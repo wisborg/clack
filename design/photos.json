@@ -1,0 +1,125 @@
+{
+  "about": "Public-domain (CC0) photographs from Wikimedia Commons, used by Clack's design mock-ups and demo. The images are not committed: `go run ./tools/dev serve` fetches each from `url` into the user cache and refuses any whose SHA-256 differs. The captions are ours, written for the mock-ups.",
+  "photos": [
+    {
+      "file": "01.jpg",
+      "title": "MG 9988 (by Kristian Karlsson).JPG",
+      "author": "Kristian Karlsson",
+      "licence": "CC0",
+      "source": "https://commons.wikimedia.org/wiki/File:MG_9988_(by_Kristian_Karlsson).JPG",
+      "width": 3635,
+      "height": 5301,
+      "sha256": "d7dfc202f46bd75c2c54c12f966adf8f75e6527df71fa95cb7441d872137a942",
+      "caption": "An old car in the snow",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/0/06/MG_9988_%28by_Kristian_Karlsson%29.JPG?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled"
+    },
+    {
+      "file": "02.jpg",
+      "title": "Ceo@trá.jpg",
+      "author": "Ruxandra Mateiu",
+      "licence": "CC0",
+      "source": "https://commons.wikimedia.org/wiki/File:Ceo@tr%C3%A1.jpg",
+      "width": 3840,
+      "height": 2560,
+      "sha256": "7b06f2c1f7fd13724f51561537e1181223d3fa4af26304863080eaa885581d86",
+      "caption": "Low tide under a grey sky",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/9/9b/Ceo%40tr%C3%A1.jpg/3840px-Ceo%40tr%C3%A1.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+    },
+    {
+      "file": "03.jpg",
+      "title": "VerticalStrata(byAleksandraBoguslawska).jpg",
+      "author": "Aleksandra Boguslawska",
+      "licence": "CC0",
+      "source": "https://commons.wikimedia.org/wiki/File:VerticalStrata(byAleksandraBoguslawska).jpg",
+      "width": 3840,
+      "height": 2550,
+      "sha256": "ddad8a5c2816c70369a9e975e40f03fea5cfc87c1c8ebfee8623921bd93c37ec",
+      "caption": "Ridgeline above the valley",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/4/4c/VerticalStrata%28byAleksandraBoguslawska%29.jpg/3840px-VerticalStrata%28byAleksandraBoguslawska%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+    },
+    {
+      "file": "04.jpg",
+      "title": "BrooklynBridge(byPiotrKwiatkowski).jpg",
+      "author": "Piotr Kwiatkowski",
+      "licence": "CC0",
+      "source": "https://commons.wikimedia.org/wiki/File:BrooklynBridge(byPiotrKwiatkowski).jpg",
+      "width": 3800,
+      "height": 2850,
+      "sha256": "79a50cf52ff7ccd4cca6de9a0ee2c3072e0df9b75c8d437711d7fe4be08a80f2",
+      "caption": "Cables of the bridge",
+      "url": "https://upload.wikimedia.org/wikipedia/commons/4/40/BrooklynBridge%28byPiotrKwiatkowski%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled"
+    },
+    {
+      "file": "05.jpg",
+      "title": "Kayaker&spookedGulls(byPixelDebris).jpg",
+      "author": "Victoria Alexander",
+      "licence": "CC0",
+      "source": "https://commons.wikimedia.org/wiki/File:Kayaker%26spookedGulls(byPixelDebris).jpg",
+      "width": 3840,
+      "height": 2550,
+      "sha256": "cb1f210cd59f8314fbd4cb8103eb934f36998ad003293b069df01b1cb94ffbbb",
+      "caption": "Old pier at sunset",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/2/2c/Kayaker%26spookedGulls%28byPixelDebris%29.jpg/3840px-Kayaker%26spookedGulls%28byPixelDebris%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+    },
+    {
+      "file": "06.jpg",
+      "title": "Manarola(dettaglio).jpg",
+      "author": "Jonas Lavoie-Levesque",
+      "licence": "CC0",
+      "source": "https://commons.wikimedia.org/wiki/File:Manarola(dettaglio).jpg",
+      "width": 3840,
+      "height": 2561,
+      "sha256": "4205fa20b05f6a64690674b672e8a3fffc9467de6d9f2214785eacdfe53bfafd",
+      "caption": "Houses above the harbour",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/f/fb/Manarola%28dettaglio%29.jpg/3840px-Manarola%28dettaglio%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+    },
+    {
+      "file": "07.jpg",
+      "title": "Garbs@mist(byMichalKubíček).jpg",
+      "author": "Michal Kubíček",
+      "licence": "CC0",
+      "source": "https://commons.wikimedia.org/wiki/File:Garbs@mist(byMichalKub%C3%AD%C4%8Dek).jpg",
+      "width": 3840,
+      "height": 2880,
+      "sha256": "41bd20140ad774ee2866b0c5d5acdb5017585dd7e3352e30ade53bf7cd884e02",
+      "caption": "A bale in the morning mist",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/b/b2/Garbs%40mist%28byMichalKub%C3%AD%C4%8Dek%29.jpg/3840px-Garbs%40mist%28byMichalKub%C3%AD%C4%8Dek%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+    },
+    {
+      "file": "08.jpg",
+      "title": "Pelicans@pier(byYairHazout).jpg",
+      "author": "Yair Hazout",
+      "licence": "CC0",
+      "source": "https://commons.wikimedia.org/wiki/File:Pelicans@pier(byYairHazout).jpg",
+      "width": 3840,
+      "height": 2550,
+      "sha256": "157fea7a31fdbd4eeb4c5cceddcc001788149292374b9c814136a74a1e1fc749",
+      "caption": "Pelicans on the jetty",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/3/37/Pelicans%40pier%28byYairHazout%29.jpg/3840px-Pelicans%40pier%28byYairHazout%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+    },
+    {
+      "file": "09.jpg",
+      "title": "VägenTillKulle(avJonOttosson).jpg",
+      "author": "Jon Ottosson",
+      "licence": "CC0",
+      "source": "https://commons.wikimedia.org/wiki/File:V%C3%A4genTillKulle(avJonOttosson).jpg",
+      "width": 3840,
+      "height": 2562,
+      "sha256": "1f74cd094d7ae29893aa00698c406412997bbe3677eb4a56b71953a20c6b102f",
+      "caption": "The road to the hill",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/87/V%C3%A4genTillKulle%28avJonOttosson%29.jpg/3840px-V%C3%A4genTillKulle%28avJonOttosson%29.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+    },
+    {
+      "file": "10.jpg",
+      "title": "SunsetCliffs2014jun.jpg",
+      "author": "Artur Pokusin",
+      "licence": "CC0",
+      "source": "https://commons.wikimedia.org/wiki/File:SunsetCliffs2014jun.jpg",
+      "width": 3840,
+      "height": 2560,
+      "sha256": "3fc6d865c5806f8f02a7d7e689ea6dead6fb75e9840b20af993f5a1440b10b36",
+      "caption": "Cliffs at golden hour",
+      "url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/ee/SunsetCliffs2014jun.jpg/3840px-SunsetCliffs2014jun.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+    }
+  ]
+}

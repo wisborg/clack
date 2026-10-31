@@ -1,0 +1,748 @@
+/*
+ * Clack design mock-ups: static pages for settling the look of the five
+ * themes before the component exists. Each theme below is the set of values
+ * a theme file will hold (docs/plan.md, "Themes"), written as CSS custom
+ * properties, plus the few rules its layout needs. Served by
+ * `go run ./tools/dev serve` under the same strict Content-Security-Policy as
+ * the tests: no inline style or script anywhere.
+ */
+
+/* ---------- Base ---------------------------------------------------------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+:root {
+  --serif: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Defaults; each theme overrides. Light first. */
+  --canvas: #f3f3f1;
+  --surface: #ffffff;
+  --text: #1d1d1f;
+  --muted: #6e6e73;
+  --hairline: rgb(0 0 0 / 0.1);
+  --accent: #1d1d1f;
+  --photo-shadow: 0 1px 2px rgb(0 0 0 / 0.06), 0 14px 36px rgb(0 0 0 / 0.14);
+  --control: rgb(0 0 0 / 0.55);
+  --control-hover: rgb(0 0 0 / 0.9);
+  --caption-font: var(--serif);
+  color-scheme: light;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--canvas);
+  color: var(--text);
+  font: 15px/1.5 var(--sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+img {
+  display: block;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.icon {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ---------- The slideshow view --------------------------------------------- */
+
+/*
+ * .show is the <clack-show> element filling the window. Three rows: an
+ * optional header, the stage (the photo, as large as it can be while
+ * keeping its proportions), and the caption with the controls.
+ */
+.show {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100vh;
+  height: 100dvh;
+  padding: var(--pad-y, 28px) var(--pad-x, 48px) var(--pad-bottom, 20px);
+}
+
+.show-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding-bottom: 20px;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+
+.show-header .album {
+  color: var(--text);
+  font-family: var(--caption-font);
+  font-size: 15px;
+  letter-spacing: 0.01em;
+}
+
+/* The stage is a size container, so the photo can be limited to the space
+   the grid gave it (cqw, cqh) while the element keeps the photo's own
+   proportions -- which the shadow and the Mat theme's frame depend on. */
+.stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  container-type: size;
+}
+
+/* The photo: contained, never cropped, never upscaled past its pixels. */
+.photo {
+  max-width: 100cqw;
+  max-height: 100cqh;
+  width: auto;
+  height: auto;
+  box-shadow: var(--photo-shadow);
+}
+
+.below {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 16px;
+  padding-top: 22px;
+}
+
+.caption {
+  margin: 0;
+  min-width: 0;
+}
+
+.caption .title {
+  display: block;
+  font-family: var(--caption-font);
+  font-size: 17px;
+  line-height: 1.35;
+  color: var(--text);
+}
+
+.caption .credit {
+  display: block;
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--muted);
+  letter-spacing: 0.01em;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--control);
+}
+
+.controls button {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  transition: color 160ms var(--ease), background-color 160ms var(--ease);
+}
+
+.controls button:hover {
+  color: var(--control-hover);
+  background: var(--hairline);
+}
+
+.controls button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.counter {
+  min-width: 64px;
+  text-align: center;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.tools {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  color: var(--control);
+}
+
+.tools button {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+}
+
+.tools button:hover {
+  color: var(--control-hover);
+  background: var(--hairline);
+}
+
+.tools button[aria-pressed="true"] {
+  color: var(--text);
+  background: var(--hairline);
+}
+
+/* Auto-play progress: a hairline that fills over the slide's interval. */
+.progress {
+  height: 2px;
+  margin-top: 14px;
+  background: var(--hairline);
+  border-radius: 1px;
+  overflow: hidden;
+}
+
+.progress span {
+  display: block;
+  width: 38%;
+  height: 100%;
+  background: var(--muted);
+}
+
+/* ---------- The metadata panel --------------------------------------------- */
+
+.with-info .show {
+  grid-template-columns: minmax(0, 1fr) 320px;
+  column-gap: 40px;
+}
+
+.with-info .show > .show-header,
+.with-info .show > .below,
+.with-info .show > .progress {
+  grid-column: 1;
+}
+
+.info {
+  grid-column: 2;
+  grid-row: 1 / -1;
+  align-self: stretch;
+  overflow: auto;
+  padding: 28px 28px 24px;
+  background: var(--surface);
+  border-left: 1px solid var(--hairline);
+  margin: calc(-1 * var(--pad-y, 28px)) calc(-1 * var(--pad-x, 48px)) calc(-1 * var(--pad-bottom, 20px)) 0;
+}
+
+.info h2 {
+  margin: 0 0 4px;
+  font-family: var(--caption-font);
+  font-weight: 400;
+  font-size: 21px;
+  line-height: 1.3;
+}
+
+.info .lede {
+  margin: 0 0 24px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.info dl {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  margin: 0;
+}
+
+.info dt {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.info dd {
+  margin: 2px 0 0;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.info .exposure {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+
+.info .note {
+  margin-top: 28px;
+  padding-top: 14px;
+  border-top: 1px solid var(--hairline);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ---------- Phones ---------------------------------------------------------- */
+
+@media (max-width: 640px) {
+  .show {
+    --pad-x: 16px;
+    --pad-y: 16px;
+    --pad-bottom: 12px;
+  }
+
+  .show-header {
+    padding-bottom: 14px;
+  }
+
+  .below {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "caption caption"
+      "controls tools";
+    row-gap: 10px;
+    padding-top: 16px;
+  }
+
+  .caption {
+    grid-area: caption;
+  }
+
+  .controls {
+    grid-area: controls;
+  }
+
+  .tools {
+    grid-area: tools;
+  }
+
+  .with-info .show {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+
+  /* On a phone the panel is a sheet over the lower part of the screen. */
+  .info {
+    position: fixed;
+    inset: auto 0 0 0;
+    max-height: 62dvh;
+    margin: 0;
+    border-left: 0;
+    border-top: 1px solid var(--hairline);
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -12px 40px rgb(0 0 0 / 0.18);
+  }
+}
+
+/* ---------- Theme: Gallery ----------------------------------------------------
+ * White or charcoal walls, wide margins, a small serif caption beneath.
+ */
+
+[data-theme="gallery"] {
+  --canvas: #f3f3f1;
+  --surface: #fbfbfa;
+  --pad-x: 72px;
+  --pad-y: 32px;
+}
+
+[data-theme="gallery"] .stage {
+  padding: 8px 0;
+}
+
+/* ---------- Theme: Darkroom ---------------------------------------------------
+ * Near-black; the photo is the only light. Dark by nature, so it does not
+ * follow the visitor's scheme.
+ */
+
+[data-theme="darkroom"] {
+  color-scheme: dark;
+  --canvas: #0b0b0b;
+  --surface: #151515;
+  --text: #ececec;
+  --muted: #8d8d8f;
+  --hairline: rgb(255 255 255 / 0.1);
+  --accent: #ececec;
+  --photo-shadow: none;
+  --control: rgb(255 255 255 / 0.55);
+  --control-hover: #fff;
+  --caption-font: var(--sans);
+  --pad-x: 24px;
+  --pad-y: 20px;
+  --pad-bottom: 16px;
+}
+
+[data-theme="darkroom"] .caption .title {
+  font-size: 14px;
+  letter-spacing: 0.01em;
+}
+
+[data-theme="darkroom"] .show-header .album {
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* ---------- Theme: Mat -------------------------------------------------------
+ * Each photo in a mat board with a fine bevel, framed, on a wall; the
+ * caption is a museum label.
+ */
+
+[data-theme="mat"] {
+  --mat-pad: clamp(22px, 6.5vmin, 80px);
+  --frame-width: 9px;
+  --canvas: #e4e3df;
+  --surface: #f7f6f2;
+  --photo-shadow: none;
+  --mat: #f8f7f3;
+  --label: #f7f6f2;
+  --frame: #1f1d1b;
+  --pad-x: 64px;
+  --pad-y: 36px;
+}
+
+[data-theme="mat"] .stage {
+  padding: 4px 0 6px;
+}
+
+/* Frame, then mat, then a bevel: the mat's cut edge catches the light on
+   the top and left, and is in its own shade on the bottom and right. */
+[data-theme="mat"] .framed {
+  display: grid;
+  place-items: center;
+  max-width: 100%;
+  max-height: 100%;
+  padding: var(--mat-pad);
+  background: var(--mat);
+  border: var(--frame-width) solid var(--frame);
+  box-shadow:
+    inset 0 0 0 1px rgb(0 0 0 / 0.35),
+    0 2px 3px rgb(0 0 0 / 0.18),
+    0 22px 48px rgb(0 0 0 / 0.22);
+}
+
+[data-theme="mat"] .framed .photo {
+  max-width: calc(100cqw - 2 * (var(--mat-pad) + var(--frame-width)));
+  max-height: calc(100cqh - 2 * (var(--mat-pad) + var(--frame-width)));
+  border-style: solid;
+  border-width: 2px;
+  border-color: #c9c7c0 #fdfcf9 #fdfcf9 #c9c7c0;
+}
+
+[data-theme="mat"] .caption {
+  justify-self: start;
+  padding: 10px 14px 11px;
+  background: var(--label);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.12);
+}
+
+[data-theme="mat"] .caption .title {
+  font-style: italic;
+  font-size: 15px;
+}
+
+[data-theme="mat"] .caption .credit {
+  font-size: 11.5px;
+}
+
+/* ---------- Theme: Minimal ---------------------------------------------------
+ * Edge to edge; controls float over the photo's surround, sans-serif.
+ */
+
+[data-theme="minimal"] {
+  --canvas: #ffffff;
+  --surface: #ffffff;
+  --photo-shadow: none;
+  --caption-font: var(--sans);
+  --pad-x: 0px;
+  --pad-y: 0px;
+  --pad-bottom: 0px;
+}
+
+[data-theme="minimal"] .show {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+[data-theme="minimal"] .stage {
+  grid-row: 1;
+}
+
+[data-theme="minimal"] .photo {
+  width: 100cqw;
+  height: 100cqh;
+  max-width: none;
+  max-height: none;
+  object-fit: contain;
+}
+
+[data-theme="minimal"] .below {
+  position: fixed;
+  left: 50%;
+  bottom: 20px;
+  translate: -50% 0;
+  display: flex;
+  gap: 14px;
+  padding: 6px 8px 6px 18px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.72);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08), 0 8px 24px rgb(0 0 0 / 0.12);
+  white-space: nowrap;
+}
+
+[data-theme="minimal"] .caption .title {
+  font-size: 13.5px;
+  font-weight: 500;
+}
+
+[data-theme="minimal"] .caption .credit {
+  display: none;
+}
+
+[data-theme="minimal"] .controls button,
+[data-theme="minimal"] .tools button {
+  width: 34px;
+  height: 34px;
+}
+
+[data-theme="minimal"] .counter {
+  min-width: 48px;
+}
+
+[data-theme="minimal"] .progress {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  margin: 0;
+  border-radius: 0;
+}
+
+@media (max-width: 640px) {
+  [data-theme="minimal"] .below {
+    left: 12px;
+    right: 12px;
+    translate: none;
+    bottom: 12px;
+  }
+
+  [data-theme="minimal"] .caption {
+    display: none;
+  }
+}
+
+/* ---------- Theme: Contact sheet (indexes) ----------------------------------
+ * Strips of film on photographic paper, with frame numbers and the
+ * photographer's grease-pencil mark on the pick of the roll.
+ */
+
+[data-theme="contact-sheet"] {
+  --canvas: #f4f2ec;
+  --text: #1c1b19;
+  --muted: #74716a;
+  --film: #121212;
+  --edge-print: #e2a03f;
+  --grease: #d4352b;
+}
+
+.sheet {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 40px 48px 64px;
+}
+
+.sheet-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 28px;
+}
+
+.sheet-header h1 {
+  margin: 0;
+  font-family: var(--serif);
+  font-weight: 400;
+  font-size: 30px;
+  letter-spacing: 0.005em;
+}
+
+.sheet-header p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.strip {
+  --hole: 7px;
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(var(--frames, 5), 1fr);
+  gap: 30px 10px; /* rows leave room for the edge numbers when a strip wraps */
+  margin: 0 0 22px;
+  padding: 34px 14px;
+  background: var(--film);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+}
+
+/* The holes, drawn as rounded rectangles cut out of the strip. */
+.strip::before,
+.strip::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  height: var(--hole);
+  background: repeating-linear-gradient(
+    90deg,
+    var(--canvas) 0 10px,
+    transparent 10px 18px
+  );
+  border-radius: 2px;
+}
+
+.strip::before {
+  top: 7px;
+}
+
+.strip::after {
+  bottom: 7px;
+}
+
+.frame {
+  position: relative;
+  margin: 0;
+}
+
+.frame a {
+  display: block;
+  aspect-ratio: 3 / 2;
+  background: #000;
+}
+
+.frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.frame figcaption {
+  position: absolute;
+  left: 2px;
+  bottom: -18px;
+  font: 600 10px/1 var(--mono);
+  letter-spacing: 0.08em;
+  color: var(--edge-print);
+}
+
+/* The grease-pencil pick: a hand-drawn rectangle, slightly askew. */
+.frame.pick::after {
+  content: "";
+  position: absolute;
+  inset: -7px -6px -6px -8px;
+  border: 3px solid var(--grease);
+  border-radius: 12px 6px 14px 8px / 8px 12px 6px 14px;
+  rotate: -1.4deg;
+  opacity: 0.88;
+  pointer-events: none;
+}
+
+.sheet-note {
+  margin-top: 30px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+@media (max-width: 640px) {
+  .sheet {
+    padding: 22px 14px 40px;
+  }
+
+  .sheet-header h1 {
+    font-size: 24px;
+  }
+
+  .strip {
+    --frames: 2 !important;
+  }
+}
+
+/* ---------- Dark schemes ----------------------------------------------------
+ * A neutral grey or black behind photographs, never a tinted one.
+ */
+
+:root[data-scheme="dark"] {
+  color-scheme: dark;
+  --canvas: #1b1b1b;
+  --surface: #232323;
+  --text: #ececec;
+  --muted: #9a9a9d;
+  --hairline: rgb(255 255 255 / 0.1);
+  --accent: #ececec;
+  --photo-shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 18px 44px rgb(0 0 0 / 0.55);
+  --control: rgb(255 255 255 / 0.6);
+  --control-hover: #fff;
+}
+
+:root[data-scheme="dark"][data-theme="mat"] {
+  --canvas: #2a2a29;
+  --surface: #232323;
+  --label: #f1efe9;
+  --photo-shadow: none;
+  --frame: #0f0f0f;
+}
+
+/* The museum label stays a printed card, whatever the wall. */
+:root[data-scheme="dark"][data-theme="mat"] .caption {
+  color: #1d1d1f;
+  --text: #1d1d1f;
+  --muted: #6e6e73;
+}
+
+:root[data-scheme="dark"][data-theme="minimal"] {
+  --canvas: #000000;
+  --surface: #161616;
+  --photo-shadow: none;
+}
+
+:root[data-scheme="dark"][data-theme="minimal"] .below {
+  background: rgb(28 28 30 / 0.66);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.4);
+}
+
+/* Darkroom ignores the scheme: it is dark by nature. */
+:root[data-scheme="dark"][data-theme="darkroom"],
+:root[data-scheme="light"][data-theme="darkroom"] {
+  --canvas: #0b0b0b;
+  --surface: #151515;
+  --photo-shadow: none;
+}
+
+/* On the dark side of the contact sheet, the film lies on a light table
+   that is switched off: the strips sit on a dark board. */
+:root[data-scheme="dark"][data-theme="contact-sheet"] {
+  --canvas: #1d1c1a;
+  --text: #ecebe7;
+  --muted: #9b988f;
+  --film: #050505;
+}

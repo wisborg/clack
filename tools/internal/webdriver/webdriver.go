@@ -236,6 +236,13 @@ func (s *Session) ExecuteAsync(ctx context.Context, script string, args []any, r
 	return s.d.command(ctx, http.MethodPost, s.path("/execute/async"), body, result)
 }
 
+// SetWindowSize resizes the browser window. In a headless browser the
+// window is the viewport, so this is how a phone-sized page is drawn.
+func (s *Session) SetWindowSize(ctx context.Context, width, height int) error {
+	body := map[string]any{"width": width, "height": height}
+	return s.d.command(ctx, http.MethodPost, s.path("/window/rect"), body, nil)
+}
+
 // Screenshot returns a PNG of the browser's viewport.
 func (s *Session) Screenshot(ctx context.Context) ([]byte, error) {
 	var encoded string

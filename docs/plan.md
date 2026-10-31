@@ -286,7 +286,8 @@ A theme is a **JSON file of typed design tokens** with a published JSON Schema:
 
 ### Out of the box
 
-Five, each in light and dark, each finished to the point of being someone's first choice:
+Five, each finished to the point of being someone's first choice, and each in light and dark
+except Darkroom, which is dark by nature and says so in its theme file:
 
 | theme | the idea |
 |---|---|
@@ -320,7 +321,8 @@ side with the version before.
 - Verify the Node-free toolchain: esbuild through Go, tsgo, the WebDriver harness on Safari,
   Chrome and Firefox. *(done: Safari 26.5, Chrome 156 and Firefox 157 all pass)*
 - Design: the visual language and the five themes as static mock-ups with real photographs,
-  reviewed on phone, laptop and large screen.
+  reviewed on phone, laptop and large screen. *(mock-ups in `design/`, with public-domain
+  photographs; waiting for review)*
 - Draft the theme and manifest schemas.
 
 **1 — First release**

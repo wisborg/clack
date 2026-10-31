@@ -13,6 +13,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -63,6 +64,38 @@ func Serve(files map[string][]byte) (*Server, error) {
 		return nil, err
 	}
 	mux := http.NewServeMux()
+	return serveOn(l, mux, files)
+}
+
+// ServeDirs starts a server on addr ("127.0.0.1:0" for any free port)
+// serving each directory under its URL prefix, such as "/photos/", with the
+// same strict policy as the test page -- so a design page that would need
+// the policy loosened is found out while it is still a mock-up.
+func ServeDirs(addr string, dirs map[string]string) (*Server, error) {
+	l, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	mux := http.NewServeMux()
+	for prefix, dir := range dirs {
+		fs := http.StripPrefix(prefix, http.FileServerFS(os.DirFS(dir)))
+		mux.Handle("GET "+prefix, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			h := w.Header()
+			h.Set("Content-Security-Policy", ContentSecurityPolicy)
+			h.Set("X-Content-Type-Options", "nosniff")
+			h.Set("Cache-Control", "no-store")
+			fs.ServeHTTP(w, r)
+		}))
+	}
+	s := &Server{
+		URL: "http://" + l.Addr().String() + "/",
+		srv: &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second},
+	}
+	go s.srv.Serve(l)
+	return s, nil
+}
+
+func serveOn(l net.Listener, mux *http.ServeMux, files map[string][]byte) (*Server, error) {
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		headers(w, "text/html; charset=utf-8")
 		io.WriteString(w, page)
@@ -152,19 +185,15 @@ const scriptTimeout = 10 * time.Minute
 // when it is empty), and returns the test page's report. Notes on what it
 // did besides are written to log.
 func Run(ctx context.Context, b webdriver.Browser, driverPath, url string, headless bool, log io.Writer) (Report, error) {
-	d, s, err := open(ctx, b, driverPath, headless)
+	// A browser can end its first process straight after starting --
+	// Firefox does, after applying a downloaded update, and restarts itself
+	// -- which the driver reports as a failed session. A second start finds
+	// nothing left to apply. Open retries once, which covers that without
+	// guessing at any driver's wording; a failure that persists is reported
+	// as it was.
+	d, s, err := Open(ctx, b, driverPath, headless, log)
 	if err != nil {
-		// A browser can end its first process straight after starting --
-		// Firefox does, after applying a downloaded update, and restarts
-		// itself -- which the driver reports as a failed session. A second
-		// start finds nothing left to apply. One retry covers that without
-		// guessing at any driver's wording; a failure that persists is
-		// reported as it was.
-		fmt.Fprintf(log, "%s: could not start a session; trying once more (%v)\n", b.Name, firstLine(err))
-		d, s, err = open(ctx, b, driverPath, headless)
-		if err != nil {
-			return Report{}, err
-		}
+		return Report{}, err
 	}
 	defer d.Stop()
 	defer func() {
@@ -189,6 +218,17 @@ func Run(ctx context.Context, b webdriver.Browser, driverPath, url string, headl
 		report.Error = "the page reported no tests"
 	}
 	return report, nil
+}
+
+// Open starts b's driver and a session in it, retrying once as Run does.
+// The caller stops the driver when done.
+func Open(ctx context.Context, b webdriver.Browser, driverPath string, headless bool, log io.Writer) (*webdriver.Driver, *webdriver.Session, error) {
+	d, s, err := open(ctx, b, driverPath, headless)
+	if err != nil {
+		fmt.Fprintf(log, "%s: could not start a session; trying once more (%v)\n", b.Name, firstLine(err))
+		d, s, err = open(ctx, b, driverPath, headless)
+	}
+	return d, s, err
 }
 
 // open starts b's driver and a session in it.

@@ -33,6 +33,14 @@ first time they are needed.
 | geckodriver 0.37.1 | driving Firefox | Mozilla's GitHub release | SHA-256 pinned per platform in `tools/internal/drivers`. MPL-2.0, Mozilla. |
 | chromedriver | driving Chrome | Google's Chrome for Testing, matched to the installed Chrome's build | **HTTPS from Google's storage only.** It cannot be pinned (it must follow Chrome's own updates), Google publishes no checksums, and it is not signed with Google's developer certificate. The tools require the index to point at Google's storage and the binary to report the version the index named. This is the weakest check in the toolchain. BSD-3-Clause, Google. |
 
+## Photographs fetched by the tools
+
+The design mock-ups and the demo are shown with ten public-domain (CC0) photographs from
+Wikimedia Commons, listed with author, source and SHA-256 in `design/photos.json`. They are
+fetched into the user cache, refused if their digest differs, and never committed or
+distributed. The manifest loader accepts only Wikimedia hosts and only CC0 or public-domain
+entries.
+
 ## Programs used from the system
 
 | program | for |

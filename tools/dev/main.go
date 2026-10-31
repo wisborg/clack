@@ -6,6 +6,8 @@
 //	go run ./tools/dev test [-browsers=...] # the tests, in Safari, Chrome and Firefox
 //	go run ./tools/dev gates                # everything a branch must pass
 //	go run ./tools/dev tsgo                 # build the pinned compiler; print its path
+//	go run ./tools/dev serve                # the design pages, on http://127.0.0.1:8737/
+//	go run ./tools/dev shots                # screenshots of the design pages -> .scratch/shots/
 //	go run ./tools/dev clean                # remove dist/ and .scratch/
 //	go run ./tools/dev help                 # this list
 //
@@ -26,10 +28,12 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/wisborg/clack/tools/internal/browsertest"
 	"github.com/wisborg/clack/tools/internal/bundle"
 	"github.com/wisborg/clack/tools/internal/drivers"
+	"github.com/wisborg/clack/tools/internal/photos"
 	"github.com/wisborg/clack/tools/internal/tsgo"
 	"github.com/wisborg/clack/tools/internal/webdriver"
 )
@@ -55,6 +59,8 @@ func init() {
 		{"test", "run the tests in real browsers (-browsers=safari,chrome,firefox -headed)", cmdTest},
 		{"gates", "everything a branch must pass, one status line each", cmdGates},
 		{"tsgo", "build the pinned TypeScript compiler if needed and print its path", cmdTsgo},
+		{"serve", "serve design/ with the photos, under the strict policy (-addr)", cmdServe},
+		{"shots", "screenshot the design pages at desktop and phone size into .scratch/shots/", cmdShots},
 		{"clean", "remove dist/ and .scratch/", cmdClean},
 		{"help", "this list", nil},
 	}
@@ -392,6 +398,136 @@ func gofmt(ctx context.Context) error {
 	}
 	if s := strings.TrimSpace(string(out)); s != "" {
 		return errors.New("not gofmt-formatted:\n" + s)
+	}
+	return nil
+}
+
+// designServer serves design/ at / and the verified photos at /photos/.
+func designServer(ctx context.Context, addr string) (*browsertest.Server, error) {
+	list, err := photos.Load("design/photos.json")
+	if err != nil {
+		return nil, err
+	}
+	dir, err := photos.Ensure(ctx, list, os.Stderr)
+	if err != nil {
+		return nil, err
+	}
+	return browsertest.ServeDirs(addr, map[string]string{"/": "design", "/photos/": dir})
+}
+
+func cmdServe(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+	addr := fs.String("addr", "127.0.0.1:8737", "address to listen on; another device can reach it only if this is not loopback")
+	if err := parse(fs, args); err != nil {
+		return err
+	}
+	srv, err := designServer(ctx, *addr)
+	if err != nil {
+		return err
+	}
+	defer srv.Close()
+	fmt.Printf("serving the design pages on %smockups/ -- Ctrl-C to stop\n", srv.URL)
+	<-ctx.Done()
+	return nil
+}
+
+// imagesReady resolves true once every image on the page has decoded, or
+// false after 15 seconds.
+const imagesReady = `
+const done = arguments[arguments.length - 1];
+const all = [...document.images].map((img) => {
+  img.loading = "eager";
+  return img.decode().catch(() => {});
+});
+Promise.race([
+  Promise.all(all).then(() => true),
+  new Promise((r) => setTimeout(() => r(false), 15000)),
+]).then(done);
+`
+
+// viewports are the sizes design pages are judged at.
+var viewports = []struct {
+	name          string
+	width, height int
+}{
+	{"desktop", 1440, 900},
+	{"phone", 390, 844},
+}
+
+func cmdShots(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("shots", flag.ContinueOnError)
+	browserName := fs.String("browser", "chrome", "browser to draw the pages in")
+	only := fs.String("pages", "", "comma-separated page names (default: every page in design/mockups/)")
+	if err := parse(fs, args); err != nil {
+		return err
+	}
+	b, ok := webdriver.Lookup(*browserName)
+	if !ok {
+		return usageError{fmt.Sprintf("dev shots: unknown browser %q", *browserName)}
+	}
+	var pages []string
+	if *only != "" {
+		pages = strings.Split(*only, ",")
+	} else {
+		matches, _ := filepath.Glob("design/mockups/*.html")
+		for _, m := range matches {
+			pages = append(pages, strings.TrimSuffix(filepath.Base(m), ".html"))
+		}
+	}
+	srv, err := designServer(ctx, "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+	defer srv.Close()
+	driver, err := driverFor(ctx, b)
+	if err != nil {
+		return err
+	}
+	d, s, err := browsertest.Open(ctx, b, driver, true, os.Stderr)
+	if err != nil {
+		return err
+	}
+	defer d.Stop()
+	defer s.Close(context.WithoutCancel(ctx))
+
+	out := filepath.Join(".scratch", "shots")
+	if err := os.MkdirAll(out, 0o755); err != nil {
+		return err
+	}
+	if err := s.SetScriptTimeout(ctx, 30*time.Second); err != nil {
+		return err
+	}
+	for _, vp := range viewports {
+		if err := s.SetWindowSize(ctx, vp.width, vp.height); err != nil {
+			return err
+		}
+		for _, page := range pages {
+			for _, scheme := range []string{"light", "dark"} {
+				url := fmt.Sprintf("%smockups/%s.html?scheme=%s", srv.URL, page, scheme)
+				if err := s.Navigate(ctx, url); err != nil {
+					return err
+				}
+				// The load event does not wait for lazily loaded images, which
+				// a real index uses; wait until every image is decoded, so a
+				// screenshot never shows a frame still empty.
+				var ready bool
+				if err := s.ExecuteAsync(ctx, imagesReady, nil, &ready); err != nil {
+					return err
+				}
+				if !ready {
+					fmt.Fprintf(os.Stderr, "%s: some images had not loaded after 15 s\n", url)
+				}
+				png, err := s.Screenshot(ctx)
+				if err != nil {
+					return err
+				}
+				name := filepath.Join(out, fmt.Sprintf("%s-%s-%s.png", page, scheme, vp.name))
+				if err := os.WriteFile(name, png, 0o644); err != nil {
+					return err
+				}
+				fmt.Println(name)
+			}
+		}
 	}
 	return nil
 }
