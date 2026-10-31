@@ -1,0 +1,12 @@
+/* Clack's own styles, adopted by each element's shadow root as a
+   constructable stylesheet: no <style> element, no stylesheet URL, nothing a
+   host page's Content-Security-Policy has to allow. */
+
+:host {
+  display: block;
+  position: relative;
+}
+
+:host([hidden]) {
+  display: none;
+}

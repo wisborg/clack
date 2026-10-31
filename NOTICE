@@ -1,5 +1,6 @@
 Clack
 Copyright 2026 Jesper Wisborg Krogh
 
-This product includes no third-party software yet. Each component added will be
-listed here with its licence, as DEPENDENCIES.md records why it was added.
+The files Clack distributes (dist/) contain no third-party software. The
+programs used to build and test them are listed, with their licences, in
+DEPENDENCIES.md; none of them is distributed with Clack.

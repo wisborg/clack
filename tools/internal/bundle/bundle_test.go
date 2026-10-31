@@ -1,0 +1,65 @@
+package bundle
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func write(t *testing.T, dir, name, body string) string {
+	t.Helper()
+	p := filepath.Join(dir, name)
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestBuildInlinesCSSAsText(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "a.css", ":host { display: block; }")
+	entry := write(t, dir, "a.ts", `import css from "./a.css";
+export const sheet: string = css;
+`)
+	files, err := Build(Options{Entry: entry, Outfile: filepath.Join(dir, "out.js")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var js, mapFile string
+	for _, f := range files {
+		switch filepath.Base(f.Path) {
+		case "out.js":
+			js = string(f.Contents)
+		case "out.js.map":
+			mapFile = string(f.Contents)
+		}
+	}
+	if !strings.Contains(js, ":host { display: block; }") {
+		t.Errorf("the CSS is not in the bundle as text:\n%s", js)
+	}
+	if !strings.Contains(js, "sourceMappingURL=out.js.map") || mapFile == "" {
+		t.Error("the bundle has no linked source map")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "out.js")); err == nil {
+		t.Error("Write was false, but the bundle was written to disk")
+	}
+}
+
+func TestBuildTreatsWarningsAsErrors(t *testing.T) {
+	dir := t.TempDir()
+	// Comparing with -0 is one of esbuild's warnings.
+	entry := write(t, dir, "w.ts", "export const z = (x: number) => x === -0;\n")
+	if _, err := Build(Options{Entry: entry, Outfile: filepath.Join(dir, "w.js")}); err == nil {
+		t.Fatal("want the warning to fail the build")
+	}
+}
+
+func TestBuildReportsErrors(t *testing.T) {
+	dir := t.TempDir()
+	entry := write(t, dir, "e.ts", `import "./missing";`)
+	_, err := Build(Options{Entry: entry, Outfile: filepath.Join(dir, "e.js")})
+	if err == nil || !strings.Contains(err.Error(), "missing") {
+		t.Fatalf("err = %v, want an unresolved-import error", err)
+	}
+}

@@ -35,9 +35,11 @@ Nothing is built yet.
 Clack runs in the visitor's browser, so it is JavaScript in the end; the choice is only
 about how it is written and what it carries.
 
-- **TypeScript source, shipped as one ES module plus one CSS file.** Types catch whole classes
-  of bugs in the state machine (slide index, play/pause, loading states) that tests
-  rarely reach. What ships is ordinary JavaScript.
+- **TypeScript source, shipped as one ES module.** Types catch whole classes of bugs in the
+  state machine (slide index, play/pause, loading states) that tests rarely reach. What ships
+  is ordinary JavaScript. The CSS travels inside it, as the text of a constructable stylesheet
+  the shadow root adopts: no stylesheet URL for the host to configure, no flash of unstyled
+  content, and no `<style>` element for the host's Content-Security-Policy to allow.
 - **Zero runtime dependencies.** No framework, no utility library, no polyfills. Everything
   Clack needs — pointer events, the Fullscreen API, `IntersectionObserver`,
   `HTMLImageElement.decode()`, the Web Animations API, custom elements, Shadow DOM — is in
@@ -53,26 +55,38 @@ about how it is written and what it carries.
 ## Decision 2: build and test tooling — no Node
 
 Node is not needed, and the npm ecosystem is where most recent supply-chain incidents
-have happened. The front-end can be built and tested without it:
+have happened. The front-end is built and tested without it, all through one Go program,
+`go run ./tools/dev` (verified in phase 0; how each piece is checked is in
+`DEPENDENCIES.md`):
 
 - **Bundling and minifying: esbuild, through its Go API**
   (`github.com/evanw/esbuild/pkg/api`). esbuild is itself written in Go, has a very large user
-  base, and its module depends only on `golang.org/x/sys`. A small Go program in each repo
-  (`go run ./tools/build`) produces Clack's `.js` and `.css`, both minified and readable.
-  It strips TypeScript types but does not check them.
-- **Type checking: `tsgo`**, the Go port of the TypeScript compiler (Microsoft's
-  `typescript-go`). *To verify in phase 0*: that it builds from source with `go build` at a
-  pinned tag, or ships as a standalone binary. The fallback is the `typescript` npm package,
-  which has no dependencies of its own — one package, pinned by hash, installed with scripts
-  disabled, used only in CI and development.
+  base, and its module depends only on `golang.org/x/sys`. It produces `dist/clack.js`
+  (readable) and `dist/clack.min.js`, with source maps. It strips TypeScript types but does
+  not check them, and a warning from it fails the build.
+- **Type checking: TypeScript 7, built from source.** TypeScript 7 (August 2026) is the
+  native port, written in Go. Its source is an ordinary Go module in `tsc/` of
+  `microsoft/TypeScript`, so the tools fetch exactly one commit (the v7.0.2 tag's), verify
+  its hash, and build it with the local Go toolchain; two builds are byte-identical. `go
+  install` cannot do this, because the module proxy has no release version for it. The npm
+  fallback the plan allowed for is not needed.
 - **Browser tests: a small W3C WebDriver client of our own, in Go, standard library only.**
   WebDriver is HTTP and JSON. It drives Safari (`safaridriver` ships with macOS), Chrome
   (`chromedriver`) and Firefox (`geckodriver`) — all three real engines, which matters for a
-  visual component — and takes screenshots for visual regression tests. Rejected: Playwright
-  (excellent, but Node and a large install), chromedp (Chrome only, several dependencies).
+  visual component — and takes screenshots for visual regression tests. The tools fetch
+  chromedriver from Google's Chrome for Testing for the installed Chrome's build, and a
+  pinned, checksummed geckodriver from Mozilla; Homebrew disabled its chromedriver package in
+  2026, and the driver must follow Chrome's updates anyway. Rejected: Playwright (excellent,
+  but Node and a large install), chromedp (Chrome only, several dependencies).
+- **The test page enforces a strict Content-Security-Policy**, including Trusted Types, and
+  any policy violation a test did not provoke on purpose fails the run. Every test is
+  therefore also a test that Clack works on the strictest site that might embed it.
 - **Logic tests** for the pure parts (state machine, layout maths, theme validation,
   ThumbHash decoding) run in the browser through the same harness, so there is one test
   runner, not two.
+- **The Go toolchain is pinned** with `toolchain` in `go.mod`, and govulncheck is a gate: the
+  first run found fifteen standard-library vulnerabilities in the installed Go 1.26.5, fixed
+  by pinning the current release.
 
 ---
 
@@ -82,11 +96,15 @@ What ships has none. What builds and tests it:
 
 | dependency | for | verdict |
 |---|---|---|
-| Go toolchain | the build and test tools under `tools/` | — |
+| Go toolchain, pinned | the build and test tools under `tools/` | — |
 | `evanw/esbuild` (Go API) | bundling, minifying | accept: huge user base, depends only on `golang.org/x/sys` |
-| `tsgo`, or the `typescript` npm package | type checking | accept: Microsoft; the npm package has no dependencies of its own |
+| TypeScript 7 (`tsgo`), built from a pinned commit | type checking | accept: Microsoft |
+| `golang.org/x/vuln` (govulncheck) | the vulnerability gate | accept: the Go team |
 | browser drivers (`safaridriver`, `chromedriver`, `geckodriver`) | browser tests | external programs, from the browser vendors |
-| bundled fonts | the themes' typography | open-licensed (OFL), listed in `NOTICE` |
+| bundled fonts | the themes' typography | open-licensed (OFL), listed in `NOTICE`; served as files beside the module, since browsers do not reliably honour a font declared inside a shadow root |
+
+`DEPENDENCIES.md` holds the full record: maintainers, licences, and how the copy of each that
+we run is checked.
 
 A WebDriver client, a test harness, the ThumbHash decoder and the theme loader are ours.
 
@@ -130,8 +148,8 @@ Three ways in, from least to most code, all of them the same component:
   the script loads all see photos, not an empty box.
 - **The manifest** is a JSON format with a published schema — the same format Shoebox produces —
   so Clack is usable with any backend.
-- Published as two files plus a source map, with SRI hashes in each release, so a site can
-  copy the files and serve them itself. An npm package can come later; it is not the primary
+- Published as one file plus a source map (fonts, when a theme bundles one, beside it), with
+  SRI hashes in each release, so a site can copy the files and serve them itself. An npm package can come later; it is not the primary
   channel.
 
 ### Progression
@@ -298,9 +316,10 @@ side with the version before.
 ## Phases
 
 **0 — Foundations**
-- Licence, `DEPENDENCIES.md`, the gates.
+- Licence, `DEPENDENCIES.md`, the gates. *(done)*
 - Verify the Node-free toolchain: esbuild through Go, tsgo, the WebDriver harness on Safari,
-  Chrome and Firefox.
+  Chrome and Firefox. *(done: Chrome and Firefox pass; Safari waits on "Allow remote
+  automation")*
 - Design: the visual language and the five themes as static mock-ups with real photographs,
   reviewed on phone, laptop and large screen.
 - Draft the theme and manifest schemas.
