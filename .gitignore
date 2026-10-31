@@ -1,0 +1,8 @@
+# Build output; releases carry it, the repository carries the source.
+/dist/
+
+# Session output: screenshots, captured diffs.
+.scratch/
+
+# Finder's folder settings, which macOS writes into any directory it opens.
+.DS_Store
