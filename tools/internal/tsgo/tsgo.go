@@ -25,6 +25,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/wisborg/clack/tools/internal/cache"
 )
 
 const (
@@ -40,11 +42,10 @@ const (
 // Path returns the path of the compiler, building it first if it is not
 // already in the user's cache. Progress is written to log.
 func Path(ctx context.Context, log io.Writer) (string, error) {
-	cache, err := os.UserCacheDir()
+	dir, err := cache.Dir("tsgo", Commit)
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(cache, "clack", "tsgo", Commit)
 	bin := filepath.Join(dir, "tsgo")
 
 	if v, err := version(ctx, bin); err == nil && v == Version {
@@ -63,7 +64,8 @@ func Path(ctx context.Context, log io.Writer) (string, error) {
 		return "", fmt.Errorf("fetching TypeScript source: %w", err)
 	}
 
-	tmp := bin + ".tmp"
+	tmp := bin + ".partial"
+	defer os.Remove(tmp) // a no-op once it has been promoted
 	build := exec.CommandContext(ctx, "go", "build",
 		"-C", filepath.Join(src, "tsc"),
 		"-mod=readonly", "-trimpath",
@@ -80,7 +82,7 @@ func Path(ctx context.Context, log io.Writer) (string, error) {
 	if v != Version {
 		return "", fmt.Errorf("built tsgo reports version %q, want %q", v, Version)
 	}
-	if err := os.Rename(tmp, bin); err != nil {
+	if err := cache.Promote(tmp, bin); err != nil {
 		return "", err
 	}
 	// The source is no longer needed; the binary is self-contained.

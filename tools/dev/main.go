@@ -9,8 +9,8 @@
 //	go run ./tools/dev clean                # remove dist/ and .scratch/
 //	go run ./tools/dev help                 # this list
 //
-// Every command ends with one "dev <command>: ok" or "dev <command>: FAILED
-// (exit N)" line and exits with that status.
+// Every command, help and mistakes included, ends with one "dev <command>:
+// ok" or "dev <command>: FAILED (exit N)" line and exits with that status.
 package main
 
 import (
@@ -56,18 +56,53 @@ func init() {
 		{"gates", "everything a branch must pass, one status line each", cmdGates},
 		{"tsgo", "build the pinned TypeScript compiler if needed and print its path", cmdTsgo},
 		{"clean", "remove dist/ and .scratch/", cmdClean},
+		{"help", "this list", nil},
 	}
 }
 
+// usageError is a mistake in how dev was called; it exits 2.
+type usageError struct{ msg string }
+
+func (e usageError) Error() string { return e.msg }
+
+// silent marks an error whose explanation has already been printed.
+var silent = errors.New("")
+
 func main() {
+	name, err := dispatch()
+	code := 0
+	switch {
+	case err == nil:
+	case errors.As(err, new(usageError)):
+		code = 2
+	default:
+		code = 1
+	}
+	if err != nil && err.Error() != "" {
+		fmt.Fprintln(os.Stderr, err)
+	}
+	label := "dev " + name
+	if name == "" {
+		label = "dev"
+	}
+	if code == 0 {
+		fmt.Printf("%s: ok\n", label)
+	} else {
+		fmt.Printf("%s: FAILED (exit %d)\n", label, code)
+	}
+	os.Exit(code)
+}
+
+// dispatch runs the command named on the command line and returns its name
+// for the status line.
+func dispatch() (string, error) {
 	if len(os.Args) < 2 {
 		usage(os.Stderr)
-		os.Exit(2)
+		return "", usageError{"dev: no command given"}
 	}
 	name := os.Args[1]
-	if name == "help" || name == "-h" || name == "--help" {
-		usage(os.Stdout)
-		return
+	if name == "-h" || name == "--help" {
+		name = "help"
 	}
 	var cmd *command
 	for i := range commands {
@@ -76,26 +111,25 @@ func main() {
 		}
 	}
 	if cmd == nil {
-		fmt.Fprintf(os.Stderr, "dev: unknown command %q\n\n", name)
 		usage(os.Stderr)
-		os.Exit(2)
+		return name, usageError{fmt.Sprintf("dev: unknown command %q", name)}
+	}
+	if cmd.run == nil {
+		usage(os.Stdout)
+		return name, nil
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-
-	err := chdirRoot()
-	if err == nil {
-		err = cmd.run(ctx, os.Args[2:])
+	if err := chdirRoot(); err != nil {
+		return name, err
 	}
-	if err != nil {
-		if msg := err.Error(); msg != "" {
-			fmt.Fprintln(os.Stderr, msg)
-		}
-		fmt.Printf("dev %s: FAILED (exit 1)\n", name)
-		os.Exit(1)
+	err := cmd.run(ctx, os.Args[2:])
+	if errors.Is(err, flag.ErrHelp) {
+		// The flag package has already printed the command's flags.
+		return name, nil
 	}
-	fmt.Printf("dev %s: ok\n", name)
+	return name, err
 }
 
 func usage(w io.Writer) {
@@ -104,6 +138,18 @@ func usage(w io.Writer) {
 	for _, c := range commands {
 		fmt.Fprintf(w, "  %-10s %s\n", c.name, c.help)
 	}
+}
+
+// parse parses a command's flags, reporting a bad flag as a usage error.
+func parse(fs *flag.FlagSet, args []string) error {
+	err := fs.Parse(args)
+	if err != nil && !errors.Is(err, flag.ErrHelp) {
+		return usageError{err.Error()}
+	}
+	if err == nil && fs.NArg() > 0 {
+		return usageError{fmt.Sprintf("dev %s: unexpected argument %q", fs.Name(), fs.Arg(0))}
+	}
+	return err
 }
 
 // chdirRoot moves to the repository root, so every command works the same
@@ -126,27 +172,34 @@ func chdirRoot() error {
 	}
 }
 
-// silent marks an error whose explanation has already been printed.
-var silent = errors.New("")
-
 func cmdBuild(ctx context.Context, args []string) error {
-	if err := flag.NewFlagSet("build", flag.ContinueOnError).Parse(args); err != nil {
+	if err := parse(flag.NewFlagSet("build", flag.ContinueOnError), args); err != nil {
 		return err
 	}
 	if err := os.MkdirAll("dist", 0o755); err != nil {
 		return err
 	}
-	for _, o := range []bundle.Options{
-		{Entry: "src/clack.ts", Outfile: "dist/clack.js", Write: true, Banner: banner},
-		{Entry: "src/clack.ts", Outfile: "dist/clack.min.js", Write: true, Banner: banner, Minify: true},
-	} {
-		if _, err := bundle.Build(o); err != nil {
-			return err
-		}
+	if _, err := bundle.Build(bundle.Options{
+		Entry: "src/clack.ts", Outfile: "dist/clack.js", Write: true, Banner: banner,
+	}); err != nil {
+		return err
 	}
-	min, err := os.ReadFile("dist/clack.min.js")
+	files, err := bundle.Build(bundle.Options{
+		Entry: "src/clack.ts", Outfile: "dist/clack.min.js", Write: true, Banner: banner, Minify: true,
+	})
 	if err != nil {
 		return err
+	}
+	// The budget is checked against what was just built, not whatever is on
+	// disk.
+	var min []byte
+	for _, f := range files {
+		if filepath.Base(f.Path) == "clack.min.js" {
+			min = f.Contents
+		}
+	}
+	if min == nil {
+		return errors.New("the minified build produced no clack.min.js")
 	}
 	gz := gzipSize(min)
 	fmt.Printf("dist/clack.min.js: %s, %s gzipped (budget %s)\n", kb(len(min)), kb(gz), kb(sizeBudget))
@@ -167,7 +220,7 @@ func gzipSize(b []byte) int {
 func kb(n int) string { return fmt.Sprintf("%.1f KB", float64(n)/1024) }
 
 func cmdTypecheck(ctx context.Context, args []string) error {
-	if err := flag.NewFlagSet("typecheck", flag.ContinueOnError).Parse(args); err != nil {
+	if err := parse(flag.NewFlagSet("typecheck", flag.ContinueOnError), args); err != nil {
 		return err
 	}
 	bin, err := tsgo.Path(ctx, os.Stderr)
@@ -178,6 +231,9 @@ func cmdTypecheck(ctx context.Context, args []string) error {
 }
 
 func cmdTsgo(ctx context.Context, args []string) error {
+	if err := parse(flag.NewFlagSet("tsgo", flag.ContinueOnError), args); err != nil {
+		return err
+	}
 	bin, err := tsgo.Path(ctx, os.Stderr)
 	if err != nil {
 		return err
@@ -190,14 +246,14 @@ func cmdTest(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("test", flag.ContinueOnError)
 	names := fs.String("browsers", "safari,chrome,firefox", "comma-separated browsers to test in")
 	headed := fs.Bool("headed", false, "show Chrome and Firefox windows (Safari always shows one)")
-	if err := fs.Parse(args); err != nil {
+	if err := parse(fs, args); err != nil {
 		return err
 	}
 	var browsers []webdriver.Browser
 	for _, n := range strings.Split(*names, ",") {
 		b, ok := webdriver.Lookup(strings.TrimSpace(n))
 		if !ok {
-			return fmt.Errorf("unknown browser %q", n)
+			return usageError{fmt.Sprintf("dev test: unknown browser %q", n)}
 		}
 		browsers = append(browsers, b)
 	}
@@ -225,16 +281,8 @@ func cmdTest(ctx context.Context, args []string) error {
 			failed = true
 			continue
 		}
-		report, err := browsertest.Run(ctx, b, driver, srv.URL, !*headed)
-		if err != nil && b.Name == "firefox" && strings.Contains(err.Error(), "unexpectedly closed with status 0") {
-			// Firefox applies a downloaded update when it starts and then
-			// restarts itself; geckodriver sees the first process end and
-			// gives up. The second start finds nothing left to apply.
-			fmt.Println("firefox  exited at once, as it does after applying an update; trying again")
-			report, err = browsertest.Run(ctx, b, driver, srv.URL, !*headed)
-		}
-		switch {
-		case err != nil:
+		report, err := browsertest.Run(ctx, b, driver, srv.URL, !*headed, os.Stderr)
+		if err != nil {
 			fmt.Printf("%-8s FAILED to run: %v\n", b.Name, err)
 			failed = true
 			continue
@@ -287,23 +335,14 @@ func printReport(browser string, r browsertest.Report) {
 }
 
 func cmdGates(ctx context.Context, args []string) error {
-	if err := flag.NewFlagSet("gates", flag.ContinueOnError).Parse(args); err != nil {
+	if err := parse(flag.NewFlagSet("gates", flag.ContinueOnError), args); err != nil {
 		return err
 	}
 	gates := []struct {
 		name string
 		run  func() error
 	}{
-		{"gofmt", func() error {
-			out, err := exec.CommandContext(ctx, "gofmt", "-l", "tools").Output()
-			if err != nil {
-				return err
-			}
-			if s := strings.TrimSpace(string(out)); s != "" {
-				return errors.New("not gofmt-formatted:\n" + s)
-			}
-			return nil
-		}},
+		{"gofmt", func() error { return gofmt(ctx) }},
 		{"go vet", func() error { return run(ctx, "go", "vet", "./...") }},
 		{"go test", func() error { return run(ctx, "go", "test", "./...") }},
 		{"govulncheck", func() error { return run(ctx, "go", "tool", "govulncheck", "./...") }},
@@ -311,33 +350,56 @@ func cmdGates(ctx context.Context, args []string) error {
 		{"build", func() error { return cmdBuild(ctx, nil) }},
 		{"browsers", func() error { return cmdTest(ctx, nil) }},
 	}
-	var failed []string
-	for _, g := range gates {
+	status := make([]string, len(gates))
+	anyFailed := false
+	for i, g := range gates {
 		fmt.Printf("--- %s\n", g.name)
+		status[i] = "ok"
 		if err := g.run(); err != nil {
 			if msg := err.Error(); msg != "" {
 				fmt.Println(msg)
 			}
-			failed = append(failed, g.name)
+			status[i] = "FAILED"
+			anyFailed = true
 		}
 	}
 	fmt.Println()
-	for _, g := range gates {
-		status := "ok"
-		for _, f := range failed {
-			if f == g.name {
-				status = "FAILED"
-			}
-		}
-		fmt.Printf("  %-12s %s\n", g.name, status)
+	for i, g := range gates {
+		fmt.Printf("  %-12s %s\n", g.name, status[i])
 	}
-	if len(failed) > 0 {
+	if anyFailed {
 		return silent
 	}
 	return nil
 }
 
+// gofmt checks the Go sources with the gofmt of the toolchain go.mod pins,
+// not whichever gofmt is first on PATH: formatting can change between
+// releases, and the gate must agree with the toolchain that builds.
+func gofmt(ctx context.Context) error {
+	goroot, err := exec.CommandContext(ctx, "go", "env", "GOROOT").Output()
+	if err != nil {
+		return fmt.Errorf("go env GOROOT: %w", err)
+	}
+	bin := filepath.Join(strings.TrimSpace(string(goroot)), "bin", "gofmt")
+	cmd := exec.CommandContext(ctx, bin, "-l", "tools")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		// A file gofmt cannot parse is reported on stderr, with its reason.
+		return fmt.Errorf("gofmt: %w\n%s", err, stderr.String())
+	}
+	if s := strings.TrimSpace(string(out)); s != "" {
+		return errors.New("not gofmt-formatted:\n" + s)
+	}
+	return nil
+}
+
 func cmdClean(ctx context.Context, args []string) error {
+	if err := parse(flag.NewFlagSet("clean", flag.ContinueOnError), args); err != nil {
+		return err
+	}
 	for _, dir := range []string{"dist", ".scratch"} {
 		if err := os.RemoveAll(dir); err != nil {
 			return err

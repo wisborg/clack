@@ -143,22 +143,39 @@ if (!run) {
 run.then(done, (e) => done({error: String((e && e.stack) || e)}));
 `
 
+// scriptTimeout bounds the whole test run in one browser. The harness keeps
+// well inside it (see runBudgetMs in test/harness.ts), so that a slow run
+// still comes back as a report rather than as a WebDriver timeout.
+const scriptTimeout = 10 * time.Minute
+
 // Run opens url in b, driven by the driver at driverPath (or found on PATH
-// when it is empty), and returns the test page's report.
-func Run(ctx context.Context, b webdriver.Browser, driverPath, url string, headless bool) (Report, error) {
-	d, err := webdriver.Start(ctx, b, driverPath)
+// when it is empty), and returns the test page's report. Notes on what it
+// did besides are written to log.
+func Run(ctx context.Context, b webdriver.Browser, driverPath, url string, headless bool, log io.Writer) (Report, error) {
+	d, s, err := open(ctx, b, driverPath, headless)
 	if err != nil {
-		return Report{}, err
+		// A browser can end its first process straight after starting --
+		// Firefox does, after applying a downloaded update, and restarts
+		// itself -- which the driver reports as a failed session. A second
+		// start finds nothing left to apply. One retry covers that without
+		// guessing at any driver's wording; a failure that persists is
+		// reported as it was.
+		fmt.Fprintf(log, "%s: could not start a session; trying once more (%v)\n", b.Name, firstLine(err))
+		d, s, err = open(ctx, b, driverPath, headless)
+		if err != nil {
+			return Report{}, err
+		}
 	}
 	defer d.Stop()
+	defer func() {
+		// Bounded, so that a browser that has stopped answering cannot hold
+		// the run open, even after Ctrl-C has cancelled ctx.
+		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		s.Close(closeCtx)
+	}()
 
-	s, err := d.NewSession(ctx, headless)
-	if err != nil {
-		return Report{}, withOutput(err, d)
-	}
-	defer s.Close(context.WithoutCancel(ctx))
-
-	if err := s.SetScriptTimeout(ctx, 2*time.Minute); err != nil {
+	if err := s.SetScriptTimeout(ctx, scriptTimeout); err != nil {
 		return Report{}, err
 	}
 	if err := s.Navigate(ctx, url); err != nil {
@@ -172,6 +189,26 @@ func Run(ctx context.Context, b webdriver.Browser, driverPath, url string, headl
 		report.Error = "the page reported no tests"
 	}
 	return report, nil
+}
+
+// open starts b's driver and a session in it.
+func open(ctx context.Context, b webdriver.Browser, driverPath string, headless bool) (*webdriver.Driver, *webdriver.Session, error) {
+	d, err := webdriver.Start(ctx, b, driverPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	s, err := d.NewSession(ctx, headless)
+	if err != nil {
+		err = withOutput(err, d)
+		d.Stop()
+		return nil, nil, err
+	}
+	return d, s, nil
+}
+
+func firstLine(err error) string {
+	line, _, _ := strings.Cut(err.Error(), "\n")
+	return line
 }
 
 func withOutput(err error, d *webdriver.Driver) error {

@@ -42,6 +42,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/wisborg/clack/tools/internal/cache"
 )
 
 const (
@@ -64,6 +66,9 @@ var geckodriverAssets = map[string]struct{ asset, sha256 string }{
 
 var client = &http.Client{Timeout: 5 * time.Minute}
 
+// chromeVersionRE finds the version in `Google Chrome 156.0.8078.74`.
+var chromeVersionRE = regexp.MustCompile(`\d+\.\d+\.\d+\.\d+`)
+
 // Geckodriver returns the path of the pinned geckodriver, fetching it first
 // if it is not in the cache.
 func Geckodriver(ctx context.Context, log io.Writer) (string, error) {
@@ -72,12 +77,12 @@ func Geckodriver(ctx context.Context, log io.Writer) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("no geckodriver %s is recorded for %s", GeckodriverVersion, platform)
 	}
-	dir, err := cacheDir("geckodriver", GeckodriverVersion)
+	dir, err := cache.Dir("geckodriver", GeckodriverVersion)
 	if err != nil {
 		return "", err
 	}
 	bin := filepath.Join(dir, "geckodriver")
-	if _, err := os.Stat(bin); err == nil {
+	if cache.Exists(bin) {
 		return bin, nil
 	}
 
@@ -96,7 +101,7 @@ func Geckodriver(ctx context.Context, log io.Writer) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return bin, install(bin, exe)
+	return bin, cache.WriteExecutable(bin, exe)
 }
 
 // Chromedriver returns the path of a chromedriver for the installed Chrome,
@@ -115,12 +120,12 @@ func Chromedriver(ctx context.Context, log io.Writer) (string, error) {
 
 	// The cache is keyed by build, so a Chrome update within the build
 	// needs nothing, and one to a new build fetches a new driver.
-	dir, err := cacheDir("chromedriver", build)
+	dir, err := cache.Dir("chromedriver", build)
 	if err != nil {
 		return "", err
 	}
 	bin := filepath.Join(dir, "chromedriver")
-	if _, err := os.Stat(bin); err == nil {
+	if cache.Exists(bin) {
 		return bin, nil
 	}
 
@@ -139,14 +144,14 @@ func Chromedriver(ctx context.Context, log io.Writer) (string, error) {
 		return "", err
 	}
 	tmp := bin + ".unverified"
-	if err := install(tmp, exe); err != nil {
+	if err := cache.WriteExecutable(tmp, exe); err != nil {
 		return "", err
 	}
 	if err := checkVersion(ctx, tmp, version); err != nil {
 		os.Remove(tmp)
 		return "", err
 	}
-	return bin, os.Rename(tmp, bin)
+	return bin, cache.Promote(tmp, bin)
 }
 
 // checkVersion runs bin --version and requires it to name version.
@@ -180,7 +185,7 @@ func installedChrome(ctx context.Context) (string, error) {
 		if err != nil {
 			continue
 		}
-		if v := regexp.MustCompile(`\d+\.\d+\.\d+\.\d+`).FindString(string(out)); v != "" {
+		if v := chromeVersionRE.FindString(string(out)); v != "" {
 			return v, nil
 		}
 	}
@@ -244,15 +249,6 @@ func parseIndex(raw []byte, build, platform string) (url, version string, err er
 	return "", "", fmt.Errorf("Chrome for Testing has no %s chromedriver for build %s", platform, build)
 }
 
-func cacheDir(name, version string) (string, error) {
-	cache, err := os.UserCacheDir()
-	if err != nil {
-		return "", err
-	}
-	dir := filepath.Join(cache, "clack", name, version)
-	return dir, os.MkdirAll(dir, 0o755)
-}
-
 func download(ctx context.Context, url string, limit int64) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -313,14 +309,4 @@ func fromZip(archive []byte, name string) ([]byte, error) {
 		return io.ReadAll(io.LimitReader(rc, 128<<20))
 	}
 	return nil, fmt.Errorf("%s is not in the archive", name)
-}
-
-// install writes an executable atomically, so an interrupted fetch never
-// leaves a half-written driver in the cache.
-func install(path string, exe []byte) error {
-	tmp := path + ".partial"
-	if err := os.WriteFile(tmp, exe, 0o755); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
 }

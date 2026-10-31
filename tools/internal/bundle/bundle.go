@@ -14,14 +14,16 @@ import (
 	"github.com/evanw/esbuild/pkg/api"
 )
 
-// Engines are the oldest browser versions the output must run in: roughly
-// the current release of each engine and the one before, as the plan
-// promises. Raising them is a decision about who can use Clack, not a build
-// detail.
+// Engines are the oldest browser versions the output must run in: the
+// release before the current one of each engine, as the plan promises.
+// Written in October 2026, when Chrome and Edge were at 156, Firefox at 157
+// and Safari at 26 (whose previous major release was 18). They are reviewed
+// with each Clack release; moving them is a decision about who can use
+// Clack, not a build detail. Safari 18 is the floor that binds in practice.
 var Engines = []api.Engine{
-	{Name: api.EngineChrome, Version: "130"},
-	{Name: api.EngineEdge, Version: "130"},
-	{Name: api.EngineFirefox, Version: "132"},
+	{Name: api.EngineChrome, Version: "155"},
+	{Name: api.EngineEdge, Version: "155"},
+	{Name: api.EngineFirefox, Version: "156"},
 	{Name: api.EngineSafari, Version: "18"},
 	{Name: api.EngineIOS, Version: "18"},
 }
