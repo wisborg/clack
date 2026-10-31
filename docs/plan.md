@@ -318,8 +318,7 @@ side with the version before.
 **0 — Foundations**
 - Licence, `DEPENDENCIES.md`, the gates. *(done)*
 - Verify the Node-free toolchain: esbuild through Go, tsgo, the WebDriver harness on Safari,
-  Chrome and Firefox. *(done: Chrome and Firefox pass; Safari waits on "Allow remote
-  automation")*
+  Chrome and Firefox. *(done: Safari 26.5, Chrome 156 and Firefox 157 all pass)*
 - Design: the visual language and the five themes as static mock-ups with real photographs,
   reviewed on phone, laptop and large screen.
 - Draft the theme and manifest schemas.
