@@ -1,14 +1,12 @@
-// Chooses the page's colour scheme before it is drawn: ?scheme=light or
-// ?scheme=dark when given (so screenshots can show both), the visitor's
-// system setting otherwise. A file of its own because the pages are served
-// under a policy that allows no inline script.
+// Forces a colour scheme when the URL asks for one with ?scheme=light or
+// ?scheme=dark, so screenshots can show both. Without it the page follows
+// the visitor's system setting through CSS alone (color-scheme and
+// light-dark() in mockups.css), live, and needs no script at all. A file of
+// its own because the pages are served under a policy that allows no
+// inline script.
 (() => {
   const asked = new URLSearchParams(location.search).get("scheme");
-  const scheme =
-    asked === "light" || asked === "dark"
-      ? asked
-      : matchMedia("(prefers-color-scheme: dark)").matches
-        ? "dark"
-        : "light";
-  document.documentElement.dataset.scheme = scheme;
+  if (asked === "light" || asked === "dark") {
+    document.documentElement.dataset.scheme = asked;
+  }
 })();

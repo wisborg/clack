@@ -28,8 +28,15 @@ func Exists(path string) bool {
 // WriteExecutable writes an executable atomically: an interrupted write
 // never leaves a half-written program at path.
 func WriteExecutable(path string, data []byte) error {
+	return WriteFile(path, data, 0o755)
+}
+
+// WriteFile writes a file atomically, with the given mode: an interrupted
+// or failed write leaves neither a half-written file at path nor a partial
+// one beside it.
+func WriteFile(path string, data []byte, mode os.FileMode) error {
 	tmp := path + ".partial"
-	if err := os.WriteFile(tmp, data, 0o755); err != nil {
+	if err := os.WriteFile(tmp, data, mode); err != nil {
 		os.Remove(tmp)
 		return err
 	}

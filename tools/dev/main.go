@@ -27,6 +27,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -431,27 +432,73 @@ func cmdServe(ctx context.Context, args []string) error {
 	return nil
 }
 
-// imagesReady resolves true once every image on the page has decoded, or
-// false after 15 seconds.
-const imagesReady = `
+// pageCheck reports, once every image on the page has settled, whether the
+// page is a real one (not the server's 404) and which images failed to
+// load or decode -- a missing photo must fail the run, not leave an empty
+// frame in a screenshot that says "ok". The load event does not wait for
+// lazily loaded images, which a real index uses, so each is told to load
+// now and waited for.
+const pageCheck = `
 const done = arguments[arguments.length - 1];
-const all = [...document.images].map((img) => {
+const imgs = [...document.images];
+const settled = imgs.map((img) => {
   img.loading = "eager";
-  return img.decode().catch(() => {});
+  return img.decode().then(() => null, () => img.currentSrc || img.src);
 });
-Promise.race([
-  Promise.all(all).then(() => true),
-  new Promise((r) => setTimeout(() => r(false), 15000)),
-]).then(done);
+const timeout = new Promise((r) => setTimeout(() => r("timeout"), 15000));
+Promise.race([Promise.all(settled), timeout]).then((r) => {
+  done({
+    title: document.title,
+    timedOut: r === "timeout",
+    failed: r === "timeout" ? [] : r.filter((x) => x),
+  });
+});
 `
 
-// viewports are the sizes design pages are judged at.
-var viewports = []struct {
+// viewportSize reports the page's viewport.
+const viewportSize = `arguments[arguments.length - 1]([innerWidth, innerHeight]);`
+
+// fitViewport sizes the window so that the viewport -- what a screenshot
+// shows -- is width by height. A window's outer size includes whatever
+// chrome the browser draws, even headless Chrome, so the first resize is
+// measured and corrected once, and anything still off is an error rather
+// than a screenshot named for a size it is not.
+func fitViewport(ctx context.Context, s *webdriver.Session, width, height int) error {
+	if err := s.SetWindowSize(ctx, width, height); err != nil {
+		return err
+	}
+	var got [2]int
+	if err := s.ExecuteAsync(ctx, viewportSize, nil, &got); err != nil {
+		return err
+	}
+	if got == [2]int{width, height} {
+		return nil
+	}
+	if err := s.SetWindowSize(ctx, 2*width-got[0], 2*height-got[1]); err != nil {
+		return err
+	}
+	if err := s.ExecuteAsync(ctx, viewportSize, nil, &got); err != nil {
+		return err
+	}
+	if got != [2]int{width, height} {
+		return fmt.Errorf("asked for a %dx%d viewport and got %dx%d", width, height, got[0], got[1])
+	}
+	return nil
+}
+
+// pageNameRE is what a design page may be called: no path, no extension.
+var pageNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+// viewport is a size design pages are judged at.
+type viewport struct {
 	name          string
 	width, height int
-}{
-	{"desktop", 1440, 900},
-	{"phone", 390, 844},
+	phone         bool // emulated as a phone, not set by sizing a window
+}
+
+var viewports = []viewport{
+	{"desktop", 1440, 900, false},
+	{"phone", 390, 844, true},
 }
 
 func cmdShots(ctx context.Context, args []string) error {
@@ -467,13 +514,32 @@ func cmdShots(ctx context.Context, args []string) error {
 	}
 	var pages []string
 	if *only != "" {
-		pages = strings.Split(*only, ",")
+		for _, p := range strings.Split(*only, ",") {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			if !pageNameRE.MatchString(p) {
+				return usageError{fmt.Sprintf("dev shots: %q is not a page name", p)}
+			}
+			if !cacheExists(filepath.Join("design", "mockups", p+".html")) {
+				return usageError{fmt.Sprintf("dev shots: there is no design/mockups/%s.html", p)}
+			}
+			pages = append(pages, p)
+		}
 	} else {
-		matches, _ := filepath.Glob("design/mockups/*.html")
+		matches, err := filepath.Glob("design/mockups/*.html")
+		if err != nil {
+			return err
+		}
 		for _, m := range matches {
 			pages = append(pages, strings.TrimSuffix(filepath.Base(m), ".html"))
 		}
 	}
+	if len(pages) == 0 {
+		return usageError{"dev shots: no pages to draw"}
+	}
+
 	srv, err := designServer(ctx, "127.0.0.1:0")
 	if err != nil {
 		return err
@@ -483,53 +549,109 @@ func cmdShots(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	d, s, err := browsertest.Open(ctx, b, driver, true, os.Stderr)
-	if err != nil {
-		return err
-	}
-	defer d.Stop()
-	defer s.Close(context.WithoutCancel(ctx))
-
 	out := filepath.Join(".scratch", "shots")
 	if err := os.MkdirAll(out, 0o755); err != nil {
 		return err
 	}
-	if err := s.SetScriptTimeout(ctx, 30*time.Second); err != nil {
-		return err
-	}
+	var problems []string
 	for _, vp := range viewports {
-		if err := s.SetWindowSize(ctx, vp.width, vp.height); err != nil {
-			return err
+		found, err := shootViewport(ctx, b, driver, srv.URL, vp, pages, out)
+		if err != nil {
+			return fmt.Errorf("%s: %w", vp.name, err)
 		}
-		for _, page := range pages {
-			for _, scheme := range []string{"light", "dark"} {
-				url := fmt.Sprintf("%smockups/%s.html?scheme=%s", srv.URL, page, scheme)
-				if err := s.Navigate(ctx, url); err != nil {
-					return err
-				}
-				// The load event does not wait for lazily loaded images, which
-				// a real index uses; wait until every image is decoded, so a
-				// screenshot never shows a frame still empty.
-				var ready bool
-				if err := s.ExecuteAsync(ctx, imagesReady, nil, &ready); err != nil {
-					return err
-				}
-				if !ready {
-					fmt.Fprintf(os.Stderr, "%s: some images had not loaded after 15 s\n", url)
-				}
-				png, err := s.Screenshot(ctx)
-				if err != nil {
-					return err
-				}
-				name := filepath.Join(out, fmt.Sprintf("%s-%s-%s.png", page, scheme, vp.name))
-				if err := os.WriteFile(name, png, 0o644); err != nil {
-					return err
-				}
-				fmt.Println(name)
-			}
-		}
+		problems = append(problems, found...)
+	}
+	if len(problems) > 0 {
+		// The screenshots are still written, to show what went wrong.
+		return errors.New(strings.Join(problems, "\n"))
 	}
 	return nil
+}
+
+// shootViewport draws every page, light and dark, at one viewport size, in
+// a session of its own: a phone is emulated from the session's start, and a
+// desktop viewport is set by sizing the window. It returns the problems it
+// saw on the pages; an error means it could not draw them at all.
+func shootViewport(ctx context.Context, b webdriver.Browser, driver, base string, vp viewport, pages []string, out string) ([]string, error) {
+	o := webdriver.Options{Headless: true}
+	if vp.phone {
+		o.Phone = &webdriver.Size{Width: vp.width, Height: vp.height}
+	}
+	d, s, err := browsertest.Open(ctx, b, driver, o, os.Stderr)
+	if err != nil {
+		return nil, err
+	}
+	defer d.Stop()
+	defer browsertest.CloseSession(ctx, s)
+
+	if err := s.SetScriptTimeout(ctx, 30*time.Second); err != nil {
+		return nil, err
+	}
+	// The viewport is measured on a page of the server's, under the same
+	// policy as the design pages.
+	if err := s.Navigate(ctx, base+"mockups/index.html"); err != nil {
+		return nil, err
+	}
+	if vp.phone {
+		if err := checkViewport(ctx, s, vp.width, vp.height); err != nil {
+			return nil, err
+		}
+	} else if err := fitViewport(ctx, s, vp.width, vp.height); err != nil {
+		return nil, err
+	}
+
+	var problems []string
+	for _, page := range pages {
+		for _, scheme := range []string{"light", "dark"} {
+			url := fmt.Sprintf("%smockups/%s.html?scheme=%s", base, page, scheme)
+			if err := s.Navigate(ctx, url); err != nil {
+				return nil, err
+			}
+			var check struct {
+				Title    string   `json:"title"`
+				TimedOut bool     `json:"timedOut"`
+				Failed   []string `json:"failed"`
+			}
+			if err := s.ExecuteAsync(ctx, pageCheck, nil, &check); err != nil {
+				return nil, err
+			}
+			switch {
+			case !strings.HasSuffix(check.Title, "Clack mock-up"):
+				problems = append(problems, fmt.Sprintf("%s: not a design page (title %q)", url, check.Title))
+			case check.TimedOut:
+				problems = append(problems, fmt.Sprintf("%s: images still loading after 15 s", url))
+			case len(check.Failed) > 0:
+				problems = append(problems, fmt.Sprintf("%s: images failed: %s", url, strings.Join(check.Failed, ", ")))
+			}
+			png, err := s.Screenshot(ctx)
+			if err != nil {
+				return nil, err
+			}
+			name := filepath.Join(out, fmt.Sprintf("%s-%s-%s.png", page, scheme, vp.name))
+			if err := os.WriteFile(name, png, 0o644); err != nil {
+				return nil, err
+			}
+			fmt.Println(name)
+		}
+	}
+	return problems, nil
+}
+
+// checkViewport requires the viewport to be width by height.
+func checkViewport(ctx context.Context, s *webdriver.Session, width, height int) error {
+	var got [2]int
+	if err := s.ExecuteAsync(ctx, viewportSize, nil, &got); err != nil {
+		return err
+	}
+	if got != [2]int{width, height} {
+		return fmt.Errorf("asked for a %dx%d viewport and got %dx%d", width, height, got[0], got[1])
+	}
+	return nil
+}
+
+func cacheExists(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && fi.Mode().IsRegular()
 }
 
 func cmdClean(ctx context.Context, args []string) error {

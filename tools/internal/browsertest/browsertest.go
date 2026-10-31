@@ -80,19 +80,21 @@ func ServeDirs(addr string, dirs map[string]string) (*Server, error) {
 	for prefix, dir := range dirs {
 		fs := http.StripPrefix(prefix, http.FileServerFS(os.DirFS(dir)))
 		mux.Handle("GET "+prefix, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			h := w.Header()
-			h.Set("Content-Security-Policy", ContentSecurityPolicy)
-			h.Set("X-Content-Type-Options", "nosniff")
-			h.Set("Cache-Control", "no-store")
+			securityHeaders(w)
 			fs.ServeHTTP(w, r)
 		}))
 	}
+	return start(l, mux), nil
+}
+
+// start serves mux on l.
+func start(l net.Listener, mux *http.ServeMux) *Server {
 	s := &Server{
 		URL: "http://" + l.Addr().String() + "/",
 		srv: &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second},
 	}
 	go s.srv.Serve(l)
-	return s, nil
+	return s
 }
 
 func serveOn(l net.Listener, mux *http.ServeMux, files map[string][]byte) (*Server, error) {
@@ -106,20 +108,21 @@ func serveOn(l net.Listener, mux *http.ServeMux, files map[string][]byte) (*Serv
 			w.Write(body)
 		})
 	}
-	s := &Server{
-		URL: "http://" + l.Addr().String() + "/",
-		srv: &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second},
-	}
-	go s.srv.Serve(l)
-	return s, nil
+	return start(l, mux), nil
 }
 
 // Close stops the server.
 func (s *Server) Close() error { return s.srv.Close() }
 
 func headers(w http.ResponseWriter, ct string) {
+	w.Header().Set("Content-Type", ct)
+	securityHeaders(w)
+}
+
+// securityHeaders sets what every response from a test or design server
+// carries: the strict policy, and no sniffing or caching.
+func securityHeaders(w http.ResponseWriter) {
 	h := w.Header()
-	h.Set("Content-Type", ct)
 	h.Set("Content-Security-Policy", ContentSecurityPolicy)
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Cache-Control", "no-store")
@@ -185,24 +188,19 @@ const scriptTimeout = 10 * time.Minute
 // when it is empty), and returns the test page's report. Notes on what it
 // did besides are written to log.
 func Run(ctx context.Context, b webdriver.Browser, driverPath, url string, headless bool, log io.Writer) (Report, error) {
+	o := webdriver.Options{Headless: headless}
 	// A browser can end its first process straight after starting --
 	// Firefox does, after applying a downloaded update, and restarts itself
 	// -- which the driver reports as a failed session. A second start finds
 	// nothing left to apply. Open retries once, which covers that without
 	// guessing at any driver's wording; a failure that persists is reported
 	// as it was.
-	d, s, err := Open(ctx, b, driverPath, headless, log)
+	d, s, err := Open(ctx, b, driverPath, o, log)
 	if err != nil {
 		return Report{}, err
 	}
 	defer d.Stop()
-	defer func() {
-		// Bounded, so that a browser that has stopped answering cannot hold
-		// the run open, even after Ctrl-C has cancelled ctx.
-		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-		defer cancel()
-		s.Close(closeCtx)
-	}()
+	defer CloseSession(ctx, s)
 
 	if err := s.SetScriptTimeout(ctx, scriptTimeout); err != nil {
 		return Report{}, err
@@ -220,24 +218,33 @@ func Run(ctx context.Context, b webdriver.Browser, driverPath, url string, headl
 	return report, nil
 }
 
+// CloseSession closes s within a bounded time, so that a browser that has
+// stopped answering cannot hold the program open, even after Ctrl-C has
+// cancelled ctx.
+func CloseSession(ctx context.Context, s *webdriver.Session) {
+	closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	s.Close(closeCtx)
+}
+
 // Open starts b's driver and a session in it, retrying once as Run does.
 // The caller stops the driver when done.
-func Open(ctx context.Context, b webdriver.Browser, driverPath string, headless bool, log io.Writer) (*webdriver.Driver, *webdriver.Session, error) {
-	d, s, err := open(ctx, b, driverPath, headless)
+func Open(ctx context.Context, b webdriver.Browser, driverPath string, o webdriver.Options, log io.Writer) (*webdriver.Driver, *webdriver.Session, error) {
+	d, s, err := open(ctx, b, driverPath, o)
 	if err != nil {
 		fmt.Fprintf(log, "%s: could not start a session; trying once more (%v)\n", b.Name, firstLine(err))
-		d, s, err = open(ctx, b, driverPath, headless)
+		d, s, err = open(ctx, b, driverPath, o)
 	}
 	return d, s, err
 }
 
 // open starts b's driver and a session in it.
-func open(ctx context.Context, b webdriver.Browser, driverPath string, headless bool) (*webdriver.Driver, *webdriver.Session, error) {
+func open(ctx context.Context, b webdriver.Browser, driverPath string, o webdriver.Options) (*webdriver.Driver, *webdriver.Session, error) {
 	d, err := webdriver.Start(ctx, b, driverPath)
 	if err != nil {
 		return nil, nil, err
 	}
-	s, err := d.NewSession(ctx, headless)
+	s, err := d.NewSession(ctx, o)
 	if err != nil {
 		err = withOutput(err, d)
 		d.Stop()

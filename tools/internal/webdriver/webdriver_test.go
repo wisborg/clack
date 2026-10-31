@@ -103,7 +103,7 @@ func TestSessionFlow(t *testing.T) {
 	d := &Driver{browser: chrome, base: srv.URL, client: srv.Client()}
 	ctx := context.Background()
 
-	s, err := d.NewSession(ctx, true)
+	s, err := d.NewSession(ctx, Options{Headless: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,9 +156,29 @@ func TestSessionFlow(t *testing.T) {
 
 func TestSafariIgnoresHeadless(t *testing.T) {
 	safari, _ := Lookup("safari")
-	caps := safari.capabilities(true)
-	if len(caps) != 1 || caps["browserName"] != "safari" {
-		t.Errorf("safari capabilities = %v; Safari has no headless option to pass", caps)
+	caps, err := safari.capabilities(Options{Headless: true})
+	if err != nil || len(caps) != 1 || caps["browserName"] != "safari" {
+		t.Errorf("safari capabilities = %v, %v; Safari has no headless option to pass", caps, err)
+	}
+}
+
+func TestOnlyChromeEmulatesAPhone(t *testing.T) {
+	phone := Options{Phone: &Size{390, 844}}
+	for _, b := range Browsers {
+		caps, err := b.capabilities(phone)
+		if b.Name != "chrome" {
+			if err == nil {
+				t.Errorf("%s accepted a phone viewport it cannot emulate", b.Name)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := caps["goog:chromeOptions"].(map[string]any)["mobileEmulation"].(map[string]any)["deviceMetrics"].(map[string]any)
+		if m["width"] != 390 || m["height"] != 844 {
+			t.Errorf("chrome device metrics = %v", m)
+		}
 	}
 }
 

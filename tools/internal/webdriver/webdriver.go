@@ -36,9 +36,30 @@ type Browser struct {
 	Driver string
 	// args returns the driver's arguments for listening on port.
 	args func(port int) []string
-	// capabilities returns the session capabilities. headless is ignored by
-	// a browser that has no headless mode.
-	capabilities func(headless bool) map[string]any
+	// capabilities returns the session capabilities for o, or an error if
+	// the browser cannot do what o asks. o.Headless is ignored by a browser
+	// that has no headless mode.
+	capabilities func(o Options) (map[string]any, error)
+}
+
+// Options says what kind of session to start.
+type Options struct {
+	// Headless runs the browser without a window, where it can.
+	Headless bool
+	// Phone, when set, emulates a phone's viewport of this many CSS pixels.
+	// Only Chrome can: a desktop browser's window has a minimum width wider
+	// than a phone's (500 px for headless Chrome).
+	Phone *Size
+}
+
+// Size is a viewport size in CSS pixels.
+type Size struct{ Width, Height int }
+
+func noPhone(name string, o Options) error {
+	if o.Phone != nil {
+		return fmt.Errorf("%s cannot emulate a phone's viewport; use chrome", name)
+	}
+	return nil
 }
 
 // Browsers are the engines Clack is tested on, in the order they are run.
@@ -48,38 +69,44 @@ var Browsers = []Browser{
 		Driver: "safaridriver",
 		args:   func(port int) []string { return []string{"-p", strconv.Itoa(port)} },
 		// Safari has no headless mode: a window opens for the duration.
-		capabilities: func(bool) map[string]any {
-			return map[string]any{"browserName": "safari"}
+		capabilities: func(o Options) (map[string]any, error) {
+			return map[string]any{"browserName": "safari"}, noPhone("safari", o)
 		},
 	},
 	{
 		Name:   "chrome",
 		Driver: "chromedriver",
 		args:   func(port int) []string { return []string{"--port=" + strconv.Itoa(port)} },
-		capabilities: func(headless bool) map[string]any {
+		capabilities: func(o Options) (map[string]any, error) {
 			args := []string{"--window-size=1280,900"}
-			if headless {
+			if o.Headless {
 				args = append(args, "--headless=new")
 			}
-			return map[string]any{
-				"browserName":        "chrome",
-				"goog:chromeOptions": map[string]any{"args": args},
+			opts := map[string]any{"args": args}
+			if o.Phone != nil {
+				opts["mobileEmulation"] = map[string]any{
+					"deviceMetrics": map[string]any{
+						"width": o.Phone.Width, "height": o.Phone.Height,
+						"pixelRatio": 1, "touch": true, "mobile": true,
+					},
+				}
 			}
+			return map[string]any{"browserName": "chrome", "goog:chromeOptions": opts}, nil
 		},
 	},
 	{
 		Name:   "firefox",
 		Driver: "geckodriver",
 		args:   func(port int) []string { return []string{"--port", strconv.Itoa(port)} },
-		capabilities: func(headless bool) map[string]any {
+		capabilities: func(o Options) (map[string]any, error) {
 			args := []string{"-width=1280", "-height=900"}
-			if headless {
+			if o.Headless {
 				args = append(args, "-headless")
 			}
 			return map[string]any{
 				"browserName":        "firefox",
 				"moz:firefoxOptions": map[string]any{"args": args},
-			}
+			}, noPhone("firefox", o)
 		},
 	},
 }
@@ -196,9 +223,13 @@ type Session struct {
 }
 
 // NewSession opens the browser.
-func (d *Driver) NewSession(ctx context.Context, headless bool) (*Session, error) {
+func (d *Driver) NewSession(ctx context.Context, o Options) (*Session, error) {
+	caps, err := d.browser.capabilities(o)
+	if err != nil {
+		return nil, err
+	}
 	body := map[string]any{
-		"capabilities": map[string]any{"alwaysMatch": d.browser.capabilities(headless)},
+		"capabilities": map[string]any{"alwaysMatch": caps},
 	}
 	var created struct {
 		SessionID string `json:"sessionId"`

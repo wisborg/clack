@@ -13,11 +13,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -50,12 +53,19 @@ func Load(path string) ([]Photo, error) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	seen := map[string]bool{}
 	for _, p := range m.Photos {
 		if p.File != filepath.Base(p.File) || !strings.HasSuffix(p.File, ".jpg") {
 			return nil, fmt.Errorf("%s: %q is not a plain .jpg file name", path, p.File)
 		}
-		if !strings.HasPrefix(p.URL, "https://upload.wikimedia.org/") &&
-			!strings.HasPrefix(p.URL, "https://thumb.wikimedia.org/") {
+		if seen[p.File] {
+			return nil, fmt.Errorf("%s: %s is listed twice", path, p.File)
+		}
+		seen[p.File] = true
+		if !shaRE.MatchString(p.SHA256) {
+			return nil, fmt.Errorf("%s: %s: sha256 %q is not 64 lowercase hex digits", path, p.File, p.SHA256)
+		}
+		if !allowedURL(p.URL) {
 			return nil, fmt.Errorf("%s: %s is not fetched from Wikimedia", path, p.File)
 		}
 		if p.Licence != "CC0" && p.Licence != "Public domain" {
@@ -63,6 +73,17 @@ func Load(path string) ([]Photo, error) {
 		}
 	}
 	return m.Photos, nil
+}
+
+var shaRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// allowedHosts are where photos may come from -- checked for the manifest's
+// URLs and again for every redirect the fetch follows.
+var allowedHosts = map[string]bool{"upload.wikimedia.org": true, "thumb.wikimedia.org": true}
+
+func allowedURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && u.Scheme == "https" && allowedHosts[u.Hostname()]
 }
 
 // Ensure makes every photo available in the cache, fetching what is missing,
@@ -73,7 +94,18 @@ func Ensure(ctx context.Context, list []Photo, log io.Writer) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	client := &http.Client{Timeout: 2 * time.Minute}
+	client := &http.Client{
+		Timeout: 2 * time.Minute,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if !allowedURL(req.URL.String()) {
+				return fmt.Errorf("refusing a redirect to %s", req.URL.Host)
+			}
+			if len(via) >= 5 {
+				return errors.New("too many redirects")
+			}
+			return nil
+		},
+	}
 	for _, p := range list {
 		path := filepath.Join(dir, p.File)
 		data, err := os.ReadFile(path)
@@ -86,11 +118,7 @@ func Ensure(ctx context.Context, list []Photo, log io.Writer) (string, error) {
 			if got := digest(data); got != p.SHA256 {
 				return "", fmt.Errorf("%s: SHA-256 %s, want %s; refusing it", p.File, got, p.SHA256)
 			}
-			tmp := path + ".partial"
-			if err := os.WriteFile(tmp, data, 0o644); err != nil {
-				return "", err
-			}
-			if err := cache.Promote(tmp, path); err != nil {
+			if err := cache.WriteFile(path, data, 0o644); err != nil {
 				return "", err
 			}
 		}

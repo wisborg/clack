@@ -21,11 +21,17 @@ func TestTheManifestLoads(t *testing.T) {
 	}
 }
 
+const hex64 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
 func TestLoadRefuses(t *testing.T) {
 	for name, entry := range map[string]string{
 		"a path":       `{"file":"../x.jpg","url":"https://upload.wikimedia.org/x","licence":"CC0"}`,
 		"another host": `{"file":"x.jpg","url":"https://example.com/x.jpg","licence":"CC0"}`,
 		"a licence":    `{"file":"x.jpg","url":"https://upload.wikimedia.org/x","licence":"CC BY-SA 4.0"}`,
+		"a bad digest": `{"file":"x.jpg","url":"https://upload.wikimedia.org/x","licence":"CC0","sha256":"ABC"}`,
+		"a duplicate": `{"file":"x.jpg","url":"https://upload.wikimedia.org/x","licence":"CC0","sha256":"` + hex64 + `"},` +
+			`{"file":"x.jpg","url":"https://upload.wikimedia.org/y","licence":"CC0","sha256":"` + hex64 + `"}`,
+		"a look-alike host": `{"file":"x.jpg","url":"https://upload.wikimedia.org.example.com/x","licence":"CC0","sha256":"` + hex64 + `"}`,
 	} {
 		p := filepath.Join(t.TempDir(), "photos.json")
 		os.WriteFile(p, []byte(`{"photos":[`+entry+`]}`), 0o644)
