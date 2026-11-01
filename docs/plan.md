@@ -321,8 +321,8 @@ side with the version before.
 - Verify the Node-free toolchain: esbuild through Go, tsgo, the WebDriver harness on Safari,
   Chrome and Firefox. *(done: Safari 26.5, Chrome 156 and Firefox 157 all pass)*
 - Design: the visual language and the five themes as static mock-ups with real photographs,
-  reviewed on phone, laptop and large screen. *(mock-ups in `design/`, with public-domain
-  photographs; waiting for review)*
+  reviewed on phone, laptop and large screen. *(done: mock-ups in `design/`, with
+  public-domain photographs; approved 2026-11-01)*
 - Draft the theme and manifest schemas.
 
 **1 — First release**
