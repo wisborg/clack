@@ -145,12 +145,14 @@ func TestEcho(t *testing.T) {
 	if resp.Request.URL.Path != "/echo/x.json" || string(body) != "1" {
 		t.Errorf("redirect: ended at %s with %q", resp.Request.URL, body)
 	}
-	resp, err = http.Get(srv.URL + "redirect?to=//example.com/")
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != 400 {
-		t.Errorf("redirect elsewhere: %d", resp.StatusCode)
+	for _, elsewhere := range []string{"//example.com/", "/%5Cexample.com", "/%09/example.com", "https://example.com/", "x"} {
+		resp, err = http.Get(srv.URL + "redirect?to=" + elsewhere)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != 400 {
+			t.Errorf("redirect to %s: %d", elsewhere, resp.StatusCode)
+		}
 	}
 }

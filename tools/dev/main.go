@@ -328,6 +328,11 @@ func printReport(browser string, r browsertest.Report) {
 		}
 	}
 	fmt.Printf("%-8s %d passed, %d failed, %d skipped  (%s)\n", browser, passed, failed, skipped, r.UserAgent)
+	if r.Hidden {
+		fmt.Printf("%-8s NOTE: the test page was hidden during the run (its window behind a full-screen app,\n"+
+			"         on another desktop, or minimised), so the browser throttled its timers; timeouts may\n"+
+			"         be that, not the code. Run again with the window in view.\n", "")
+	}
 	if r.Error != "" {
 		fmt.Printf("    RUN FAILED: %s\n", r.Error)
 	}

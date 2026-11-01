@@ -486,10 +486,14 @@ func (n *node) validate(v any, path string, errs *[]Error) {
 		if n.minLength != nil && length < *n.minLength {
 			add("must be at least %d characters", *n.minLength)
 		}
-		if n.maxLength != nil && length > *n.maxLength {
+		tooLong := n.maxLength != nil && length > *n.maxLength
+		if tooLong {
 			add("must be at most %d characters", *n.maxLength)
 		}
-		if n.pattern != nil && !n.pattern.MatchString(x) {
+		// A string already too long is not also matched against the
+		// pattern: RE2 is linear, but the browser's validator does the same,
+		// because a backtracking engine need not be (src/schema.ts).
+		if n.pattern != nil && !tooLong && !n.pattern.MatchString(x) {
 			add("%s does not have the expected form", show(x))
 		}
 	case json.Number:

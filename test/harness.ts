@@ -20,6 +20,13 @@ export interface Result {
 
 export interface Report {
   userAgent: string;
+  /**
+   * Whether the page was hidden at any time during the run. A hidden page's
+   * timers and animations are throttled or stopped (Safari, when its window
+   * is behind a full-screen app or on another desktop), so timeouts that
+   * follow say more about the window than about the code.
+   */
+  hidden: boolean;
   results: Result[];
   error: string;
 }
@@ -77,6 +84,12 @@ export interface Violation {
   /** Order of arrival, so a test can tell its own violations from older ones. */
   seq: number;
 }
+
+let wasHidden = document.visibilityState === "hidden";
+document.addEventListener("visibilitychange", (e) => {
+  // The browser's own events only: a test may send one of its own.
+  if (e.isTrusted && document.visibilityState === "hidden") wasHidden = true;
+});
 
 const violations: Violation[] = [];
 let nextSeq = 0;
@@ -153,7 +166,7 @@ export async function run(): Promise<Report> {
     }
   }
   if (abandoned) {
-    return { userAgent: navigator.userAgent, results, error: `stopped early: ${abandoned}` };
+    return { userAgent: navigator.userAgent, hidden: wasHidden, results, error: `stopped early: ${abandoned}` };
   }
   results.push(
     await runOne({
@@ -167,7 +180,7 @@ export async function run(): Promise<Report> {
       },
     }),
   );
-  return { userAgent: navigator.userAgent, results, error: "" };
+  return { userAgent: navigator.userAgent, hidden: wasHidden, results, error: "" };
 }
 
 async function runOne(t: Test): Promise<Result & { timedOut: boolean }> {

@@ -128,7 +128,7 @@ export class Schema {
   validate(doc: unknown): Problem[] {
     const out: Problem[] = [];
     validate(this.#root, doc as Json, "", out);
-    return out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+    return out.sort((a, b) => byCodePoint(a.path, b.path));
   }
 }
 
@@ -177,9 +177,44 @@ function equal(a: Json, b: Json): boolean {
 }
 
 const show = (v: Json): string => {
-  const s = JSON.stringify(v);
+  let s: string;
+  try {
+    s = JSON.stringify(v) ?? String(v);
+  } catch {
+    s = typeof v;
+  }
   return s.length > 60 ? `${s.slice(0, 57)}...` : s;
 };
+
+/**
+ * Orders strings by code point, which is the order of their UTF-8 bytes --
+ * as Go sorts them -- not of their UTF-16 units, as < does.
+ */
+export function byCodePoint(a: string, b: string): number {
+  const x = a[Symbol.iterator]();
+  const y = b[Symbol.iterator]();
+  for (;;) {
+    const p = x.next();
+    const q = y.next();
+    if (p.done || q.done) return p.done && q.done ? 0 : p.done ? -1 : 1;
+    const d = p.value.codePointAt(0)! - q.value.codePointAt(0)!;
+    if (d !== 0) return d;
+  }
+}
+
+/** Whether v is something JSON can hold: what a parser gives, and nothing else. */
+function isJson(v: unknown): v is Json {
+  switch (typeof v) {
+    case "string":
+    case "boolean":
+      return true;
+    case "number":
+      return Number.isFinite(v);
+    case "object":
+      return v === null || Array.isArray(v) || Object.getPrototypeOf(v) === Object.prototype || Object.getPrototypeOf(v) === null;
+  }
+  return false;
+}
 
 /** Characters, as JSON Schema counts them: code points, not UTF-16 units. */
 function chars(s: string): number {
@@ -214,6 +249,12 @@ function validate(n: Node, v: Json, path: string, out: Problem[]): void {
   const add = (message: string, at = path): void => {
     out.push({ path: at, message });
   };
+  if (!isJson(v)) {
+    // Given from script rather than parsed: undefined, a function, a
+    // BigInt, a class instance. Never valid, and never looked into.
+    add("is not a JSON value");
+    return;
+  }
   if (n.always !== undefined) {
     if (!n.always) add("is not allowed here");
     return;
@@ -228,7 +269,7 @@ function validate(n: Node, v: Json, path: string, out: Problem[]): void {
 
   if (typeof v === "object" && v !== null && !Array.isArray(v)) {
     for (const r of n.required ?? []) if (!own(v, r)) add(`"${r}" is required`);
-    const keys = Object.keys(v).sort();
+    const keys = Object.keys(v).sort(byCodePoint);
     for (const k of keys) {
       for (const r of n.dependentRequired?.get(k) ?? []) if (!own(v, r)) add(`"${r}" is required with "${k}"`);
     }
@@ -259,10 +300,16 @@ function validate(n: Node, v: Json, path: string, out: Problem[]): void {
     if (n.maxItems !== undefined && v.length > n.maxItems) add(`must have at most ${n.maxItems} items`);
     if (n.items) v.forEach((item, i) => validate(n.items!, item, `${path}/${i}`, out));
   } else if (typeof v === "string") {
-    const len = chars(v);
-    if (n.minLength !== undefined && len < n.minLength) add(`must be at least ${n.minLength} characters`);
-    if (n.maxLength !== undefined && len > n.maxLength) add(`must be at most ${n.maxLength} characters`);
-    if (n.pattern && !n.pattern.test(v)) add(`${show(v)} does not have the expected form`);
+    // Characters are code points, one or two UTF-16 units each, so a
+    // string's length in units bounds its count both ways: they are only
+    // counted when that cannot settle it.
+    const atLeast = (k: number): boolean => v.length >= 2 * k || (v.length >= k && chars(v) >= k);
+    const tooLong = n.maxLength !== undefined && atLeast(n.maxLength + 1);
+    if (n.minLength !== undefined && !atLeast(n.minLength)) add(`must be at least ${n.minLength} characters`);
+    if (tooLong) add(`must be at most ${n.maxLength} characters`);
+    // A string already too long is not also matched: the patterns are
+    // written to match in linear time, and this bounds the work besides.
+    if (n.pattern && !tooLong && !n.pattern.test(v)) add(`${show(v)} does not have the expected form`);
   } else if (typeof v === "number") {
     if (n.minimum !== undefined && v < n.minimum) add(`must be at least ${n.minimum}`);
     if (n.maximum !== undefined && v > n.maximum) add(`must be at most ${n.maximum}`);

@@ -10,7 +10,7 @@
  * cases (test/fixtures/manifests.json).
  */
 import manifestSchema from "../schema/manifest-1.schema.json";
-import { Schema, type Problem } from "./schema";
+import { byCodePoint, Schema, type Problem } from "./schema";
 import { fromInput, usableURL, type Keyed, type SlideInput } from "./slides";
 
 export type { Problem };
@@ -71,13 +71,14 @@ export function check(doc: unknown): Problem[] {
       }
     });
   }
-  return problems;
+  // In order of place, as the tools list them.
+  return problems.sort((a, b) => byCodePoint(a.path, b.path));
 }
 
 /**
  * Reads a manifest: parses the text, checks it, and resolves its URLs
  * against base (the URL it came from). Throws a ManifestError naming every
- * problem, or a SyntaxError for text that is not JSON.
+ * problem, or a SyntaxError for text that is not JSON; nothing else.
  */
 export function parse(text: string, base: string): Manifest {
   const doc = JSON.parse(text) as unknown;
@@ -87,12 +88,19 @@ export function parse(text: string, base: string): Manifest {
   }
   const m = doc as { title?: string; description?: string; lang?: string; slides: SlideInput[] };
   // Every URL becomes absolute, resolved against the manifest's, and is
-  // checked once more as it will be used: http or https, nothing else.
+  // checked once more as it will be used: http or https, nothing else. One
+  // the URL parser refuses (a bad port, a broken host) is a problem in the
+  // manifest like any other, named by its place; all are gathered first.
+  const unresolved: Problem[] = [];
   const resolve = (url: string, path: string): string => {
-    const abs = new URL(url, base).href;
-    if (!usableURL(abs)) {
-      throw new ManifestError([{ path, message: "does not resolve to an http or https URL" }]);
+    let abs = "";
+    try {
+      abs = new URL(url, base).href;
+    } catch {
+      unresolved.push({ path, message: "is not a URL that can be resolved" });
+      return url;
     }
+    if (!usableURL(abs)) unresolved.push({ path, message: "does not resolve to an http or https URL" });
     return abs;
   };
   const slides = m.slides.map((s, i): SlideInput => {
@@ -104,6 +112,9 @@ export function parse(text: string, base: string): Manifest {
     if (s.page) out.page = resolve(s.page, `/slides/${i}/page`);
     return out;
   });
+  if (unresolved.length > 0) {
+    throw new ManifestError(unresolved);
+  }
   return {
     title: m.title ?? "",
     description: m.description ?? "",
@@ -157,6 +168,8 @@ export async function load(url: string, signal: AbortSignal): Promise<Manifest> 
     bytes.set(p, at);
     at += p.byteLength;
   }
-  const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  // A byte-order mark is kept, and so refused as not JSON, as the tools
+  // refuse it (JSON has none: RFC 8259, 8.1).
+  const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
   return parse(text, response.url || url);
 }

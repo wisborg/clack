@@ -47,7 +47,7 @@
       "type": "string",
       "maxLength": 2000,
       "description": "An http or https URL, or a URL relative to the manifest's own. No other scheme: not data:, not javascript:. Printable ASCII only: anything else, spaces included, is percent-encoded (ø as %C3%B8). Clack checks the resolved URL again before using it.",
-      "pattern": "^(?:https?://[\\x21\\x22\\x24-\\x2e\\x30-\\x3e\\x40-\\x7e]+|//[\\x21\\x22\\x24-\\x2e\\x30-\\x3e\\x40-\\x7e]+|/(?:[\\x21-\\x2e\\x30-\\x7e]|$)|[\\x21\\x22\\x24-\\x2e\\x30-\\x39\\x3b-\\x3e\\x40-\\x7e]+(?:[/?#]|$)|[?#])[\\x21-\\x7e]*$",
+      "pattern": "^(?:(?:https?:)?//[\\x21\\x22\\x24-\\x2e\\x30-\\x3e\\x40-\\x7e]+(?:[/?#][\\x21-\\x7e]*)?|/(?:[\\x21-\\x2e\\x30-\\x7e][\\x21-\\x7e]*)?|[\\x21\\x22\\x24-\\x2e\\x30-\\x39\\x3b-\\x3e\\x40-\\x7e]+(?:[/?#][\\x21-\\x7e]*)?|[?#][\\x21-\\x7e]*)$",
       "examples": ["photos/a-1280.jpg", "/albums/coast/a-1280.jpg", "https://cdn.example.com/a-1280.jpg"]
     },
     "pixels": { "type": "integer", "minimum": 1, "maximum": 100000 },

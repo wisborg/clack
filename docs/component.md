@@ -56,15 +56,18 @@ instead. A slide still on its way when the slides change arrives where it now is
 </clack-show>
 ```
 
-`src` names a manifest ([`manifest.md`](manifest.md)). Until it arrives, the markup's slides
-are shown, as they are without script. The manifest's slides then take their place; its
-title names the show if `label` does not, and its language is set on the show's text.
+`src` names a manifest ([`manifest.md`](manifest.md)). Until the first arrives, the
+markup's slides are shown, as they are without script; when `src` changes, the slides shown
+stay until the new manifest arrives. Its slides then take their place; its title names the
+show if `label` does not, and its language is set on the show's text. A show moved in the
+page does not fetch its manifest again.
 
 A manifest that cannot be had — a failed request, the wrong type, too large, not JSON, or
-not a valid manifest — leaves the markup's slides, shows a short notice in the show ("The
-photos could not be loaded."), fires an `error` event, and logs every problem found to the
-console, each named by its place in the file. Changing `src` drops a manifest still on its
-way; removing it goes back to the markup.
+not a valid manifest — brings back the markup's slides (never a previous manifest's), shows
+a short notice in the show ("The photos could not be loaded."), fires an `error` event, and
+logs every problem found to the console, each named by its place in the file. The notice
+goes when the page moves on: another `src`, none, or slides from script. Changing `src`
+drops a manifest still on its way; removing it goes back to the markup.
 
 ## Slides from script
 
@@ -128,7 +131,7 @@ The element is 3:2 unless the page gives it a height.
   next are fetched. Photos no longer near are let go of (Firefox then stops their download;
   Chrome and Safari finish it into their cache).
 - **Crossfade** between photos, shortened when the visitor asks for reduced motion, and
-  skipped while the page is hidden.
+  skipped — or finished at once — while the page is hidden.
 - **A photo that cannot be loaded** keeps its place, with its description and a note
   saying so; the show goes on.
 - **Screen readers** hear the show as a carousel of slides ("3 of 24"), and the visitor's

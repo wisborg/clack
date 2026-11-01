@@ -4,7 +4,7 @@ import { check, load, ManifestError, maxBytes, parse } from "../src/manifest";
 import example from "../schema/examples/manifest.json";
 import fixture from "./fixtures/manifests.json";
 import { assert, assertEqual, fixture as fixtureEl, test } from "./harness";
-import { figure, img, settledOn, waitFor } from "./util";
+import { figure, img, imageLog, resetImageLog, settledOn, waitFor } from "./util";
 
 /** A deep copy of the example manifest, through JSON as a fetched one would come. */
 function exampleCopy(): unknown {
@@ -260,4 +260,112 @@ test("slides from script take over from src, and null goes back to it", async ()
   assertEqual(s.count, 1, "the script's");
   s.slides = null;
   await waitFor(() => s.count === 3, "the manifest again");
+});
+
+test("no URL, however long or nearly right, takes long to check", () => {
+  // The URL pattern is written so each part can match only one way: a
+  // backtracking engine stays linear. (RE2, in the tools, always is.)
+  const slide = (url: string): unknown => ({ id: "a", alt: "", width: 1, height: 1, sources: [{ url, width: 1 }] });
+  const near = [
+    `https://${"a".repeat(1990)} `,
+    `//${"a".repeat(1990)}\u0000`,
+    `${"a".repeat(1990)}:x`,
+    `/${"a".repeat(1990)} `,
+    `https://${"a".repeat(2_000_000)} `,
+  ];
+  for (const url of near) {
+    const t0 = performance.now();
+    const problems = check({ format: "clack-manifest/1", slides: Array.from({ length: 50 }, () => slide(url)) });
+    const ms = performance.now() - t0;
+    assert(problems.length > 0, `${url.length} characters: refused`);
+    assert(ms < 250, `${url.length} characters, 50 times: ${ms.toFixed(0)} ms`);
+  }
+});
+
+test("check never throws, even on what JSON cannot hold", () => {
+  const odd: unknown[] = [
+    undefined,
+    { format: "clack-manifest/1", slides: [{ id: "a", alt: "", width: 1, height: 1, sources: [{ url: "a.jpg", width: 1, type: undefined }] }] },
+    { format: "clack-manifest/1", slides: [{ id: "a", alt: "", width: 1n, height: 1, sources: [{ url: "a.jpg", width: 1 }] }] },
+    { format: "clack-manifest/1", slides: new Map() },
+    { format: () => 1, slides: [] },
+  ];
+  for (const doc of odd) {
+    assert(check(doc).length > 0, `refused: ${String(doc)}`);
+  }
+});
+
+test("problems are listed in order of place, those beyond the schema too", () => {
+  const slides = Array.from({ length: 10 }, (_, i) => ({ id: i === 9 ? "x" : `s${i}`, alt: "", width: 1, height: 1, sources: [{ url: "a.jpg", width: 1 }] }));
+  slides[9]!.id = "s0"; // a repeated id, found after the schema's checks
+  (slides[2] as Record<string, unknown>)["bad"] = 1;
+  const paths = check({ format: "clack-manifest/1", slides }).map((p) => p.path);
+  assertEqual(paths.join(" "), "/slides/2/bad /slides/9/id", "in order");
+});
+
+test("a URL the parser cannot resolve is a problem named by its place", () => {
+  const body = { format: "clack-manifest/1", slides: [{ id: "a", alt: "", width: 1, height: 1, sources: [{ url: "https://a:99999/x.jpg", width: 1 }] }] };
+  let e: unknown = null;
+  try {
+    parse(JSON.stringify(body), "https://example.com/");
+  } catch (err) {
+    e = err;
+  }
+  assert(e instanceof ManifestError, `a ManifestError, not ${String(e)}`);
+  assertEqual((e as ManifestError).problems[0]!.path, "/slides/0/sources/0/url", "its place");
+});
+
+test("a manifest with a byte-order mark is refused, as the tools refuse it", async () => {
+  assert((await refusal(echo(`﻿${manifestOf(1)}`))).includes("SyntaxError"), "refused as not JSON");
+});
+
+async function manifestFetches(): Promise<number> {
+  return (await imageLog()).filter((e) => e.startsWith("manifest ")).length;
+}
+
+test("a manifest is fetched once: not twice when Clack loads late, nor again when the show moves", async () => {
+  await resetImageLog();
+  const inert = document.implementation.createHTMLDocument("");
+  const early = inert.createElement(tagName);
+  early.setAttribute("src", echo(manifestOf(2)));
+  const s = document.adoptNode(early) as ClackShow;
+  s.style.setProperty("--clack-transition-duration", "40ms");
+  fixtureEl().append(s);
+  await waitFor(() => s.count === 2, "the manifest");
+  await settledOn(s, "1 of 2");
+  fixtureEl().append(s); // moved to another place in the page
+  await settledOn(s, "1 of 2");
+  assertEqual(await manifestFetches(), 1, "fetches");
+});
+
+test("after a manifest fails, the notice goes once the page moves on", async () => {
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    const s = show({ src: echo("{}", { status: 500 }) }, 1);
+    const notice = s.shadowRoot!.querySelector<HTMLElement>(".notice")!;
+    await waitFor(() => !notice.hidden, "the notice");
+    s.removeAttribute("src");
+    assertEqual(notice.hidden, true, "gone, back to the markup");
+    s.setAttribute("src", echo("{}", { status: 500 }));
+    await waitFor(() => !notice.hidden, "the notice again");
+    s.slides = [{ id: "s", alt: "", width: 300, height: 200, sources: [{ url: img(300, 200), width: 300 }] }];
+    assertEqual(notice.hidden, true, "gone, slides from script");
+  } finally {
+    console.error = quiet;
+  }
+});
+
+test("a src that fails after another loaded leaves the markup, not the old manifest", async () => {
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    const s = show({ src: echo(manifestOf(3)) }, 1);
+    await waitFor(() => s.count === 3, "the first manifest");
+    s.setAttribute("src", echo("{}", { status: 404 }));
+    await waitFor(() => s.count === 1, "the markup's one slide");
+    assertEqual(s.shadowRoot!.querySelector(".show")!.hasAttribute("lang"), false, "nor the old manifest's language");
+  } finally {
+    console.error = quiet;
+  }
 });

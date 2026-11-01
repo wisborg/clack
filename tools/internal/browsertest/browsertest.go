@@ -65,8 +65,9 @@ func Serve(files map[string][]byte) (*Server, error) {
 		return nil, err
 	}
 	mux := http.NewServeMux()
-	(&testImages{}).register(mux)
-	registerEcho(mux)
+	images := &testImages{}
+	images.register(mux)
+	registerEcho(mux, images)
 	return serveOn(l, mux, files)
 }
 
@@ -143,8 +144,11 @@ func contentType(path string) string {
 
 // Report is what the test page hands back.
 type Report struct {
-	UserAgent string   `json:"userAgent"`
-	Results   []Result `json:"results"`
+	UserAgent string `json:"userAgent"`
+	// Hidden says the page was hidden during the run, when the browser
+	// throttles timers and stops animations: see test/harness.ts.
+	Hidden  bool     `json:"hidden"`
+	Results []Result `json:"results"`
 	// Error is set when the test run itself failed, not one test.
 	Error string `json:"error"`
 }

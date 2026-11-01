@@ -2,6 +2,7 @@ package browsertest
 
 import (
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -19,8 +20,14 @@ import (
 //	    body is streamed without saying its size.
 //	GET /redirect?to=URL
 //	    a 302 to URL, which must be a path on this server.
-func registerEcho(mux *http.ServeMux) {
+//
+// Each /echo request is added to the image log (see testImages) as
+// "manifest <path and query>", so a test can count the fetches.
+func registerEcho(mux *http.ServeMux, log *testImages) {
 	mux.HandleFunc("GET /echo/{path...}", func(w http.ResponseWriter, r *http.Request) {
+		log.mu.Lock()
+		log.log = append(log.log, "manifest "+r.URL.RequestURI())
+		log.mu.Unlock()
 		q := r.URL.Query()
 		if d := q.Get("delay"); d != "" {
 			ms, err := strconv.Atoi(d)
@@ -76,7 +83,11 @@ func registerEcho(mux *http.ServeMux) {
 	})
 	mux.HandleFunc("GET /redirect", func(w http.ResponseWriter, r *http.Request) {
 		to := r.URL.Query().Get("to")
-		if !strings.HasPrefix(to, "/") || strings.HasPrefix(to, "//") {
+		// A path on this server, and nothing a browser might read as another
+		// host: no "//", and no backslash, which browsers take for "/".
+		u, err := url.Parse(to)
+		if err != nil || u.Scheme != "" || u.Host != "" || !strings.HasPrefix(to, "/") ||
+			strings.HasPrefix(to, "//") || strings.ContainsAny(to, "\\\t\r\n") {
 			http.Error(w, "to must be a path on this server", http.StatusBadRequest)
 			return
 		}

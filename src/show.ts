@@ -97,6 +97,15 @@ export class ClackShow extends HTMLElement {
   #showTitle = "";
   /** Cancels the manifest being fetched, if one is. */
   #abort: AbortController | null = null;
+  /** The URL of the manifest whose slides are shown, or "": a reconnect does not fetch it again. */
+  #loaded = "";
+  /**
+   * Set between connectedCallback and disconnectedCallback. isConnected is
+   * not enough: when Clack loads after the page, an attribute's callback
+   * runs before connectedCallback, already connected, and would start a
+   * second fetch of the manifest that connectedCallback starts anyway.
+   */
+  #connected = false;
   readonly #photos = new Photos();
   /** The slide asked for, which may still be loading. */
   #target = -1;
@@ -179,7 +188,18 @@ export class ClackShow extends HTMLElement {
     return b;
   }
 
+  /**
+   * A page hidden in the middle of a fade may not run it on (Safari stops
+   * animations in a hidden page): it is finished at once, so the old slide
+   * is not left behind until the page is shown again.
+   */
+  readonly #onVisibility = (): void => {
+    if (document.visibilityState === "hidden") this.#finishTransitions();
+  };
+
   connectedCallback(): void {
+    this.#connected = true;
+    document.addEventListener("visibilitychange", this.#onVisibility);
     this.#resize.observe(this.#stage);
     this.#stopSwipe = listen(this.#stage, {
       move: (dx) => this.#drag(dx),
@@ -201,12 +221,15 @@ export class ClackShow extends HTMLElement {
         }
       }
     }
-    if (!this.#scripted) {
+    // Moved in the page with its manifest already shown: nothing to fetch.
+    if (!this.#scripted && !(this.#loaded && this.#loaded === this.#srcURL())) {
       this.#source();
     }
   }
 
   disconnectedCallback(): void {
+    this.#connected = false;
+    document.removeEventListener("visibilitychange", this.#onVisibility);
     this.#abort?.abort();
     this.#abort = null;
     this.#resize.disconnect();
@@ -222,7 +245,7 @@ export class ClackShow extends HTMLElement {
         this.#internals.ariaLabel = value || this.#showTitle || text.show;
         break;
       case "src":
-        if (this.isConnected && !this.#scripted) this.#source();
+        if (this.#connected && !this.#scripted) this.#source();
         break;
       case "loop":
         this.#updateControls();
@@ -252,13 +275,15 @@ export class ClackShow extends HTMLElement {
   set slides(input: readonly (SlideInput | Slide)[] | null) {
     if (input === null) {
       this.#scripted = false;
-      if (this.isConnected) this.#source();
+      if (this.#connected) this.#source();
       return;
     }
     const slides = fromInput(input);
     this.#scripted = true;
     this.#abort?.abort();
     this.#abort = null;
+    this.#loaded = "";
+    this.#notice.hidden = true;
     this.#mutations.disconnect();
     this.#setTitle("", "");
     this.#setSlides(slides);
@@ -316,29 +341,28 @@ export class ClackShow extends HTMLElement {
   #source(): void {
     this.#abort?.abort();
     this.#abort = null;
+    this.#notice.hidden = true;
     const src = this.getAttribute("src");
     if (!src) {
-      this.#setTitle("", "");
-      this.#mutations.observe(this, { childList: true, subtree: true, attributes: true, characterData: true });
-      this.#readMarkup();
+      this.#markup();
       return;
     }
     this.#mutations.disconnect();
+    // Until the manifest arrives, what is shown stays: the markup's slides
+    // at first, as without script; a previous manifest's, when src changes.
     if (this.#slides.length === 0) this.#readMarkup();
-    const abort = new AbortController();
-    this.#abort = abort;
-    let url: string;
-    try {
-      url = new URL(src, document.baseURI).href;
-    } catch {
+    const url = this.#srcURL();
+    if (!url) {
       this.#manifestFailed(new Error(`Clack: src is not a URL: ${src}`));
       return;
     }
+    const abort = new AbortController();
+    this.#abort = abort;
     load(url, abort.signal).then(
       (m) => {
         if (abort.signal.aborted) return;
         this.#abort = null;
-        this.#notice.hidden = true;
+        this.#loaded = url;
         this.#setTitle(m.title, m.lang);
         this.#setSlides(m.slides);
       },
@@ -350,8 +374,33 @@ export class ClackShow extends HTMLElement {
     );
   }
 
+  /** src, resolved against the page, or "" if it is not a URL. */
+  #srcURL(): string {
+    const src = this.getAttribute("src");
+    if (!src) return "";
+    try {
+      return new URL(src, document.baseURI).href;
+    } catch {
+      return "";
+    }
+  }
+
+  /** Back to the markup's slides, following its changes. */
+  #markup(): void {
+    this.#loaded = "";
+    this.#setTitle("", "");
+    this.#mutations.observe(this, { childList: true, subtree: true, attributes: true, characterData: true });
+    this.#readMarkup();
+  }
+
+  /**
+   * The manifest could not be had: the markup's slides are shown, whatever
+   * was shown before (a previous manifest's would be the wrong photos), and
+   * the show says so.
+   */
   #manifestFailed(e: unknown): void {
     console.error(e);
+    this.#markup();
     this.#notice.textContent = text.noManifest;
     this.#notice.hidden = false;
     this.dispatchEvent(new Event("error"));

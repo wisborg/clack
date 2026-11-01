@@ -642,3 +642,22 @@ test("the slides read from a show can be given back to it", async () => {
   }
   assert(threw, "a URL in a srcset that is not http(s) is refused");
 });
+
+test("a page hidden in the middle of a fade finishes it at once", async () => {
+  const show = makeShow(three);
+  show.style.setProperty("--clack-transition-duration", "3s");
+  await settledOn(show, "1 of 3");
+  if (document.visibilityState === "hidden") skip("this engine's window is hidden, so nothing fades");
+  await show.next();
+  assertEqual(figures(show).length, 2, "fading");
+  // The event as the browser sends it; the page's own state cannot be set.
+  const real = Object.getOwnPropertyDescriptor(Document.prototype, "visibilityState")!;
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+  try {
+    document.dispatchEvent(new Event("visibilitychange"));
+  } finally {
+    delete (document as unknown as Record<string, unknown>)["visibilityState"];
+    void real;
+  }
+  assertEqual(figures(show).length, 1, "finished at once");
+});
