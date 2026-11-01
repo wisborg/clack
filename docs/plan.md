@@ -271,7 +271,12 @@ show returns focus to the same thumbnail.
 
 - Evergreen browsers: current Safari (macOS and iOS), Chrome/Edge, Firefox, and the version
   before each. iOS Safari is the most likely to be wrong and gets tested on a device.
-- A size budget, measured in CI: JS + CSS under 25 KB compressed.
+- A size budget, measured in CI: JS + CSS under 32 KB compressed. It was 25 KB until
+  2026-11-01: with the core and the manifest loader built (13.2 KB), the measured cost of
+  the rest came to 28–29 KB. The choice was then between raising the budget, loading the
+  rarer parts (the full-size view, the index) from further files, or cutting features;
+  Clack staying one file mattered more than the number, which was set before anything was
+  measured. Near the end of phase 1 the whole of `src/` is reviewed for size.
 - Video slides (for fitdash videos, later) are kept possible by modelling a slide as a media
   item with a type, not as an `<img>`.
 
@@ -388,6 +393,8 @@ side with the version before.
 - Title slides: a slide type that introduces a part of a show (a day of a trip), for
   Shoebox's slideshows of an album with its sub-albums.
 - Accessibility pass, strict-CSP test page, documentation, a demo page.
+- A review of all of `src/` for size, now that it is all there: what each part costs, and
+  what can be made smaller without making it worse.
 
 **2 — Polish**
 - Ken Burns, thumbnail strip, URL fragment sync.

@@ -41,7 +41,10 @@ import (
 
 // sizeBudget is the most the minified bundle may weigh, gzipped. The plan
 // sets it; the build enforces it so that growth is a decision, not a drift.
-const sizeBudget = 25 << 10
+// Raised from 25 KB to 32 KB on 2026-11-01, with the user, when the
+// measured cost of the features still to come showed 25 would not hold
+// them in one file (docs/plan.md, "Targets").
+const sizeBudget = 32 << 10
 
 const banner = "/*! Clack | Apache-2.0 | https://github.com/wisborg/clack */"
 
