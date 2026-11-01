@@ -1,0 +1,113 @@
+# Manifests
+
+A manifest is a JSON file listing the slides of one show: which photos, in what order, at what
+sizes, and whatever is known about each that the page wants shown. The format is
+**`clack-manifest/1`**, defined by
+[`schema/manifest-1.schema.json`](../schema/manifest-1.schema.json). Clack fetches it from
+`<clack-show src="…">`, or is given the same structure from JavaScript.
+
+*This is a draft (phase 0). It may change until the first release; after that, format 1 only
+grows in ways old manifests keep working with, and anything else is format 2.*
+
+## Content, not presentation
+
+A manifest says what the photos are. How the show behaves — auto-play and its interval,
+whether metadata is shown, the theme, the size — is the page's choice, made on the element.
+The same manifest can feed a small embedded show and a full-window one.
+
+Clack shows what the manifest holds, and **reads nothing from the image files**. What a
+visitor can learn about a photo is exactly what the host put in the manifest it served them,
+which is how Shoebox decides who sees where and when a photo was taken: it builds each
+visitor's manifest from what they are allowed to see.
+
+## The smallest manifest
+
+```json
+{
+  "format": "clack-manifest/1",
+  "slides": [
+    {
+      "id": "1",
+      "alt": "Low tide under a grey sky",
+      "width": 3840,
+      "height": 2560,
+      "sources": [{ "url": "low-tide-1280.jpg", "width": 1280 }]
+    }
+  ]
+}
+```
+
+[`schema/examples/manifest.json`](../schema/examples/manifest.json) uses every field.
+
+## The show
+
+| property | |
+|---|---|
+| `format` | `"clack-manifest/1"`, required. A format Clack does not know is refused, never guessed at. |
+| `title` | the show's title, for the header |
+| `description` | plain text; line breaks are kept |
+| `lang` | the language of the manifest's text, such as `en-AU`, so screen readers pronounce it right |
+| `slides` | the slides, in order; at most 20,000 |
+
+## A slide
+
+| property | |
+|---|---|
+| `id` | required: letters, digits, `-` and `_`, unique in the manifest and stable, so a link to a slide keeps working |
+| `type` | `image`, the default and, for now, the only one; video will be added beside it |
+| `alt` | required: what the photo shows, for anyone who cannot see it. `""` marks a photo that adds nothing the caption does not already say. |
+| `width`, `height` | required: the photo's size in pixels as it is shown (after rotation), so its space is kept before it loads and the page never jumps |
+| `sources` | required: the photo at one to sixteen sizes, each `{ url, width, height?, type? }`. The browser fetches the one that fits the screen and its pixel density. Give `type` (`image/avif`, `image/webp`, `image/jpeg`, `image/png`, `image/jxl`) when offering more than one format; a browser skips types it cannot show. |
+| `full` | the full-size file, `{ url, width, height?, type? }`, fetched only when the full-size view opens. Without it, that view uses the largest source. |
+| `page` | the photo's own page, if it has one |
+| `placeholder` | `{ thumbhash, color }`: a ThumbHash (base64, about 25 bytes) painted as a blurred impression of the photo while it loads, and its average colour for the moment before that |
+| `focus` | `{ x, y }` from 0 to 1: the point kept in view when the photo is cropped to fill a frame |
+| `duration` | seconds this slide stays during auto-play, in place of the show's interval |
+| `description`, `camera`, `time`, `location`, `technical` | metadata, by class (below) |
+| `extra` | further facts for the details panel, as `[{ label, value }]`, in order |
+
+Text is always plain text: Clack sets it with `textContent`, so a caption can never become
+markup, whatever it contains.
+
+### URLs
+
+Every URL is `http://` or `https://`, or relative — resolved against the manifest's own URL,
+or the page's when the slides come from JavaScript. Every other scheme is refused: no
+`data:`, `blob:` or `javascript:`. The schema says so, and Clack checks each resolved URL
+again before using it. Clack requests these URLs and nothing else.
+
+## Metadata, by class
+
+Metadata comes in the same classes Shoebox grants access by, so a host includes or leaves out
+whole classes. Each is optional, and so is everything in it. Clack formats numbers and dates
+for the visitor's locale.
+
+| class | properties |
+|---|---|
+| `description` | `title`, `caption`, `credit`, `keywords` |
+| `camera` | `make`, `model`, `lens`, `focalLength` and `focalLength35` (mm), `aperture` (the f-number: `2.8` is ƒ/2.8), `exposure` (seconds: `0.004` is 1/250 s), `exposureBias` (stops), `iso`, `flash` |
+| `time` | `taken`: local time where the photo was taken, as precisely as it is known (below) |
+| `location` | `latitude`, `longitude`, `altitude` (m), `direction` (degrees from true north), `precision` (`exact` or `approximate`), `place` (`name`, `locality`, `region`, `country`) |
+| `technical` | `width` and `height` of the original, `colorProfile`, `fileSize` (bytes), `format` |
+
+`time.taken` is written `1999`, `1999-07`, `1999-07-14`, `1999-07-14T18:05`, with seconds
+and an offset from UTC (`+10:00`, `Z`) when they are known. It is shown as the local time it
+was where the photo was taken, not converted to the visitor's time zone: a sunset photo says
+evening wherever it is seen. A scanned print from 1999 may only know its year, and says so.
+
+`location` is the most sensitive class. `precision: "approximate"` says the coordinates were
+rounded on purpose, and Clack shows them as such. A latitude needs a longitude, and the other
+way round.
+
+## Extensions
+
+Properties whose names start with `x-`, on the manifest or on a slide, are ignored by Clack
+and kept for other programs. Any other property Clack does not know is an error, named in the
+message — in particular, metadata outside the five classes is refused rather than shown or
+dropped silently.
+
+## Checks beyond the schema
+
+The schema cannot say everything; Clack also refuses a manifest whose slide ids repeat, and
+one with two sources of one slide at the same width and type. The tools check the examples
+the same way (`tools/internal/formats`).

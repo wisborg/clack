@@ -3,6 +3,7 @@
 import { run, type Report } from "./harness";
 import "./csp.test";
 import "./element.test";
+import "./schemas.test";
 
 declare global {
   interface Window {

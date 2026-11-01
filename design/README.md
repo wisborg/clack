@@ -16,7 +16,11 @@ Darkroom is dark by nature and ignores it.
 The pages are served under the same strict Content-Security-Policy as the tests, so nothing
 here relies on inline style or script that Clack itself could not use. `mockups.css` holds
 each theme as the values its theme file will carry, written as CSS custom properties, so the
-mock-ups double as the first draft of how theme tokens map onto CSS.
+mock-ups double as the first draft of how theme tokens map onto CSS. The theme files
+themselves are in `themes/`. When the contrast check was written, three of the approved
+colours fell just short of WCAG AA and were darkened slightly, here and there: Mat's
+secondary text on its wall, the museum label's credit line, and the contact sheet's
+secondary text.
 
 ## The photographs
 

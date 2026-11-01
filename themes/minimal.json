@@ -1,0 +1,20 @@
+{
+  "$schema": "../schema/theme-1.schema.json",
+  "format": "clack-theme/1",
+  "name": "Minimal",
+  "description": "Edge to edge, with controls that float over the photo and appear when wanted; sans-serif.",
+  "colors": {
+    "light": { "canvas": "#ffffff", "surface": "#ffffff" },
+    "dark": { "canvas": "#000000", "surface": "#161616" }
+  },
+  "layout": {
+    "type": "full-bleed",
+    "padding": { "inline": "0", "top": "0", "bottom": "0" },
+    "shadow": "none"
+  },
+  "caption": { "font": "sans", "size": "13.5px", "weight": 500, "credit": false },
+  "header": { "visible": false },
+  "controls": { "style": "floating", "size": "34px", "reveal": "on-activity" },
+  "progress": { "position": "edge" },
+  "transition": { "type": "crossfade", "duration": "500ms" }
+}

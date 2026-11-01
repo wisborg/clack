@@ -1,0 +1,47 @@
+{
+  "$comment": "Strings each schema pattern must accept and refuse, checked in Go (RE2) and in every browser (ECMAScript), so the two read the patterns alike. Keys are a schema file and a JSON Pointer to the schema holding the pattern.",
+  "theme-1.schema.json#/$defs/color": {
+    "match": ["#fff", "#ffff", "#1d1d1f", "#1D1D1F80", "rgb(0 0 0)", "rgb(255 255 255 / 0.1)", "rgb(0 128 255 / 50%)", "rgb(0 0 0 / 1)", "rgb( 0 0 0 )"],
+    "nomatch": ["red", "#ff", "#fffff", "rgb(0, 0, 0)", "rgb(256 0 0)", "rgb(0 0 0 / 2)", "rgb(0 0 0 / 101%)", "rgba(0 0 0 / 1)", "url(x)", "#fff\n", "var(--x)", "#fff;", " #fff"]
+  },
+  "theme-1.schema.json#/$defs/length": {
+    "match": ["0", "24px", "6.5vmin", ".5rem", "100%", "3.4cqi", "9999px"],
+    "nomatch": ["-4px", "8", "0px ", "1e3px", "calc(1px)", "10000px", "1.2345px", "4 px", "4PX"]
+  },
+  "theme-1.schema.json#/$defs/fontSize": {
+    "match": ["8px", "17px", "13.5px", "47.99px", "48px", "0.95rem", "1em", "3rem", ".8em"],
+    "nomatch": ["7px", "48.5px", "49px", "200px", "3.5rem", "4em", "17", "17pt"]
+  },
+  "theme-1.schema.json#/$defs/tracking": {
+    "match": ["0", "0.01em", ".06em", "0.3em", "-0.05em", "-0.049em", "0.299em"],
+    "nomatch": ["0.31em", "0.4em", "-0.051em", "-0.06em", "1em", "0.01px", "0.01"]
+  },
+  "theme-1.schema.json#/$defs/duration": {
+    "match": ["0", "700ms", "3000ms", "2999ms", "1.2s", "3s", "3.000s", "0.5s"],
+    "nomatch": ["3001ms", "10s", "3.1s", "700", "-1s", "1min"]
+  },
+  "manifest-1.schema.json#/$defs/url": {
+    "match": ["a.jpg", "photos/a.jpg", "./a.jpg", "../a.jpg", "/a.jpg", "/", "//cdn.example.com/a.jpg", "https://example.com/a.jpg", "http://example.com", "?v=2", "#x", "a.jpg?x=1:2", "photos/a:b.jpg"],
+    "nomatch": ["javascript:alert(1)", "JavaScript:alert(1)", "data:image/png;base64,AA", "blob:https://example.com/1", "x:y.jpg", "https://", "https:///x", "a b.jpg", "", " a.jpg", "mailto:a@example.com", "HTTPS://example.com", "a.jpg\n", "file:///etc/passwd", "//"]
+  },
+  "manifest-1.schema.json#/$defs/lang": {
+    "match": ["en", "en-AU", "da", "zh-Hant-TW", "sr-Latn-RS"],
+    "nomatch": ["e", "english", "en_AU", "en-", "-en", "en AU"]
+  },
+  "manifest-1.schema.json#/$defs/slide/properties/id": {
+    "match": ["1", "low-tide", "IMG_0042", "a-b_c"],
+    "nomatch": ["", "a/b", "a b", "é", "a.b", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
+  },
+  "manifest-1.schema.json#/$defs/slide/properties/placeholder/properties/thumbhash": {
+    "match": ["3OcRJYB4d3h/iIeHeEh3eIhw+j3A", "abcdef", "abcdef=="],
+    "nomatch": ["abc", "abc-def_", "abcdef===", "abc def"]
+  },
+  "manifest-1.schema.json#/$defs/slide/properties/placeholder/properties/color": {
+    "match": ["#8a8d8c", "#FFFFFF"],
+    "nomatch": ["#fff", "#8a8d8c80", "8a8d8c", "rgb(0 0 0)", "#8a8d8g"]
+  },
+  "manifest-1.schema.json#/$defs/timeClass/properties/taken": {
+    "match": ["1999", "1999-07", "1999-07-14", "1999-07-14T18:05", "2014-06-14T18:42:10+01:00", "2014-06-14T18:42:10.123Z", "2014-06-14T18:42-05:30"],
+    "nomatch": ["99", "1999-13", "1999-00", "1999-07-32", "1999-07-14 18:05", "1999-07-14T24:00", "1999-07-14T18", "June 2014", "1999-07-14T18:05:60", "1999-07-14T18:05+1"]
+  }
+}

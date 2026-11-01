@@ -146,8 +146,8 @@ Three ways in, from least to most code, all of them the same component:
 - **Progressive enhancement:** the light-DOM markup is meaningful by itself (images with alt
   text and captions), so search engines, readers with script disabled, and the moment before
   the script loads all see photos, not an empty box.
-- **The manifest** is a JSON format with a published schema — the same format Shoebox produces —
-  so Clack is usable with any backend.
+- **The manifest** (`clack-manifest/1`, `docs/manifest.md`) is a JSON format with a published
+  schema — the same format Shoebox produces — so Clack is usable with any backend.
 - Published as one file plus a source map (fonts, when a theme bundles one, beside it), with
   SRI hashes in each release, so a site can copy the files and serve them itself. An npm package can come later; it is not the primary
   channel.
@@ -241,30 +241,32 @@ no metadata to read.
 
 ### Format
 
-A theme is a **JSON file of typed design tokens** with a published JSON Schema:
+A theme is a **JSON file of typed design tokens**, format `clack-theme/1`, with a published
+JSON Schema (`schema/theme-1.schema.json`; every token is described in `docs/themes.md`). Mat,
+abridged from `themes/mat.json`:
 
-```jsonc
+```json
 {
-  "$schema": "https://…/theme.schema.json",
-  "name": "Gallery",
-  "version": 1,
-  "extends": "base",
-  "schemes": {
-    "light": { "canvas": "#f4f3f1", "frame": "#ffffff", "text": "#1d1d1f", "muted": "#6e6e73", "accent": "#1d1d1f" },
-    "dark":  { "canvas": "#111111", "frame": "#1a1a1a", "text": "#f5f5f7", "muted": "#a1a1a6", "accent": "#f5f5f7" }
+  "$schema": "https://raw.githubusercontent.com/wisborg/clack/main/schema/theme-1.schema.json",
+  "format": "clack-theme/1",
+  "name": "Mat",
+  "colors": {
+    "light": { "canvas": "#e4e3df", "muted": "#636368", "mat": "#f8f7f3", "frame": "#1f1d1b" },
+    "dark":  { "canvas": "#2a2a29", "mat": "#f8f7f3", "frame": "#0f0f0f" }
   },
-  "presentation": {
-    "layout": "matted",
-    "mat": { "width": "6%", "colour": "frame", "bevel": true },
-    "shadow": "soft",
-    "caption": { "position": "below", "font": "serif", "size": "0.95rem", "align": "center" },
-    "controls": { "style": "minimal", "reveal": "on-hover" },
-    "transition": { "type": "crossfade", "duration": "700ms" }
+  "layout": {
+    "type": "matted",
+    "padding": { "inline": { "min": "16px", "ideal": "4.4cqi", "max": "64px" } },
+    "shadow": "none",
+    "mat": { "width": { "min": "22px", "ideal": "6.5vmin", "max": "80px" }, "bevel": true }
   },
-  "typography": { "serif": "bundled:source-serif", "sans": "system" }
+  "caption": { "size": "15px", "style": "italic", "card": true }
 }
 ```
 
+- **Every theme extends another**, `base` unless it names a built-in one, and sets only what
+  it changes: objects merge key by key. `base` sets every token, so a theme of three lines is
+  complete. Only built-in themes can be extended, so loading a theme never fetches another.
 - **Tokens, not CSS.** Every value has a type (colour, length, duration, one of a fixed set of
   layouts and styles) and is validated before use, then compiled into CSS custom properties.
   A theme from a stranger can therefore do nothing but change how Clack looks: it cannot
@@ -276,8 +278,8 @@ A theme is a **JSON file of typed design tokens** with a published JSON Schema:
   one. A new layout is a code change; a new theme isn't.
 - **Light and dark schemes** in every theme; the theme says whether it follows the visitor's
   `prefers-color-scheme` or forces one.
-- **JSON** because browsers and Go both parse it with no dependency; comments (`//`) are allowed
-  and stripped by our own loader so hand-written themes can be annotated.
+- **JSON** because browsers and Go both parse it with no dependency; comments (`//` and
+  `/* */`) are allowed and stripped by our own loader so hand-written themes can be annotated.
 - **Fonts are bundled or system**, never fetched from a font service. Bundled fonts are
   open-licensed (OFL), self-hosted, subset, and listed in `NOTICE`.
 - **An escape hatch, later and only for site admins:** a theme may ship an extra stylesheet,
@@ -323,7 +325,9 @@ side with the version before.
 - Design: the visual language and the five themes as static mock-ups with real photographs,
   reviewed on phone, laptop and large screen. *(done: mock-ups in `design/`, with
   public-domain photographs; approved 2026-11-01)*
-- Draft the theme and manifest schemas.
+- Draft the theme and manifest schemas. *(drafted: `schema/`, the built-in themes in `themes/`,
+  `docs/themes.md` and `docs/manifest.md`; checked by our own validator for the subset of JSON
+  Schema they use, with the contrast of every built-in theme checked in each scheme)*
 
 **1 — First release**
 - Core: slides, manual navigation (controls, keys, swipe), responsive images,

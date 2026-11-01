@@ -1,0 +1,28 @@
+// A theme written by hand, with comments: Clack's loader allows // and /* */
+// comments outside strings, and nothing else beyond plain JSON.
+{
+  "$schema": "../theme-1.schema.json",
+  "format": "clack-theme/1",
+  "name": "Harbour",
+  "description": "Gallery's layout on a cooler wall, with the caption on a card.",
+  "author": "An example",
+
+  // Start from Gallery; everything not set here is Gallery's.
+  "extends": "gallery",
+
+  "colors": {
+    "light": {
+      "canvas": "#eef0f1", /* a cool grey: still neutral enough behind photos */
+      "muted": "#5f6368"
+    },
+    "dark": {
+      "canvas": "#16191b",
+      "muted": "#a0a5aa"
+    }
+  },
+
+  "caption": { "card": true, "style": "italic" },
+
+  // Something for another program; Clack ignores x- properties.
+  "x-site": { "featured": true }
+}

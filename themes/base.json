@@ -1,0 +1,86 @@
+{
+  "$schema": "../schema/theme-1.schema.json",
+  "format": "clack-theme/1",
+  "name": "Base",
+  "description": "What every theme starts from: every token set, quietly. Not offered as a theme by itself.",
+  "scheme": "auto",
+  "colors": {
+    "light": {
+      "canvas": "#f3f3f1",
+      "surface": "#ffffff",
+      "text": "#1d1d1f",
+      "muted": "#6e6e73",
+      "hairline": "rgb(0 0 0 / 0.1)",
+      "accent": "#1d1d1f",
+      "control": "rgb(0 0 0 / 0.55)",
+      "controlActive": "rgb(0 0 0 / 0.9)",
+      "mat": "#f8f7f3",
+      "frame": "#1f1d1b",
+      "label": "#f7f6f2",
+      "labelText": "#1d1d1f",
+      "labelMuted": "#6b6b70",
+      "film": "#121212",
+      "edgePrint": "#e2a03f",
+      "mark": "#d4352b"
+    },
+    "dark": {
+      "canvas": "#1b1b1b",
+      "surface": "#232323",
+      "text": "#ececec",
+      "muted": "#9a9a9d",
+      "hairline": "rgb(255 255 255 / 0.1)",
+      "accent": "#ececec",
+      "control": "rgb(255 255 255 / 0.6)",
+      "controlActive": "#ffffff",
+      "mat": "#f8f7f3",
+      "frame": "#0f0f0f",
+      "label": "#f1efe9",
+      "labelText": "#1d1d1f",
+      "labelMuted": "#6b6b70",
+      "film": "#050505",
+      "edgePrint": "#e2a03f",
+      "mark": "#d4352b"
+    }
+  },
+  "layout": {
+    "type": "gallery",
+    "padding": {
+      "inline": { "min": "16px", "ideal": "3.4cqi", "max": "48px" },
+      "top": { "min": "16px", "ideal": "2cqi", "max": "28px" },
+      "bottom": { "min": "12px", "ideal": "1.4cqi", "max": "20px" }
+    },
+    "shadow": "soft",
+    "mat": { "width": { "min": "22px", "ideal": "6.5vmin", "max": "80px" }, "bevel": true },
+    "frame": { "width": "9px" }
+  },
+  "caption": {
+    "font": "serif",
+    "size": "17px",
+    "weight": 400,
+    "style": "normal",
+    "tracking": "0",
+    "case": "none",
+    "card": false,
+    "credit": true
+  },
+  "header": {
+    "visible": true,
+    "font": "serif",
+    "size": "15px",
+    "weight": 400,
+    "style": "normal",
+    "tracking": "0.01em",
+    "case": "none"
+  },
+  "controls": { "style": "plain", "size": "40px", "reveal": "always" },
+  "progress": { "position": "below" },
+  "transition": { "type": "crossfade", "duration": "700ms" },
+  "details": { "position": "side" },
+  "index": {
+    "style": "justified",
+    "rowHeight": { "min": "120px", "ideal": "18cqi", "max": "260px" },
+    "frameWidth": { "min": "140px", "ideal": "18cqi", "max": "240px" },
+    "gap": "8px"
+  },
+  "fonts": { "serif": "system", "sans": "system", "mono": "system" }
+}

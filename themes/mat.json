@@ -1,0 +1,34 @@
+{
+  "$schema": "../schema/theme-1.schema.json",
+  "format": "clack-theme/1",
+  "name": "Mat",
+  "description": "Each photo in a mat board with a fine bevel, framed on a wall, with a museum label for its caption.",
+  "colors": {
+    "light": {
+      "canvas": "#e4e3df",
+      "surface": "#f7f6f2",
+      "muted": "#636368",
+      "mat": "#f8f7f3",
+      "frame": "#1f1d1b",
+      "label": "#f7f6f2"
+    },
+    "dark": {
+      "canvas": "#2a2a29",
+      "surface": "#232323",
+      "mat": "#f8f7f3",
+      "frame": "#0f0f0f",
+      "label": "#f1efe9"
+    }
+  },
+  "layout": {
+    "type": "matted",
+    "padding": {
+      "inline": { "min": "16px", "ideal": "4.4cqi", "max": "64px" },
+      "top": { "min": "16px", "ideal": "2.5cqi", "max": "36px" }
+    },
+    "shadow": "none",
+    "mat": { "width": { "min": "22px", "ideal": "6.5vmin", "max": "80px" }, "bevel": true },
+    "frame": { "width": "9px" }
+  },
+  "caption": { "size": "15px", "style": "italic", "card": true }
+}

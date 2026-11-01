@@ -432,6 +432,7 @@ html:root[data-theme="darkroom"] {
   --frame-width: 9px;
   --canvas: light-dark(#e4e3df, #2a2a29);
   --surface: light-dark(#f7f6f2, #232323);
+  --muted: light-dark(#636368, #9a9a9d);
   --photo-shadow: none;
   --mat: #f8f7f3;
   --label: light-dark(#f7f6f2, #f1efe9);
@@ -471,7 +472,7 @@ html:root[data-theme="darkroom"] {
 /* The museum label is a printed card, whatever the wall. */
 [data-theme="mat"] .caption {
   --text: #1d1d1f;
-  --muted: #6e6e73;
+  --muted: #6b6b70;
   justify-self: start;
   padding: 10px 14px 11px;
   background: var(--label);
@@ -586,7 +587,7 @@ html:root[data-theme="darkroom"] {
 [data-theme="contact-sheet"] {
   --canvas: light-dark(#f4f2ec, #1d1c1a);
   --text: light-dark(#1c1b19, #ecebe7);
-  --muted: light-dark(#74716a, #9b988f);
+  --muted: light-dark(#706d66, #9b988f);
   --film: light-dark(#121212, #050505);
   --edge-print: #e2a03f;
   --grease: #d4352b;

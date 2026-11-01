@@ -1,0 +1,12 @@
+{
+  "format": "clack-manifest/1",
+  "slides": [
+    {
+      "id": "1",
+      "alt": "",
+      "width": 1600,
+      "height": 1067,
+      "sources": [{ "url": "a.jpg", "width": 1600 }]
+    }
+  ]
+}

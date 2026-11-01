@@ -1,0 +1,69 @@
+{
+  "$schema": "../manifest-1.schema.json",
+  "format": "clack-manifest/1",
+  "title": "Coastlines",
+  "description": "Summer along the coast.\nThe photographs are public domain; the details are invented.",
+  "lang": "en",
+  "slides": [
+    {
+      "id": "low-tide",
+      "type": "image",
+      "alt": "Low tide under a grey sky, the sand ribbed by the retreating water",
+      "width": 3840,
+      "height": 2560,
+      "sources": [
+        { "url": "photos/02-640.avif", "width": 640, "type": "image/avif" },
+        { "url": "photos/02-1280.avif", "width": 1280, "type": "image/avif" },
+        { "url": "photos/02-640.jpg", "width": 640, "type": "image/jpeg" },
+        { "url": "photos/02-1280.jpg", "width": 1280, "type": "image/jpeg" }
+      ],
+      "full": { "url": "photos/02.jpg", "width": 3840, "height": 2560, "type": "image/jpeg" },
+      "page": "/albums/coastlines/low-tide",
+      "placeholder": { "thumbhash": "3OcRJYB4d3h/iIeHeEh3eIhw+j3A", "color": "#8a8d8c" },
+      "focus": { "x": 0.5, "y": 0.62 },
+      "duration": 8,
+      "description": {
+        "title": "Low tide",
+        "caption": "The river empties twice a day; this was the evening one.",
+        "credit": "Public domain, from Wikimedia Commons",
+        "keywords": ["river", "tide", "evening"]
+      },
+      "camera": {
+        "make": "Fujifilm",
+        "model": "X-T5",
+        "lens": "XF 16-55mm F2.8",
+        "focalLength": 23,
+        "focalLength35": 35,
+        "aperture": 8,
+        "exposure": 0.004,
+        "exposureBias": -0.33,
+        "iso": 160,
+        "flash": false
+      },
+      "time": { "taken": "2014-06-14T18:42:10+01:00" },
+      "location": {
+        "latitude": 51.51,
+        "longitude": -0.1,
+        "precision": "approximate",
+        "place": { "name": "Thames foreshore", "locality": "London", "country": "United Kingdom" }
+      },
+      "technical": {
+        "width": 3840,
+        "height": 2560,
+        "colorProfile": "Display P3",
+        "fileSize": 4815162,
+        "format": "HEIC"
+      },
+      "extra": [{ "label": "Film simulation", "value": "Classic Chrome" }],
+      "x-shoebox": { "photo": 1042 }
+    },
+    {
+      "id": "old-car",
+      "alt": "An old car half buried in snow",
+      "width": 3635,
+      "height": 5301,
+      "sources": [{ "url": "https://cdn.example.com/coastlines/01-1280.jpg", "width": 1280 }],
+      "time": { "taken": "1999-07" }
+    }
+  ]
+}

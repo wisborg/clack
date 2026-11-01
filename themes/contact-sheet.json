@@ -1,0 +1,30 @@
+{
+  "$schema": "../schema/theme-1.schema.json",
+  "format": "clack-theme/1",
+  "name": "Contact sheet",
+  "description": "For an album's index: strips of film on photographic paper, with frame numbers. The slideshow is Gallery's, on the same paper.",
+  "extends": "gallery",
+  "colors": {
+    "light": {
+      "canvas": "#f4f2ec",
+      "text": "#1c1b19",
+      "muted": "#706d66",
+      "film": "#121212",
+      "edgePrint": "#e2a03f",
+      "mark": "#d4352b"
+    },
+    "dark": {
+      "canvas": "#1d1c1a",
+      "text": "#ecebe7",
+      "muted": "#9b988f",
+      "film": "#050505",
+      "edgePrint": "#e2a03f",
+      "mark": "#d4352b"
+    }
+  },
+  "index": {
+    "style": "contact-sheet",
+    "frameWidth": { "min": "140px", "ideal": "16cqi", "max": "230px" },
+    "gap": "10px"
+  }
+}

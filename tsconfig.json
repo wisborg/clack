@@ -15,6 +15,7 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "isolatedModules": true,
+    "resolveJsonModule": true,
     "verbatimModuleSyntax": true,
     "forceConsistentCasingInFileNames": true
   },

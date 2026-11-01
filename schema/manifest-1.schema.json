@@ -1,0 +1,246 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/wisborg/clack/main/schema/manifest-1.schema.json",
+  "title": "Clack manifest, format 1",
+  "description": "The slides of one show: which photos, in what order, at what sizes, and whatever is known about each that the page wants shown. Clack shows what is here and reads nothing from the image files. How the show behaves (auto-play, metadata on or off, theme) is the page's choice, made on the element, not here. Documented in docs/manifest.md.",
+  "type": "object",
+  "required": ["format", "slides"],
+  "properties": {
+    "$schema": { "type": "string", "maxLength": 200 },
+    "format": {
+      "const": "clack-manifest/1",
+      "description": "The format and its version. A file in a format this Clack does not know is refused, never guessed at."
+    },
+    "title": { "$ref": "#/$defs/line", "description": "The show's title, for the header." },
+    "description": { "$ref": "#/$defs/paragraph" },
+    "lang": {
+      "$ref": "#/$defs/lang",
+      "description": "The language of the text in the manifest (captions, titles, alt text), so screen readers pronounce it right. Default: the page's."
+    },
+    "slides": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/slide" },
+      "maxItems": 20000
+    }
+  },
+  "patternProperties": {
+    "^x-": { "description": "Extensions: ignored by Clack, kept for whoever wrote them." }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "line": {
+      "type": "string",
+      "maxLength": 300,
+      "description": "Plain text on one line. Shown as text, never as markup."
+    },
+    "paragraph": {
+      "type": "string",
+      "maxLength": 5000,
+      "description": "Plain text; line breaks are kept. Shown as text, never as markup."
+    },
+    "lang": {
+      "type": "string",
+      "pattern": "^[a-zA-Z]{2,3}(?:-[a-zA-Z0-9]{1,8}){0,4}$",
+      "examples": ["en", "en-AU", "da"]
+    },
+    "url": {
+      "type": "string",
+      "maxLength": 2000,
+      "description": "An http or https URL, or a URL relative to the manifest's own. No other scheme: not data:, not javascript:. Clack checks the resolved URL again before using it.",
+      "pattern": "^(?:https?://[^\\s/?#]+|//[^\\s/?#]+|/(?:[^/\\s]|$)|[^\\s:/?#]+(?:[/?#]|$)|[?#])[^\\s]*$",
+      "examples": ["photos/a-1280.jpg", "/albums/coast/a-1280.jpg", "https://cdn.example.com/a-1280.jpg"]
+    },
+    "pixels": { "type": "integer", "minimum": 1, "maximum": 100000 },
+    "image": {
+      "type": "object",
+      "description": "One file of a photo.",
+      "required": ["url", "width"],
+      "properties": {
+        "url": { "$ref": "#/$defs/url" },
+        "width": { "$ref": "#/$defs/pixels", "description": "Its width in pixels; the browser picks among sources by it." },
+        "height": { "$ref": "#/$defs/pixels" },
+        "type": {
+          "enum": ["image/jpeg", "image/png", "image/webp", "image/avif", "image/jxl"],
+          "description": "Its media type, when sources come in more than one: a browser skips types it cannot show."
+        }
+      },
+      "additionalProperties": false
+    },
+    "slide": {
+      "type": "object",
+      "required": ["id", "alt", "width", "height", "sources"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "description": "Unique in the manifest and stable, so a link to a slide keeps working."
+        },
+        "type": {
+          "const": "image",
+          "description": "What the slide shows. Only image for now; video will be added beside it."
+        },
+        "alt": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "What the photo shows, for anyone who cannot see it. Required; an empty string marks a photo that adds nothing the caption does not say."
+        },
+        "width": { "$ref": "#/$defs/pixels", "description": "The photo's width in pixels, as it is to be shown (after any rotation), so its space is kept before it loads." },
+        "height": { "$ref": "#/$defs/pixels" },
+        "sources": {
+          "type": "array",
+          "description": "The photo at one or more sizes; the browser fetches the one that fits the screen.",
+          "items": { "$ref": "#/$defs/image" },
+          "minItems": 1,
+          "maxItems": 16
+        },
+        "full": {
+          "$ref": "#/$defs/image",
+          "description": "The full-size file, fetched only when the full-size view opens. Without it, the full-size view uses the largest source."
+        },
+        "page": {
+          "$ref": "#/$defs/url",
+          "description": "The photo's own page, if it has one, for sharing and for links."
+        },
+        "placeholder": {
+          "type": "object",
+          "description": "What to paint while the photo loads.",
+          "properties": {
+            "thumbhash": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9+/]{6,64}={0,2}$",
+              "description": "A ThumbHash, base64: a blurred impression of the photo in about 25 bytes."
+            },
+            "color": {
+              "type": "string",
+              "pattern": "^#[0-9a-fA-F]{6}$",
+              "description": "The photo's average colour, for browsers before the ThumbHash is decoded."
+            }
+          },
+          "additionalProperties": false
+        },
+        "focus": {
+          "type": "object",
+          "description": "The point of interest, from the top left (0, 0) to the bottom right (1, 1): kept in view when the photo is cropped to fill a frame.",
+          "required": ["x", "y"],
+          "properties": {
+            "x": { "type": "number", "minimum": 0, "maximum": 1 },
+            "y": { "type": "number", "minimum": 0, "maximum": 1 }
+          },
+          "additionalProperties": false
+        },
+        "duration": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 600,
+          "description": "Seconds this slide stays during auto-play, in place of the show's interval."
+        },
+        "description": { "$ref": "#/$defs/descriptionClass" },
+        "camera": { "$ref": "#/$defs/cameraClass" },
+        "time": { "$ref": "#/$defs/timeClass" },
+        "location": { "$ref": "#/$defs/locationClass" },
+        "technical": { "$ref": "#/$defs/technicalClass" },
+        "extra": {
+          "type": "array",
+          "description": "Further facts to show in the details panel, as labelled text, in order.",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "required": ["label", "value"],
+            "properties": {
+              "label": { "type": "string", "minLength": 1, "maxLength": 60 },
+              "value": { "$ref": "#/$defs/line" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "patternProperties": {
+        "^x-": { "description": "Extensions: ignored by Clack." }
+      },
+      "additionalProperties": false
+    },
+    "descriptionClass": {
+      "type": "object",
+      "description": "Title, caption and credit: what the photo is.",
+      "properties": {
+        "title": { "$ref": "#/$defs/line" },
+        "caption": { "$ref": "#/$defs/paragraph" },
+        "credit": { "$ref": "#/$defs/line", "description": "Who took it, or whose it is." },
+        "keywords": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 60 },
+          "maxItems": 50
+        }
+      },
+      "additionalProperties": false
+    },
+    "cameraClass": {
+      "type": "object",
+      "description": "What took the photo, and how. Clack formats the numbers for the visitor's locale.",
+      "properties": {
+        "make": { "$ref": "#/$defs/line" },
+        "model": { "$ref": "#/$defs/line" },
+        "lens": { "$ref": "#/$defs/line" },
+        "focalLength": { "type": "number", "exclusiveMinimum": 0, "maximum": 10000, "description": "Millimetres." },
+        "focalLength35": { "type": "number", "exclusiveMinimum": 0, "maximum": 10000, "description": "The 35 mm equivalent, in millimetres." },
+        "aperture": { "type": "number", "exclusiveMinimum": 0, "maximum": 1000, "description": "The f-number: 2.8 is shown as ƒ/2.8." },
+        "exposure": { "type": "number", "exclusiveMinimum": 0, "maximum": 100000, "description": "Seconds: 0.004 is shown as 1/250 s." },
+        "exposureBias": { "type": "number", "minimum": -20, "maximum": 20, "description": "Exposure compensation, in stops." },
+        "iso": { "type": "integer", "minimum": 1, "maximum": 10000000 },
+        "flash": { "type": "boolean", "description": "Whether the flash fired." }
+      },
+      "additionalProperties": false
+    },
+    "timeClass": {
+      "type": "object",
+      "description": "When the photo was taken.",
+      "properties": {
+        "taken": {
+          "type": "string",
+          "pattern": "^[0-9]{4}(?:-(?:0[1-9]|1[0-2])(?:-(?:0[1-9]|[12][0-9]|3[01])(?:T(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9](?:\\.[0-9]{1,3})?)?(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])?)?)?)?$",
+          "description": "The local time where the photo was taken, as precisely as it is known: 1999, 1999-07, 1999-07-14, or 1999-07-14T18:05, with seconds and the offset from UTC when known. Shown as that local time, not converted to the visitor's.",
+          "examples": ["2014-01-12T07:41:09+11:00", "2014-01-12T07:41", "1999-07"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "locationClass": {
+      "type": "object",
+      "description": "Where the photo was taken. The most sensitive class: a host decides whether to include it, and how precisely.",
+      "properties": {
+        "latitude": { "type": "number", "minimum": -90, "maximum": 90 },
+        "longitude": { "type": "number", "minimum": -180, "maximum": 180 },
+        "altitude": { "type": "number", "minimum": -12000, "maximum": 100000, "description": "Metres above sea level." },
+        "direction": { "type": "number", "minimum": 0, "exclusiveMaximum": 360, "description": "The direction the camera faced, in degrees from true north." },
+        "precision": {
+          "enum": ["exact", "approximate"],
+          "description": "approximate: the coordinates were rounded on purpose, and are shown as such."
+        },
+        "place": {
+          "type": "object",
+          "properties": {
+            "name": { "$ref": "#/$defs/line", "description": "A named place: a beach, a building, a park." },
+            "locality": { "$ref": "#/$defs/line" },
+            "region": { "$ref": "#/$defs/line" },
+            "country": { "$ref": "#/$defs/line" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "dependentRequired": { "latitude": ["longitude"], "longitude": ["latitude"], "altitude": ["latitude"], "direction": ["latitude"] },
+      "additionalProperties": false
+    },
+    "technicalClass": {
+      "type": "object",
+      "description": "About the file the photo was made from.",
+      "properties": {
+        "width": { "$ref": "#/$defs/pixels" },
+        "height": { "$ref": "#/$defs/pixels" },
+        "colorProfile": { "$ref": "#/$defs/line", "description": "The colour profile's name, such as Display P3." },
+        "fileSize": { "type": "integer", "minimum": 0, "description": "Bytes." },
+        "format": { "$ref": "#/$defs/line", "description": "The original's format, such as HEIC." }
+      },
+      "additionalProperties": false
+    }
+  }
+}

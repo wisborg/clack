@@ -1,0 +1,291 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/wisborg/clack/main/schema/theme-1.schema.json",
+  "title": "Clack theme, format 1",
+  "description": "How a Clack slideshow looks. Every value is a typed token that Clack validates and compiles into CSS custom properties; nothing in a theme is CSS, so a theme can change how Clack looks and nothing else. Every property but format and name is optional: a theme starts from the one it extends (base unless it says otherwise) and overrides what it sets. Documented in docs/themes.md.",
+  "type": "object",
+  "required": ["format", "name"],
+  "properties": {
+    "$schema": { "type": "string", "maxLength": 200 },
+    "format": {
+      "const": "clack-theme/1",
+      "description": "The format and its version. A file in a format this Clack does not know is refused, never guessed at."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 60,
+      "description": "Shown wherever a theme is chosen."
+    },
+    "description": { "type": "string", "maxLength": 300 },
+    "author": { "type": "string", "maxLength": 100 },
+    "extends": {
+      "enum": ["base", "gallery", "darkroom", "mat", "minimal", "contact-sheet"],
+      "description": "The built-in theme this one starts from (default: base). Only built-in themes can be extended, so loading a theme never fetches another."
+    },
+    "scheme": {
+      "enum": ["auto", "light", "dark"],
+      "description": "auto follows the visitor's light or dark setting, live; light or dark forces that scheme, and then only its colours are used."
+    },
+    "colors": {
+      "type": "object",
+      "description": "The colours of each scheme, by role. Colours behind photographs should be neutral: a tinted surround shifts how every photo looks.",
+      "properties": {
+        "light": { "$ref": "#/$defs/palette" },
+        "dark": { "$ref": "#/$defs/palette" }
+      },
+      "additionalProperties": false
+    },
+    "layout": { "$ref": "#/$defs/layout" },
+    "caption": { "$ref": "#/$defs/caption" },
+    "header": { "$ref": "#/$defs/header" },
+    "controls": { "$ref": "#/$defs/controls" },
+    "progress": {
+      "type": "object",
+      "properties": {
+        "position": {
+          "enum": ["below", "edge"],
+          "description": "Where auto-play's progress line sits: below the caption, or along the bottom edge of the show."
+        }
+      },
+      "additionalProperties": false
+    },
+    "transition": { "$ref": "#/$defs/transition" },
+    "details": {
+      "type": "object",
+      "description": "The metadata panel, when the page has asked for metadata to be shown.",
+      "properties": {
+        "position": {
+          "enum": ["side", "below", "overlay"],
+          "description": "Beside the photo, under it, or over it. On a narrow show every position becomes a sheet over the lower part of the photo."
+        }
+      },
+      "additionalProperties": false
+    },
+    "index": { "$ref": "#/$defs/index" },
+    "fonts": {
+      "type": "object",
+      "description": "Which typeface each family uses. Only the visitor's system fonts for now; bundled, open-licensed fonts will add values here. A theme can never name a font to fetch.",
+      "properties": {
+        "serif": { "enum": ["system"] },
+        "sans": { "enum": ["system"] },
+        "mono": { "enum": ["system"] }
+      },
+      "additionalProperties": false
+    }
+  },
+  "patternProperties": {
+    "^x-": {
+      "description": "Extensions: ignored by Clack, kept for whoever wrote them."
+    }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": { "required": ["scheme"], "properties": { "scheme": { "const": "dark" } } },
+      "then": { "properties": { "colors": { "not": { "required": ["light"] } } } }
+    },
+    {
+      "if": { "required": ["scheme"], "properties": { "scheme": { "const": "light" } } },
+      "then": { "properties": { "colors": { "not": { "required": ["dark"] } } } }
+    }
+  ],
+  "$defs": {
+    "color": {
+      "type": "string",
+      "description": "A hex colour (#rgb, #rgba, #rrggbb, #rrggbbaa) or rgb(r g b) / rgb(r g b / alpha), with r, g and b from 0 to 255 and alpha from 0 to 1 or a percentage.",
+      "pattern": "^(?:#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})|rgb\\( ?(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9]) (?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9]) (?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])(?: / (?:0|1|0?\\.[0-9]{1,3}|(?:100|[1-9]?[0-9])%))? ?\\))$",
+      "examples": ["#1d1d1f", "rgb(0 0 0 / 0.55)"]
+    },
+    "palette": {
+      "type": "object",
+      "description": "Colours by role. A theme sets the roles it changes; the rest come from the theme it extends.",
+      "properties": {
+        "canvas": { "$ref": "#/$defs/color", "description": "Behind everything: the wall the photos hang on." },
+        "surface": { "$ref": "#/$defs/color", "description": "Panels over the canvas, such as the details panel." },
+        "text": { "$ref": "#/$defs/color", "description": "Captions and titles. Must reach 4.5:1 against canvas and surface." },
+        "muted": { "$ref": "#/$defs/color", "description": "Secondary text: credits, counters, labels. Must reach 4.5:1 against canvas and surface." },
+        "hairline": { "$ref": "#/$defs/color", "description": "Rules, dividers, the progress track, a hovered control's backdrop." },
+        "accent": { "$ref": "#/$defs/color", "description": "The keyboard focus ring and the active state. Must reach 3:1 against canvas." },
+        "control": { "$ref": "#/$defs/color", "description": "Control icons at rest. Must reach 3:1 against canvas." },
+        "controlActive": { "$ref": "#/$defs/color", "description": "Control icons when hovered or pressed." },
+        "mat": { "$ref": "#/$defs/color", "description": "The mat board around each photo (matted layout)." },
+        "frame": { "$ref": "#/$defs/color", "description": "The picture frame around the mat (matted layout)." },
+        "label": { "$ref": "#/$defs/color", "description": "The caption card, when caption.card is on." },
+        "labelText": { "$ref": "#/$defs/color", "description": "Text on the caption card. Must reach 4.5:1 against label." },
+        "labelMuted": { "$ref": "#/$defs/color", "description": "Secondary text on the caption card. Must reach 4.5:1 against label." },
+        "film": { "$ref": "#/$defs/color", "description": "The film strip (contact-sheet index)." },
+        "edgePrint": { "$ref": "#/$defs/color", "description": "Frame numbers printed on the film's edge. Must reach 4.5:1 against film." },
+        "mark": { "$ref": "#/$defs/color", "description": "The grease-pencil mark on a picked frame (contact-sheet index)." }
+      },
+      "additionalProperties": false
+    },
+    "length": {
+      "type": "string",
+      "description": "A length that is not negative: 0, or a number with a unit. % is of the show's width; cqi, cqb, cqw, cqh, cqmin and cqmax are of the show itself; vw, vh, vmin and vmax of the window.",
+      "pattern": "^(?:0|(?:[0-9]{1,4}(?:\\.[0-9]{1,3})?|\\.[0-9]{1,3})(?:px|rem|em|%|vw|vh|vmin|vmax|cqi|cqb|cqw|cqh|cqmin|cqmax))$",
+      "examples": ["24px", "6.5vmin", "0"]
+    },
+    "fluidLength": {
+      "description": "A length, or one that grows with the show between a minimum and a maximum (CSS clamp()).",
+      "oneOf": [
+        { "$ref": "#/$defs/length" },
+        {
+          "type": "object",
+          "required": ["min", "ideal", "max"],
+          "properties": {
+            "min": { "$ref": "#/$defs/length" },
+            "ideal": { "$ref": "#/$defs/length" },
+            "max": { "$ref": "#/$defs/length" }
+          },
+          "additionalProperties": false
+        }
+      ],
+      "examples": ["48px", { "min": "16px", "ideal": "3.4cqi", "max": "48px" }]
+    },
+    "fontSize": {
+      "type": "string",
+      "description": "A font size: from 8px to 48px, or in rem or em up to 3.",
+      "pattern": "^(?:(?:[89]|[1-3][0-9]|4[0-7])(?:\\.[0-9]{1,2})?px|48px|[0-2](?:\\.[0-9]{1,3})?r?em|3(?:\\.0{1,3})?r?em|\\.[0-9]{1,3}r?em)$",
+      "examples": ["17px", "0.95rem"]
+    },
+    "tracking": {
+      "type": "string",
+      "description": "Letter spacing in em, from -0.05em to 0.3em.",
+      "pattern": "^(?:0|-0?\\.0(?:[0-4][0-9]?|50?)em|0?\\.(?:[0-2][0-9]{0,2}|30{0,2})em)$",
+      "examples": ["0.01em", "0.06em"]
+    },
+    "duration": {
+      "type": "string",
+      "description": "A duration in ms or s, at most 3 seconds.",
+      "pattern": "^(?:0|(?:[0-9]{1,3}|[12][0-9]{3}|3000)ms|(?:[0-2](?:\\.[0-9]{1,3})?|3(?:\\.0{1,3})?)s)$",
+      "examples": ["700ms", "1.2s"]
+    },
+    "family": {
+      "enum": ["serif", "sans", "mono"],
+      "description": "A font family, set to a typeface in fonts."
+    },
+    "text": {
+      "description": "How a line of text is set.",
+      "type": "object",
+      "properties": {
+        "font": { "$ref": "#/$defs/family" },
+        "size": { "$ref": "#/$defs/fontSize" },
+        "weight": { "enum": [300, 400, 500, 600, 700] },
+        "style": { "enum": ["normal", "italic"] },
+        "tracking": { "$ref": "#/$defs/tracking" },
+        "case": { "enum": ["none", "uppercase"] }
+      }
+    },
+    "layout": {
+      "type": "object",
+      "description": "How the photo sits in the show.",
+      "properties": {
+        "type": {
+          "enum": ["gallery", "stage", "matted", "full-bleed"],
+          "description": "gallery: generous margins, caption beneath, like a museum wall. stage: dark surround, the photo the only light. matted: each photo in a mat board and frame. full-bleed: the photo as large as the show, controls floating over it. Layouts are Clack's code; a theme chooses and tunes one."
+        },
+        "padding": {
+          "type": "object",
+          "description": "Space between the show's edge and its contents.",
+          "properties": {
+            "inline": { "$ref": "#/$defs/fluidLength" },
+            "top": { "$ref": "#/$defs/fluidLength" },
+            "bottom": { "$ref": "#/$defs/fluidLength" }
+          },
+          "additionalProperties": false
+        },
+        "shadow": {
+          "enum": ["none", "soft"],
+          "description": "A shadow under the photo, lifting it off the canvas. soft is tuned for each scheme."
+        },
+        "mat": {
+          "type": "object",
+          "description": "The mat board (matted layout). Its colour is the mat colour.",
+          "properties": {
+            "width": { "$ref": "#/$defs/fluidLength" },
+            "bevel": { "type": "boolean", "description": "A fine bevelled edge where the mat is cut, catching the light." }
+          },
+          "additionalProperties": false
+        },
+        "frame": {
+          "type": "object",
+          "description": "The picture frame around the mat (matted layout). Its colour is the frame colour.",
+          "properties": {
+            "width": { "$ref": "#/$defs/length" }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "caption": {
+      "description": "The photo's title and caption, beneath it or in the controls.",
+      "allOf": [{ "$ref": "#/$defs/text" }],
+      "properties": {
+        "font": true, "size": true, "weight": true, "style": true, "tracking": true, "case": true,
+        "card": {
+          "type": "boolean",
+          "description": "Set the caption on a printed card, in the label colours, like a museum label."
+        },
+        "credit": {
+          "type": "boolean",
+          "description": "Show the credit line under the caption."
+        }
+      },
+      "additionalProperties": false
+    },
+    "header": {
+      "description": "The line above the photo with the show's title and the slide counter.",
+      "allOf": [{ "$ref": "#/$defs/text" }],
+      "properties": {
+        "font": true, "size": true, "weight": true, "style": true, "tracking": true, "case": true,
+        "visible": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "controls": {
+      "type": "object",
+      "properties": {
+        "style": {
+          "enum": ["plain", "floating"],
+          "description": "plain: icons on the canvas. floating: a translucent bar over the photo, for full-bleed."
+        },
+        "size": {
+          "$ref": "#/$defs/length",
+          "description": "Each control's target size. Clack never makes a target smaller than 24px (WCAG 2.5.8)."
+        },
+        "reveal": {
+          "enum": ["always", "on-activity"],
+          "description": "always: controls are always visible. on-activity: they fade in when the pointer moves or focus arrives, and out again after a few seconds. The pause control is always reachable by keyboard either way."
+        }
+      },
+      "additionalProperties": false
+    },
+    "transition": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "enum": ["crossfade", "slide", "none"],
+          "description": "How one photo gives way to the next. With reduced motion, slide becomes a short crossfade."
+        },
+        "duration": { "$ref": "#/$defs/duration" }
+      },
+      "additionalProperties": false
+    },
+    "index": {
+      "type": "object",
+      "description": "An album's index of photos, for whatever draws it (Shoebox's album pages, for now), so one theme styles the index and the slideshow alike.",
+      "properties": {
+        "style": {
+          "enum": ["justified", "contact-sheet"],
+          "description": "justified: rows of equal height, each photo in its own proportions, filling the width. contact-sheet: strips of film with frame numbers."
+        },
+        "rowHeight": { "$ref": "#/$defs/fluidLength", "description": "The height of a justified row." },
+        "frameWidth": { "$ref": "#/$defs/fluidLength", "description": "The smallest width of a frame on a contact sheet; as many fit in a strip as will." },
+        "gap": { "$ref": "#/$defs/length" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

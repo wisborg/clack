@@ -1,0 +1,16 @@
+{
+  "$schema": "../schema/theme-1.schema.json",
+  "format": "clack-theme/1",
+  "name": "Gallery",
+  "description": "White or charcoal walls, wide margins, a small serif caption beneath.",
+  "colors": {
+    "light": { "surface": "#fbfbfa" }
+  },
+  "layout": {
+    "type": "gallery",
+    "padding": {
+      "inline": { "min": "16px", "ideal": "5cqi", "max": "72px" },
+      "top": { "min": "16px", "ideal": "2.2cqi", "max": "32px" }
+    }
+  }
+}

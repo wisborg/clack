@@ -44,6 +44,15 @@ delegates; do not add a target that does the work itself.
   manifest it is given, and never shows metadata unless the page asked for it.
 - CSS imported from TypeScript arrives as text (esbuild's text loader).
 
+## Theme and manifest formats
+
+`schema/` holds the published JSON Schemas, `themes/` the built-in themes, and
+`docs/themes.md` and `docs/manifest.md` describe both formats; change them together.
+`tools/internal/formats` checks every built-in theme and example against the schemas and
+for contrast, and `tools/internal/jsonschema` is our validator for exactly the subset of JSON
+Schema the schemas use — it refuses any other keyword, so a schema needing one means adding
+it there, with a test. Patterns must be valid both in Go (RE2) and in JavaScript.
+
 ## Dependencies
 
 Every build or test dependency is in `DEPENDENCIES.md` with its reason and how it is

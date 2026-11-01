@@ -1,0 +1,32 @@
+{
+  "$schema": "../schema/theme-1.schema.json",
+  "format": "clack-theme/1",
+  "name": "Darkroom",
+  "description": "Near-black, no chrome until the pointer moves: the photo is the only light. Dark by nature.",
+  "scheme": "dark",
+  "colors": {
+    "dark": {
+      "canvas": "#0b0b0b",
+      "surface": "#151515",
+      "text": "#ececec",
+      "muted": "#8d8d8f",
+      "hairline": "rgb(255 255 255 / 0.1)",
+      "accent": "#ececec",
+      "control": "rgb(255 255 255 / 0.55)",
+      "controlActive": "#ffffff"
+    }
+  },
+  "layout": {
+    "type": "stage",
+    "padding": {
+      "inline": { "min": "12px", "ideal": "1.7cqi", "max": "24px" },
+      "top": { "min": "12px", "ideal": "1.4cqi", "max": "20px" },
+      "bottom": { "min": "10px", "ideal": "1.1cqi", "max": "16px" }
+    },
+    "shadow": "none"
+  },
+  "caption": { "font": "sans", "size": "14px", "tracking": "0.01em" },
+  "header": { "font": "sans", "size": "13px", "tracking": "0.06em", "case": "uppercase" },
+  "controls": { "reveal": "on-activity" },
+  "transition": { "type": "crossfade", "duration": "900ms" }
+}
