@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"regexp"
 	"slices"
@@ -134,6 +135,9 @@ func Compile(data []byte) (*Schema, error) {
 	}
 	n := &node{}
 	if err := c.fill(n, root, ""); err != nil {
+		return nil, err
+	}
+	if err := checkLoops(n, c.defs); err != nil {
 		return nil, err
 	}
 	return &Schema{root: n}, nil
@@ -359,6 +363,72 @@ func (c *compiler) fill(n *node, v any, at string) error {
 	return nil
 }
 
+// checkLoops refuses a schema in which a $ref leads back to itself without
+// stepping into the value -- through other refs, allOf, anyOf, oneOf, not
+// or if/then/else, which all apply to the same value -- because validating
+// anything against it would recurse for ever. A ref reached through
+// properties or items is fine: each step goes one level into the value,
+// which ends. Every definition is checked, used or not.
+func checkLoops(root *node, defs map[string]*node) error {
+	const (
+		visiting = 1
+		done     = 2
+	)
+	state := map[*node]int{}
+	// The schemas for parts of the value, found on the way, are checked
+	// afterwards, each as the start of a walk of its own.
+	var parts []*node
+	var visit func(n *node, via string) error
+	visit = func(n *node, via string) error {
+		switch state[n] {
+		case visiting:
+			return fmt.Errorf("schema: %s leads back to itself without stepping into the value, a loop that never ends", via)
+		case done:
+			return nil
+		}
+		state[n] = visiting
+		for _, sub := range slices.Concat(n.allOf, n.anyOf, n.oneOf, []*node{n.not, n.ifNode, n.thenNode, n.elseNode}) {
+			if sub != nil {
+				if err := visit(sub, via); err != nil {
+					return err
+				}
+			}
+		}
+		if n.refNode != nil {
+			if err := visit(n.refNode, n.ref); err != nil {
+				return err
+			}
+		}
+		state[n] = done
+		for _, p := range n.properties {
+			parts = append(parts, p)
+		}
+		for _, pp := range n.patternProperties {
+			parts = append(parts, pp.n)
+		}
+		parts = append(parts, n.additional, n.items, n.propertyNames)
+		return nil
+	}
+	starts := []*node{root}
+	for _, name := range slices.Sorted(maps.Keys(defs)) {
+		starts = append(starts, defs[name])
+	}
+	for len(starts) > 0 || len(parts) > 0 {
+		var n *node
+		if len(parts) > 0 {
+			n, parts = parts[len(parts)-1], parts[:len(parts)-1]
+		} else {
+			n, starts = starts[0], starts[1:]
+		}
+		if n != nil {
+			if err := visit(n, "#"); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // Validate returns every way doc fails the schema, sorted by path; none
 // means it is valid. doc must come from Decode, so numbers are json.Number.
 func (s *Schema) Validate(doc any) []Error {
@@ -527,7 +597,7 @@ func (n *node) validateObject(x map[string]any, path string, errs *[]Error) {
 		add("must have at most %d properties", *n.maxProps)
 	}
 	for _, key := range sortedKeys(x) {
-		child := path + "/" + escapePointer(key)
+		child := path + "/" + EscapePointer(key)
 		if n.propertyNames != nil {
 			for _, e := range n.propertyNames.check(key, child) {
 				*errs = append(*errs, Error{child, "property name " + e.Message})
@@ -701,7 +771,8 @@ func sortedKeys(m map[string]any) []string {
 	return keys
 }
 
-func escapePointer(s string) string {
+// EscapePointer escapes a property name for a JSON Pointer.
+func EscapePointer(s string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(s, "~", "~0"), "/", "~1")
 }
 

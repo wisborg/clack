@@ -9,6 +9,7 @@
 package formats
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -79,20 +80,45 @@ func ResolveBuiltin(name string, builtins map[string]map[string]any) (map[string
 		return nil, fmt.Errorf("no built-in theme %q", name)
 	}
 	if name == "base" {
-		return theme, nil
+		return clone(theme).(map[string]any), nil
 	}
 	return Resolve(theme, builtins)
 }
 
 // Resolve returns theme merged onto the theme it extends, which is itself
-// resolved the same way, down to base: objects merge key by key, and any
+// merged the same way, down to base: objects merge key by key, and any
 // other value replaces the one beneath it. builtins holds the built-in
-// themes as loaded, by name.
+// themes as loaded, by name. The result shares nothing with them.
+//
+// A theme shown in one scheme only -- because it forces that scheme, or
+// extends one that does -- keeps only that scheme's colours, and is
+// refused if it sets the other's itself: they would never be shown.
+// Dropping the other scheme happens once, on the finished result, so a
+// theme that extends a forced one and sets scheme back to auto still has
+// base's colours for the scheme its parent left out.
 func Resolve(theme map[string]any, builtins map[string]map[string]any) (map[string]any, error) {
-	return resolve(theme, builtins, 0)
+	out, err := chain(theme, builtins, 0)
+	if err != nil {
+		return nil, err
+	}
+	if schemes := Schemes(out); len(schemes) == 1 {
+		shown := schemes[0]
+		own, _ := theme["colors"].(map[string]any)
+		for scheme := range own {
+			if scheme != shown {
+				return nil, fmt.Errorf("/colors/%s: this theme is shown only in %s, so its %s colours would never be used", scheme, shown, scheme)
+			}
+		}
+		if colors, ok := out["colors"].(map[string]any); ok {
+			out["colors"] = map[string]any{shown: colors[shown]}
+		}
+	}
+	return out, nil
 }
 
-func resolve(theme map[string]any, builtins map[string]map[string]any, depth int) (map[string]any, error) {
+// chain merges theme onto everything beneath it, with every scheme's
+// colours still present.
+func chain(theme map[string]any, builtins map[string]map[string]any, depth int) (map[string]any, error) {
 	if depth > len(Builtins) {
 		return nil, errors.New("themes extend each other in a cycle")
 	}
@@ -104,35 +130,28 @@ func resolve(theme map[string]any, builtins map[string]map[string]any, depth int
 	if !ok {
 		return nil, fmt.Errorf("extends %q, which is not a built-in theme", parentName)
 	}
-	resolvedParent := parent
+	beneath := parent
 	if parentName != "base" {
 		var err error
-		if resolvedParent, err = resolve(parent, builtins, depth+1); err != nil {
+		if beneath, err = chain(parent, builtins, depth+1); err != nil {
 			return nil, err
 		}
 	}
 	inherited := map[string]any{}
-	for k, v := range resolvedParent {
+	for k, v := range beneath {
 		if !slices.Contains(own, k) && !strings.HasPrefix(k, "x-") {
 			inherited[k] = v
 		}
 	}
-	out := merge(inherited, theme)
-	// A theme that forces a scheme is shown only in that one, so the other
-	// scheme's colours, inherited from a theme that follows the visitor,
-	// would be dead weight -- and a forced theme may not carry them.
-	if schemes := Schemes(out); len(schemes) == 1 {
-		if colors, ok := out["colors"].(map[string]any); ok {
-			out["colors"] = map[string]any{schemes[0]: colors[schemes[0]]}
-		}
-	}
-	return out, nil
+	return merge(inherited, theme), nil
 }
 
+// merge returns a new value: over merged onto under, sharing no map or
+// slice with either.
 func merge(under, over map[string]any) map[string]any {
 	out := make(map[string]any, len(under)+len(over))
 	for k, v := range under {
-		out[k] = v
+		out[k] = clone(v)
 	}
 	for k, v := range over {
 		if a, ok := out[k].(map[string]any); ok {
@@ -141,9 +160,27 @@ func merge(under, over map[string]any) map[string]any {
 				continue
 			}
 		}
-		out[k] = v
+		out[k] = clone(v)
 	}
 	return out
+}
+
+func clone(v any) any {
+	switch x := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(x))
+		for k, e := range x {
+			out[k] = clone(e)
+		}
+		return out
+	case []any:
+		out := make([]any, len(x))
+		for i, e := range x {
+			out[i] = clone(e)
+		}
+		return out
+	}
+	return v
 }
 
 // Schemes returns the colour schemes a resolved theme is shown in.
@@ -327,7 +364,12 @@ func CheckManifest(doc map[string]any) []error {
 		widths := map[string]bool{}
 		for k, src := range sources {
 			m, _ := src.(map[string]any)
-			key := fmt.Sprint(m["width"], " ", m["type"])
+			// Widths compare as numbers (640 and 640.0 are one width). A
+			// source without a type is the fallback for browsers that take
+			// none of the typed ones, so it may share a width with them.
+			w, _ := m["width"].(json.Number)
+			width, _ := w.Float64()
+			key := fmt.Sprint(width, " ", m["type"])
 			if widths[key] {
 				errs = append(errs, fmt.Errorf("/slides/%d/sources/%d: another source has the same width and type", i, k))
 			}

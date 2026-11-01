@@ -73,8 +73,10 @@ markup, whatever it contains.
 
 Every URL is `http://` or `https://`, or relative — resolved against the manifest's own URL,
 or the page's when the slides come from JavaScript. Every other scheme is refused: no
-`data:`, `blob:` or `javascript:`. The schema says so, and Clack checks each resolved URL
-again before using it. Clack requests these URLs and nothing else.
+`data:`, `blob:` or `javascript:`. A URL is printable ASCII: anything else, a space or a
+letter like `ø` included, is percent-encoded (`%C3%B8`), which every server and every
+browser read the same way. The schema says so, and Clack checks each resolved URL again
+before using it. Clack requests these URLs and nothing else.
 
 ## Metadata, by class
 

@@ -92,7 +92,7 @@ func TestBaseSetsEveryToken(t *testing.T) {
 		if slices.Contains(skip, strings.Split(path, "/")[1]) {
 			continue
 		}
-		if lookup(base, path) == nil {
+		if lookupPointer(base, path) == nil {
 			missing = append(missing, path)
 		}
 	}
@@ -149,18 +149,6 @@ func anySlice(v any) []any {
 	return s
 }
 
-func lookup(doc map[string]any, path string) any {
-	var cur any = doc
-	for _, part := range strings.Split(strings.TrimPrefix(path, "/"), "/") {
-		m, ok := cur.(map[string]any)
-		if !ok {
-			return nil
-		}
-		cur = m[part]
-	}
-	return cur
-}
-
 func TestBuiltinsResolveAndAreReadable(t *testing.T) {
 	themeSchema, _ := schemas(t)
 	all := builtins(t, themeSchema)
@@ -198,7 +186,7 @@ func TestResolve(t *testing.T) {
 		"/index/style":               "contact-sheet",
 		"/index/rowHeight/max":       "260px",
 	} {
-		if got := lookup(sheet, path); got != want {
+		if got := lookupPointer(sheet, path); got != want {
 			t.Errorf("%s = %v, want %v", path, got, want)
 		}
 	}
@@ -491,17 +479,24 @@ func toDoc(t *testing.T, v any) any {
 	return doc
 }
 
-// patternsIn finds every pattern keyword in a schema, by the JSON Pointer of
-// the schema that holds it.
+// patternsIn finds every pattern in a schema: each pattern keyword, by the
+// pointer of the schema holding it, and each key of patternProperties, by
+// its own pointer. test/schemas.test.ts finds the same set.
 func patternsIn(v any, pointer string, found map[string]string) {
 	switch x := v.(type) {
 	case map[string]any:
 		for k, sub := range x {
+			here := pointer + "/" + jsonschema.EscapePointer(k)
 			if s, ok := sub.(string); ok && k == "pattern" {
 				found[pointer] = s
 				continue
 			}
-			patternsIn(sub, pointer+"/"+strings.ReplaceAll(strings.ReplaceAll(k, "~", "~0"), "/", "~1"), found)
+			if props, ok := sub.(map[string]any); ok && k == "patternProperties" {
+				for src := range props {
+					found[here+"/"+jsonschema.EscapePointer(src)] = src
+				}
+			}
+			patternsIn(sub, here, found)
 		}
 	case []any:
 		for i, sub := range x {
@@ -574,4 +569,75 @@ func lookupPointer(doc any, pointer string) any {
 		}
 	}
 	return cur
+}
+
+// A theme forced to one scheme by the theme it extends is refused if it
+// carries the other scheme's colours, as it is when it forces it itself:
+// they would never be shown, and silently dropping them hides the mistake.
+func TestInheritedForcedSchemeRefusesTheOthersColours(t *testing.T) {
+	themeSchema, _ := schemas(t)
+	all := builtins(t, themeSchema)
+	theme := map[string]any{"format": "clack-theme/1", "name": "Mine", "extends": "darkroom",
+		"colors": map[string]any{"light": map[string]any{"canvas": "#ffffff"}}}
+	if _, err := Resolve(theme, all); err == nil || !strings.Contains(err.Error(), "colors/light") {
+		t.Errorf("err = %v, want a refusal naming colors/light", err)
+	}
+}
+
+// Extending a theme that forces a scheme and choosing auto again brings
+// back the colours of the scheme that theme left out, from base.
+func TestUnforcingASchemeKeepsBasesColours(t *testing.T) {
+	themeSchema, _ := schemas(t)
+	all := builtins(t, themeSchema)
+	theme := map[string]any{"format": "clack-theme/1", "name": "Mine", "extends": "darkroom", "scheme": "auto"}
+	resolved, err := Resolve(theme, all)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := lookupPointer(resolved, "/colors/light/canvas"); got != "#f3f3f1" {
+		t.Errorf("light canvas = %v, want base's", got)
+	}
+	if got := lookupPointer(resolved, "/colors/dark/canvas"); got != "#0b0b0b" {
+		t.Errorf("dark canvas = %v, want darkroom's", got)
+	}
+	for _, e := range CheckContrast(resolved) {
+		t.Error(e)
+	}
+}
+
+// Changing a resolved theme never changes the built-ins it came from.
+func TestResolvedThemesShareNothingWithTheBuiltins(t *testing.T) {
+	themeSchema, _ := schemas(t)
+	all := builtins(t, themeSchema)
+	for _, name := range Builtins {
+		resolved, err := ResolveBuiltin(name, all)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resolved["colors"].(map[string]any)[Schemes(resolved)[0]].(map[string]any)["canvas"] = "#123456"
+		resolved["index"].(map[string]any)["gap"] = "99px"
+	}
+	fresh := builtins(t, themeSchema)
+	for _, name := range Builtins {
+		a, _ := json.Marshal(all[name])
+		b, _ := json.Marshal(fresh[name])
+		if string(a) != string(b) {
+			t.Errorf("%s changed when a theme resolved from it was changed", name)
+		}
+	}
+}
+
+// Widths are numbers: 640 and 640.0 are the same width.
+func TestCheckManifestComparesWidthsAsNumbers(t *testing.T) {
+	_, manifestSchema := schemas(t)
+	data := edit(t, "schema/examples/manifest.json", map[string]any{
+		"/slides/0/sources/1/width": json.Number("640.0"),
+	})
+	doc, errs := Parse(manifestSchema, data)
+	if len(errs) > 0 {
+		t.Fatal(errs)
+	}
+	if got := CheckManifest(doc); len(got) != 1 {
+		t.Errorf("got %v, want the repeated width found", got)
+	}
 }

@@ -70,8 +70,10 @@ In [`themes/`](../themes), each extending `base`, which sets every token:
 ### `scheme`
 
 `auto` (base's choice) follows the visitor's light or dark setting, and follows it live when
-it changes. `light` or `dark` forces one; a theme that forces a scheme has only that
-scheme's colours, and giving it the other's is an error.
+it changes. `light` or `dark` forces one. A theme shown in one scheme — because it forces
+it, or extends a theme that does, such as `darkroom` — has only that scheme's colours, and
+giving it the other's is an error. A theme that extends `darkroom` and sets `scheme` back
+to `auto` gets base's light colours for the scheme Darkroom leaves out.
 
 ### `colors`
 
@@ -139,7 +141,7 @@ header is the line above it, with the show's title and the counter. Both take:
 | token | values |
 |---|---|
 | `font` | `serif`, `sans` or `mono` |
-| `size` | 8px to 48px, or up to 3rem or 3em |
+| `size` | 8px to 48px, or 0.5 to 3 in rem or em |
 | `weight` | 300, 400, 500, 600 or 700 |
 | `style` | `normal` or `italic` |
 | `tracking` | letter spacing, -0.05em to 0.3em |

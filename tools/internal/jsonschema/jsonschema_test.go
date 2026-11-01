@@ -257,3 +257,29 @@ func TestDecode(t *testing.T) {
 		t.Errorf("surrounding space: %v", err)
 	}
 }
+
+// A loop of definitions that never steps into the value would recurse
+// forever; Compile refuses it. Recursion through a property is fine.
+func TestCompileRefusesRefLoops(t *testing.T) {
+	for name, schema := range map[string]string{
+		"a ref to itself":        `{"$defs": {"a": {"$ref": "#/$defs/a"}}, "$ref": "#/$defs/a"}`,
+		"two refs to each other": `{"$defs": {"a": {"$ref": "#/$defs/b"}, "b": {"$ref": "#/$defs/a"}}}`,
+		"through allOf":          `{"$defs": {"a": {"allOf": [{"$ref": "#/$defs/a"}]}}}`,
+		"through not":            `{"$defs": {"a": {"not": {"anyOf": [{"$ref": "#/$defs/a"}]}}}}`,
+		"through if":             `{"$defs": {"a": {"if": {"$ref": "#/$defs/a"}}}}`,
+	} {
+		if _, err := Compile([]byte(schema)); err == nil || !strings.Contains(err.Error(), "loop") {
+			t.Errorf("%s: err = %v, want a refusal for the loop", name, err)
+		}
+	}
+	mustCompile(t, `{"$defs": {"tree": {"properties": {"kid": {"$ref": "#/$defs/tree"}}, "items": {"$ref": "#/$defs/tree"}}}}`)
+}
+
+// Recursion through a property is not a loop, even when the property is
+// reached through allOf, which applies to the same value.
+func TestRecursionInsideAllOfIsNotALoop(t *testing.T) {
+	s := mustCompile(t, `{"$defs": {"a": {"allOf": [{"properties": {"x": {"$ref": "#/$defs/a"}}}]}}, "$ref": "#/$defs/a"}`)
+	if errs := validate(t, s, `{"x": {"x": {}}}`); len(errs) > 0 {
+		t.Error(errs)
+	}
+}

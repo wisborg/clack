@@ -1,5 +1,17 @@
 {
   "$comment": "Strings each schema pattern must accept and refuse, checked in Go (RE2) and in every browser (ECMAScript), so the two read the patterns alike. Keys are a schema file and a JSON Pointer to the schema holding the pattern.",
+  "theme-1.schema.json#/patternProperties/^x-": {
+    "match": ["x-site", "x-", "x-a-b"],
+    "nomatch": ["site", "X-site", "ax-", "-x-"]
+  },
+  "manifest-1.schema.json#/patternProperties/^x-": {
+    "match": ["x-shoebox", "x-"],
+    "nomatch": ["shoebox", "X-shoebox", "ax-"]
+  },
+  "manifest-1.schema.json#/$defs/slide/patternProperties/^x-": {
+    "match": ["x-shoebox", "x-"],
+    "nomatch": ["shoebox", "X-shoebox", "ax-"]
+  },
   "theme-1.schema.json#/$defs/color": {
     "match": ["#fff", "#ffff", "#1d1d1f", "#1D1D1F80", "rgb(0 0 0)", "rgb(255 255 255 / 0.1)", "rgb(0 128 255 / 50%)", "rgb(0 0 0 / 1)", "rgb( 0 0 0 )"],
     "nomatch": ["red", "#ff", "#fffff", "rgb(0, 0, 0)", "rgb(256 0 0)", "rgb(0 0 0 / 2)", "rgb(0 0 0 / 101%)", "rgba(0 0 0 / 1)", "url(x)", "#fff\n", "var(--x)", "#fff;", " #fff"]
@@ -9,8 +21,8 @@
     "nomatch": ["-4px", "8", "0px ", "1e3px", "calc(1px)", "10000px", "1.2345px", "4 px", "4PX"]
   },
   "theme-1.schema.json#/$defs/fontSize": {
-    "match": ["8px", "17px", "13.5px", "47.99px", "48px", "0.95rem", "1em", "3rem", ".8em"],
-    "nomatch": ["7px", "48.5px", "49px", "200px", "3.5rem", "4em", "17", "17pt"]
+    "match": ["8px", "17px", "13.5px", "47.99px", "48px", "0.95rem", "1em", "3rem", ".8em", "0.5rem", ".5em", "2.999em"],
+    "nomatch": ["7px", "48.5px", "49px", "200px", "3.5rem", "4em", "17", "17pt", "0rem", "0em", ".01em", "0.001rem", "0.49rem", ".0em"]
   },
   "theme-1.schema.json#/$defs/tracking": {
     "match": ["0", "0.01em", ".06em", "0.3em", "-0.05em", "-0.049em", "0.299em"],
@@ -21,8 +33,8 @@
     "nomatch": ["3001ms", "10s", "3.1s", "700", "-1s", "1min"]
   },
   "manifest-1.schema.json#/$defs/url": {
-    "match": ["a.jpg", "photos/a.jpg", "./a.jpg", "../a.jpg", "/a.jpg", "/", "//cdn.example.com/a.jpg", "https://example.com/a.jpg", "http://example.com", "?v=2", "#x", "a.jpg?x=1:2", "photos/a:b.jpg"],
-    "nomatch": ["javascript:alert(1)", "JavaScript:alert(1)", "data:image/png;base64,AA", "blob:https://example.com/1", "x:y.jpg", "https://", "https:///x", "a b.jpg", "", " a.jpg", "mailto:a@example.com", "HTTPS://example.com", "a.jpg\n", "file:///etc/passwd", "//"]
+    "match": ["a.jpg", "%C3%B8.jpg", "photos/a.jpg", "./a.jpg", "../a.jpg", "/a.jpg", "/", "//cdn.example.com/a.jpg", "https://example.com/a.jpg", "http://example.com", "?v=2", "#x", "a.jpg?x=1:2", "photos/a:b.jpg"],
+    "nomatch": ["a\u00a0b.jpg", "a.jpg\u000b", "a\u2028.jpg", "a\u3000.jpg", "\ufeffa.jpg", "a\u0000.jpg", "a\u007f.jpg", "ø.jpg", "javascript:alert(1)", "JavaScript:alert(1)", "data:image/png;base64,AA", "blob:https://example.com/1", "x:y.jpg", "https://", "https:///x", "a b.jpg", "", " a.jpg", "mailto:a@example.com", "HTTPS://example.com", "a.jpg\n", "file:///etc/passwd", "//"]
   },
   "manifest-1.schema.json#/$defs/lang": {
     "match": ["en", "en-AU", "da", "zh-Hant-TW", "sr-Latn-RS"],
