@@ -1,6 +1,7 @@
 # Clack
 
-A slideshow for photographs that any website can embed, as one custom element:
+A slideshow for photographs that any website can embed, as one custom element (and, for an
+index of the photos, a second one, `<clack-index>`):
 
 ```html
 <clack-show autoplay="6s" theme="gallery">

@@ -1,7 +1,7 @@
 # Clack
 
-A photo slideshow any website can embed, as one custom element, `<clack-show>`. TypeScript,
-bundled into one ES module with **no runtime dependencies**. **`docs/plan.md` is the design
+A photo slideshow any website can embed, as a custom element, `<clack-show>`, with an index
+of its photos, `<clack-index>`. TypeScript, bundled into one ES module with **no runtime dependencies**. **`docs/plan.md` is the design
 this is being built to** — read it before planning or implementing anything in `src/`.
 Shoebox (`../shoebox`) is its first user, and its `docs/plan.md` holds what the two share:
 the dependency policy and the review process.

@@ -167,8 +167,8 @@ The pause control is always present and reachable by keyboard, whatever a theme 
 
 ### `index`
 
-How an album's index looks, for whatever draws it — Shoebox's album pages, for now — so one
-theme styles the index and the slideshow alike.
+How `<clack-index>`, the index of a show's photos, looks, so one theme styles the index and
+the slideshow alike.
 
 | token | values |
 |---|---|

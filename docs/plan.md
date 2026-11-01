@@ -3,6 +3,8 @@
 Clack is a slideshow for photographs that any website can embed: manual and automatic
 progression, a chosen display size with a full-size view one click away, optional metadata
 (hidden unless the page asks for it), and themes defined in files that anyone can write.
+It also draws an index of the photos — a justified grid or a contact sheet — that opens the
+slideshow at the photo chosen.
 
 It is named after the sound a slide projector made between slides. Unlike the projector, it
 should never show a half-loaded picture.
@@ -214,6 +216,37 @@ locale.
 it small, and it is what makes Shoebox's access control meaningful: the images Shoebox serves carry
 no metadata to read.
 
+### The index
+
+A second element, `<clack-index>`, shows every photo of a show at once, styled by the same
+theme's `index` tokens: a **justified grid** (rows of equal height, each photo in its own
+proportions, filling the width) or a **contact sheet** (strips of film with frame numbers).
+Choosing a photo opens the `<clack-show>` it is paired with at that photo, and closing the
+show returns focus to the same thumbnail.
+
+```html
+<clack-index for="show" theme="contact-sheet">
+  <a href="/albums/coast/low-tide"><img src="low-tide-320.jpg" srcset="…" width="3840"
+     height="2560" alt="Low tide under a grey sky"></a>
+  …
+  <a rel="next" href="/albums/coast?page=2">More photos</a>
+</clack-index>
+<clack-show id="show" src="/albums/coast/manifest.json"></clack-show>
+```
+
+- **Decided (2026-11-01): Clack draws the index, not each host.** The index needs what the
+  slideshow already has — `srcset`, ThumbHash placeholders, lazy loading, keyboard use and
+  screen-reader labels — and the Contact sheet theme is only useful if the index is Clack's.
+- **Markup first, like the show.** The light DOM is a plain list of links to each photo's
+  page, so with no script the index is still a working index, styled by the host. With
+  script, Clack lays it out from the theme.
+- **Large albums come a page at a time.** A `rel="next"` link at the end works without
+  script; with script, the next page is fetched as the visitor nears the end, and the rows
+  continue without reflowing the ones above. (Whether pages also come as manifests is
+  settled with the element.)
+- **The same rules as the show:** Shadow DOM, the strict Content-Security-Policy, text only
+  ever set as text, and only the images it is given are requested.
+
 ### Accessibility and security
 
 - The WAI-ARIA carousel pattern: `aria-roledescription` "carousel"/"slide", "3 of 24" labels,
@@ -335,6 +368,8 @@ side with the version before.
 - Sizing modes and the full-size view with zoom and pan.
 - Auto-play with pause control, visibility and reduced-motion handling.
 - Metadata display (hidden by default), theme loading and validation, the five themes.
+- The index, `<clack-index>`: justified and contact-sheet layouts, paired with a show,
+  paging.
 - Accessibility pass, strict-CSP test page, documentation, a demo page.
 
 **2 — Polish**
