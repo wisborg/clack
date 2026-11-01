@@ -63,3 +63,28 @@ func TestBuildReportsErrors(t *testing.T) {
 		t.Fatalf("err = %v, want an unresolved-import error", err)
 	}
 }
+
+func TestMinifiedBuildMinifiesTheCSS(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "a.css", "/* a comment that must not ship */\n:host {\n  display: block;\n  color: light-dark(#ffffff, #000000);\n}\n")
+	entry := write(t, dir, "a.ts", `import css from "./a.css";
+export const sheet: string = css;
+`)
+	files, err := Build(Options{Entry: entry, Outfile: filepath.Join(dir, "out.js"), Minify: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var js string
+	for _, f := range files {
+		if filepath.Base(f.Path) == "out.js" {
+			js = string(f.Contents)
+		}
+	}
+	if strings.Contains(js, "must not ship") {
+		t.Errorf("the CSS comment is in the minified bundle:\n%s", js)
+	}
+	// light-dark() is in every engine Clack targets, so it is kept as it is.
+	if !strings.Contains(js, ":host{display:block;color:light-dark(#ffffff,#000000)}") {
+		t.Errorf("the CSS is not minified as expected:\n%s", js)
+	}
+}

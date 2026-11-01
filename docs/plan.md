@@ -15,7 +15,8 @@ markup, a manifest, or JavaScript. Shoebox's plan holds the decisions the two sh
 dependency policy and the review process — and this one holds everything about the slideshow
 and its themes.
 
-Nothing is built yet.
+Phase 0 is done and phase 1 is under way: see [Phases](#phases), and `docs/component.md`
+for what the element does so far.
 
 ---
 
@@ -364,7 +365,9 @@ side with the version before.
 
 **1 — First release**
 - Core: slides, manual navigation (controls, keys, swipe), responsive images,
-  decode-before-show, preloading, ThumbHash placeholders, crossfade.
+  decode-before-show, preloading, ThumbHash placeholders, crossfade. *(done but for
+  ThumbHash, which comes with the manifest loader; what the element does is in
+  `docs/component.md`, and `design/demo/` shows it with the design photographs)*
 - Sizing modes and the full-size view with zoom and pan.
 - Auto-play with pause control, visibility and reduced-motion handling.
 - Metadata display (hidden by default), theme loading and validation, the five themes.

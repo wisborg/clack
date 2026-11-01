@@ -1,0 +1,32 @@
+/*
+ * The demo pages: Clack's own component, with the design photographs, at
+ * the sizes the mock-ups were drawn at, so the two can be compared. Each
+ * photo is a full-size JPEG for now; the media pipeline will give a page
+ * its sizes.
+ */
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: #f3f3f1;
+}
+
+/* A full-window show, like the mock-ups. */
+clack-show {
+  height: 100vh;
+  height: 100dvh;
+}
+
+/* ?scheme= forces a scheme for screenshots (scheme.js); a host page forces
+   one the same way, by setting color-scheme on the element. */
+[data-scheme="light"] clack-show {
+  color-scheme: light;
+}
+
+[data-scheme="dark"] clack-show {
+  color-scheme: dark;
+}

@@ -403,8 +403,12 @@ func gofmt(ctx context.Context) error {
 	return nil
 }
 
-// designServer serves design/ at / and the verified photos at /photos/.
+// designServer serves design/ at /, the verified photos at /photos/, and
+// a fresh build of Clack at /dist/ for the demo pages.
 func designServer(ctx context.Context, addr string) (*browsertest.Server, error) {
+	if err := cmdBuild(ctx, nil); err != nil {
+		return nil, err
+	}
 	list, err := photos.Load("design/photos.json")
 	if err != nil {
 		return nil, err
@@ -413,7 +417,7 @@ func designServer(ctx context.Context, addr string) (*browsertest.Server, error)
 	if err != nil {
 		return nil, err
 	}
-	return browsertest.ServeDirs(addr, map[string]string{"/": "design", "/photos/": dir})
+	return browsertest.ServeDirs(addr, map[string]string{"/": "design", "/photos/": dir, "/dist/": "dist"})
 }
 
 func cmdServe(ctx context.Context, args []string) error {
@@ -427,7 +431,7 @@ func cmdServe(ctx context.Context, args []string) error {
 		return err
 	}
 	defer srv.Close()
-	fmt.Printf("serving the design pages on %smockups/ -- Ctrl-C to stop\n", srv.URL)
+	fmt.Printf("serving the mock-ups on %smockups/ and the demo on %sdemo/ -- Ctrl-C to stop\n", srv.URL, srv.URL)
 	<-ctx.Done()
 	return nil
 }
@@ -437,22 +441,36 @@ func cmdServe(ctx context.Context, args []string) error {
 // load or decode -- a missing photo must fail the run, not leave an empty
 // frame in a screenshot that says "ok". The load event does not wait for
 // lazily loaded images, which a real index uses, so each is told to load
-// now and waited for.
+// now and waited for. On a demo page, the images include those inside
+// each <clack-show>, once it has a slide on screen and its fade is over.
 const pageCheck = `
 const done = arguments[arguments.length - 1];
-const imgs = [...document.images];
-const settled = imgs.map((img) => {
-  img.loading = "eager";
-  return img.decode().then(() => null, () => img.currentSrc || img.src);
-});
-const timeout = new Promise((r) => setTimeout(() => r("timeout"), 15000));
-Promise.race([Promise.all(settled), timeout]).then((r) => {
+(async () => {
+  const shows = [...document.querySelectorAll("clack-show")];
+  const onScreen = (show) => new Promise((resolve) => {
+    const look = () => {
+      const slides = show.shadowRoot ? show.shadowRoot.querySelectorAll(".slide") : [];
+      if (slides.length === 1) resolve(); else setTimeout(look, 50);
+    };
+    look();
+  });
+  const showsTimedOut = await Promise.race([
+    Promise.all(shows.map(onScreen)).then(() => false),
+    new Promise((r) => setTimeout(() => r(true), 15000)),
+  ]);
+  const imgs = [...document.images, ...shows.flatMap((s) => [...s.shadowRoot.querySelectorAll("img")])];
+  const settled = imgs.map((img) => {
+    img.loading = "eager";
+    return img.decode().then(() => null, () => img.currentSrc || img.src);
+  });
+  const timeout = new Promise((r) => setTimeout(() => r("timeout"), 15000));
+  const r = await Promise.race([Promise.all(settled), timeout]);
   done({
     title: document.title,
-    timedOut: r === "timeout",
+    timedOut: showsTimedOut || r === "timeout",
     failed: r === "timeout" ? [] : r.filter((x) => x),
   });
-});
+})().catch((e) => done({title: "", timedOut: false, failed: ["the page check failed: " + e]}));
 `
 
 // viewportSize reports the page's viewport.
@@ -504,13 +522,18 @@ var viewports = []viewport{
 func cmdShots(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("shots", flag.ContinueOnError)
 	browserName := fs.String("browser", "chrome", "browser to draw the pages in")
-	only := fs.String("pages", "", "comma-separated page names (default: every page in design/mockups/)")
+	set := fs.String("set", "mockups", "which pages: mockups (design/mockups/) or demo (design/demo/)")
+	only := fs.String("pages", "", "comma-separated page names (default: every page in the set)")
 	if err := parse(fs, args); err != nil {
 		return err
 	}
 	b, ok := webdriver.Lookup(*browserName)
 	if !ok {
 		return usageError{fmt.Sprintf("dev shots: unknown browser %q", *browserName)}
+	}
+	title, ok := map[string]string{"mockups": "Clack mock-up", "demo": "Clack demo"}[*set]
+	if !ok {
+		return usageError{fmt.Sprintf("dev shots: -set is mockups or demo, not %q", *set)}
 	}
 	var pages []string
 	if *only != "" {
@@ -522,13 +545,13 @@ func cmdShots(ctx context.Context, args []string) error {
 			if !pageNameRE.MatchString(p) {
 				return usageError{fmt.Sprintf("dev shots: %q is not a page name", p)}
 			}
-			if !cacheExists(filepath.Join("design", "mockups", p+".html")) {
-				return usageError{fmt.Sprintf("dev shots: there is no design/mockups/%s.html", p)}
+			if !cacheExists(filepath.Join("design", *set, p+".html")) {
+				return usageError{fmt.Sprintf("dev shots: there is no design/%s/%s.html", *set, p)}
 			}
 			pages = append(pages, p)
 		}
 	} else {
-		matches, err := filepath.Glob("design/mockups/*.html")
+		matches, err := filepath.Glob(filepath.Join("design", *set, "*.html"))
 		if err != nil {
 			return err
 		}
@@ -555,7 +578,7 @@ func cmdShots(ctx context.Context, args []string) error {
 	}
 	var problems []string
 	for _, vp := range viewports {
-		found, err := shootViewport(ctx, b, driver, srv.URL, vp, pages, out)
+		found, err := shootViewport(ctx, b, driver, srv.URL, vp, *set, title, pages, out)
 		if err != nil {
 			return fmt.Errorf("%s: %w", vp.name, err)
 		}
@@ -572,7 +595,7 @@ func cmdShots(ctx context.Context, args []string) error {
 // a session of its own: a phone is emulated from the session's start, and a
 // desktop viewport is set by sizing the window. It returns the problems it
 // saw on the pages; an error means it could not draw them at all.
-func shootViewport(ctx context.Context, b webdriver.Browser, driver, base string, vp viewport, pages []string, out string) ([]string, error) {
+func shootViewport(ctx context.Context, b webdriver.Browser, driver, base string, vp viewport, set, title string, pages []string, out string) ([]string, error) {
 	o := webdriver.Options{Headless: true}
 	if vp.phone {
 		o.Phone = &webdriver.Size{Width: vp.width, Height: vp.height}
@@ -603,7 +626,7 @@ func shootViewport(ctx context.Context, b webdriver.Browser, driver, base string
 	var problems []string
 	for _, page := range pages {
 		for _, scheme := range []string{"light", "dark"} {
-			url := fmt.Sprintf("%smockups/%s.html?scheme=%s", base, page, scheme)
+			url := fmt.Sprintf("%s%s/%s.html?scheme=%s", base, set, page, scheme)
 			if err := s.Navigate(ctx, url); err != nil {
 				return nil, err
 			}
@@ -616,7 +639,7 @@ func shootViewport(ctx context.Context, b webdriver.Browser, driver, base string
 				return nil, err
 			}
 			switch {
-			case !strings.HasSuffix(check.Title, "Clack mock-up"):
+			case !strings.HasSuffix(check.Title, title):
 				problems = append(problems, fmt.Sprintf("%s: not a design page (title %q)", url, check.Title))
 			case check.TimedOut:
 				problems = append(problems, fmt.Sprintf("%s: images still loading after 15 s", url))
@@ -627,7 +650,11 @@ func shootViewport(ctx context.Context, b webdriver.Browser, driver, base string
 			if err != nil {
 				return nil, err
 			}
-			name := filepath.Join(out, fmt.Sprintf("%s-%s-%s.png", page, scheme, vp.name))
+			prefix := ""
+			if set != "mockups" {
+				prefix = set + "-"
+			}
+			name := filepath.Join(out, fmt.Sprintf("%s%s-%s-%s.png", prefix, page, scheme, vp.name))
 			if err := os.WriteFile(name, png, 0o644); err != nil {
 				return nil, err
 			}

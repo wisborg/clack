@@ -25,10 +25,9 @@ test("the hidden attribute hides it", () => {
   assertEqual(getComputedStyle(el).display, "none", "display when hidden");
 });
 
-test("slots the photos it is given", () => {
+test("draws its slides in its own shadow root, not the page's", () => {
   const el = make();
   el.append(document.createElement("figure"));
-  const slot = el.shadowRoot?.querySelector("slot");
-  assert(slot, "no <slot> in the shadow root");
-  assertEqual(slot.assignedElements().length, 1, "assigned elements");
+  assertEqual(el.shadowRoot?.querySelector("slot"), null, "no <slot>: the markup is read, not shown");
+  assert(el.shadowRoot?.querySelector(".stage"), "a stage for the photos");
 });

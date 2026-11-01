@@ -19,8 +19,10 @@ Named after the sound a slide projector made between slides.
 
 ## Status
 
-Planning. Nothing is built yet. **[docs/plan.md](docs/plan.md) is the design this will be built
-to**, with the reasoning behind each decision and the alternatives that were rejected.
+Being built; not ready for use. The slideshow's core works — markup or script, controls,
+keys, swipe, photos decoded before they are shown — and is described in
+[docs/component.md](docs/component.md). **[docs/plan.md](docs/plan.md) is the design it is
+built to**, with the reasoning behind each decision and the alternatives that were rejected.
 
 ## Building
 

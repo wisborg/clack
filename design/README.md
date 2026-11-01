@@ -10,6 +10,9 @@ go run ./tools/dev serve -addr 0.0.0.0:8737    # also reachable from a phone on 
 go run ./tools/dev shots                       # every page, light and dark, desktop and phone -> .scratch/shots/
 ```
 
+`demo/` holds pages made with the real component, built fresh by `serve` and `shots`
+(`go run ./tools/dev shots -set demo`), to compare with the mock-ups at the same sizes.
+
 `?scheme=light` or `?scheme=dark` forces a scheme; otherwise the page follows the system.
 Darkroom is dark by nature and ignores it.
 

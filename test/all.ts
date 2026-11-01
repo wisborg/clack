@@ -3,6 +3,9 @@
 import { run, type Report } from "./harness";
 import "./csp.test";
 import "./element.test";
+import "./nav.test";
+import "./slides.test";
+import "./show.test";
 import "./schemas.test";
 
 declare global {

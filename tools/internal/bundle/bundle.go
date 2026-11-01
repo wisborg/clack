@@ -9,6 +9,7 @@ package bundle
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/evanw/esbuild/pkg/api"
@@ -73,6 +74,9 @@ func Build(o Options) ([]File, error) {
 		opts.MinifyWhitespace = true
 		opts.MinifyIdentifiers = true
 		opts.MinifySyntax = true
+		// The CSS arrives as text, which esbuild would otherwise embed as
+		// written, comments and all.
+		opts.Plugins = []api.Plugin{minifyCSS}
 	}
 	if o.Banner != "" {
 		opts.Banner = map[string]string{"js": o.Banner}
@@ -93,6 +97,35 @@ func Build(o Options) ([]File, error) {
 		files = append(files, File{Path: f.Path, Contents: f.Contents})
 	}
 	return files, nil
+}
+
+// minifyCSS loads each imported stylesheet minified, still as text.
+var minifyCSS = api.Plugin{
+	Name: "minify-css",
+	Setup: func(b api.PluginBuild) {
+		b.OnLoad(api.OnLoadOptions{Filter: `\.css$`}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+			src, err := os.ReadFile(args.Path)
+			if err != nil {
+				return api.OnLoadResult{}, err
+			}
+			r := api.Transform(string(src), api.TransformOptions{
+				Loader:           api.LoaderCSS,
+				Sourcefile:       args.Path,
+				Engines:          Engines,
+				MinifyWhitespace: true,
+				MinifySyntax:     true,
+				LogLevel:         api.LogLevelSilent,
+			})
+			if len(r.Errors) > 0 {
+				return api.OnLoadResult{}, errors.New(format(r.Errors, api.ErrorMessage))
+			}
+			if len(r.Warnings) > 0 {
+				return api.OnLoadResult{}, errors.New(format(r.Warnings, api.WarningMessage))
+			}
+			css := strings.TrimSpace(string(r.Code))
+			return api.OnLoadResult{Contents: &css, Loader: api.LoaderText}, nil
+		})
+	},
 }
 
 func format(msgs []api.Message, kind api.MessageKind) string {
