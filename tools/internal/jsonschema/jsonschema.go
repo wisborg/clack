@@ -782,3 +782,50 @@ func orRoot(at string) string {
 	}
 	return at
 }
+
+// StripAnnotations returns a schema without the keywords that only explain
+// it -- title, description, examples and the rest -- for shipping in a
+// bundle, where only the rules are needed. It walks the schema as Compile
+// does, so a property that happens to be called "description" is kept: only
+// keywords of a schema are removed, never names inside properties. The
+// result is compact JSON, and compiles to the same rules.
+func StripAnnotations(data []byte) ([]byte, error) {
+	if _, err := Compile(data); err != nil {
+		return nil, err
+	}
+	v, err := Decode(data)
+	if err != nil {
+		return nil, err
+	}
+	stripNode(v)
+	return json.Marshal(v)
+}
+
+func stripNode(v any) {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return
+	}
+	for k := range m {
+		if annotations[k] {
+			delete(m, k)
+		}
+	}
+	for _, k := range []string{"properties", "patternProperties", "$defs"} {
+		if sub, ok := m[k].(map[string]any); ok {
+			for _, s := range sub {
+				stripNode(s)
+			}
+		}
+	}
+	for _, k := range []string{"items", "additionalProperties", "propertyNames", "not", "if", "then", "else"} {
+		stripNode(m[k])
+	}
+	for _, k := range []string{"allOf", "anyOf", "oneOf"} {
+		if list, ok := m[k].([]any); ok {
+			for _, s := range list {
+				stripNode(s)
+			}
+		}
+	}
+}

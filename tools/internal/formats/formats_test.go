@@ -641,3 +641,109 @@ func TestCheckManifestComparesWidthsAsNumbers(t *testing.T) {
 		t.Errorf("got %v, want the repeated width found", got)
 	}
 }
+
+// setPointer sets the value at a JSON Pointer in doc (nil removes it; ""
+// replaces the document), creating objects on the way, and returns the
+// document.
+func setPointer(t *testing.T, doc any, pointer string, v any) any {
+	t.Helper()
+	if pointer == "" {
+		return v
+	}
+	parts := strings.Split(pointer, "/")[1:]
+	for i, p := range parts {
+		parts[i] = strings.ReplaceAll(strings.ReplaceAll(p, "~1", "/"), "~0", "~")
+	}
+	cur := doc
+	for _, p := range parts[:len(parts)-1] {
+		switch c := cur.(type) {
+		case map[string]any:
+			if c[p] == nil {
+				c[p] = map[string]any{}
+			}
+			cur = c[p]
+		case []any:
+			var i int
+			fmt.Sscan(p, &i)
+			cur = c[i]
+		}
+	}
+	last := parts[len(parts)-1]
+	switch c := cur.(type) {
+	case map[string]any:
+		if v == nil {
+			delete(c, last)
+		} else {
+			c[last] = v
+		}
+	case []any:
+		var i int
+		fmt.Sscan(last, &i)
+		c[i] = v
+	default:
+		t.Fatalf("%s: no such place", pointer)
+	}
+	return doc
+}
+
+// The cases Clack's own checker in the browser is held to as well
+// (test/manifest.test.ts): the same files, the same verdicts.
+func TestSharedManifestCases(t *testing.T) {
+	_, manifestSchema := schemas(t)
+	raw, err := os.ReadFile(filepath.Join(root, "test/fixtures/manifests.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture struct {
+		Cases []struct {
+			Name  string                     `json:"name"`
+			Set   map[string]json.RawMessage `json:"set"`
+			Error *string                    `json:"error"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(raw, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	base, err := os.ReadFile(filepath.Join(root, "schema/examples/manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range fixture.Cases {
+		doc, err := jsonschema.Decode(base)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for pointer, rawValue := range c.Set {
+			v, err := jsonschema.Decode(rawValue)
+			if err != nil {
+				t.Fatalf("%s: %v", c.Name, err)
+			}
+			doc = setPointer(t, doc, pointer, v)
+		}
+		data, _ := json.Marshal(doc)
+		parsed, errs := Parse(manifestSchema, data)
+		if parsed != nil {
+			errs = append(errs, CheckManifest(parsed)...)
+		}
+		var paths []string
+		for _, e := range errs {
+			path, _, _ := strings.Cut(e.Error(), ": ")
+			if path == "(document)" {
+				path = ""
+			}
+			paths = append(paths, path)
+		}
+		switch {
+		case c.Error == nil && len(errs) > 0:
+			t.Errorf("%s: refused: %v", c.Name, errs)
+		case c.Error != nil && len(errs) == 0:
+			t.Errorf("%s: accepted", c.Name)
+		case c.Error != nil:
+			for i, p := range paths {
+				if p != *c.Error {
+					t.Errorf("%s: an error at %q, not %q: %v", c.Name, p, *c.Error, errs[i])
+				}
+			}
+		}
+	}
+}

@@ -48,6 +48,24 @@ A property set on the element before Clack has loaded (`slides`, `loop`) is take
 loads; slides it refuses are reported as an error (`reportError`), and the markup is read
 instead. A slide still on its way when the slides change arrives where it now is.
 
+## Slides from a manifest
+
+```html
+<clack-show src="/albums/coast/manifest.json">
+  <!-- optional: markup shown until the manifest arrives, and if it cannot be had -->
+</clack-show>
+```
+
+`src` names a manifest ([`manifest.md`](manifest.md)). Until it arrives, the markup's slides
+are shown, as they are without script. The manifest's slides then take their place; its
+title names the show if `label` does not, and its language is set on the show's text.
+
+A manifest that cannot be had — a failed request, the wrong type, too large, not JSON, or
+not a valid manifest — leaves the markup's slides, shows a short notice in the show ("The
+photos could not be loaded."), fires an `error` event, and logs every problem found to the
+console, each named by its place in the file. Changing `src` drops a manifest still on its
+way; removing it goes back to the markup.
+
 ## Slides from script
 
 ```js
@@ -67,13 +85,14 @@ of the slides kept are not fetched again. Sources are grouped by type into a `<p
 the untyped ones make the `<img>`. Every URL is checked, those in a `srcset` included. A slide that cannot be shown
 throws a `TypeError` that names it and says why — a URL that is not http, https or relative,
 a missing size, a repeated id — and the show keeps the slides it had. While slides come from
-script the markup is not read; `show.slides = null` goes back to it.
+script neither the markup nor a manifest is read; `show.slides = null` goes back to them.
 
 ## Attributes
 
 | attribute | |
 |---|---|
-| `label` | what the show is called, for screen readers (default "Photos") |
+| `src` | a manifest to show (see above) |
+| `label` | what the show is called, for screen readers (default: the manifest's title, or "Photos") |
 | `loop` | the next of the last slide is the first, and the other way round |
 | `fit` | `contain` (default): the whole photo, as large as fits. `cover`: the frame filled, cropped |
 
@@ -90,6 +109,7 @@ The element is 3:2 unless the page gives it a height.
 | `next()`, `previous()` | move one slide; the promise says whether it was shown (`false` if another was asked for first) |
 | `goTo(index or id)` | go to a slide; rejects with a `RangeError` if there is none |
 | `slidechange` event | a slide is on screen: `detail` is `{ index, id, previous }` |
+| `error` event | the manifest named by `src` could not be had (the console says why) |
 
 ## What it does for the visitor
 
@@ -107,7 +127,8 @@ The element is 3:2 unless the page gives it a height.
 - **Loading ahead:** once a photo is on screen, the next, the previous, and the one after
   next are fetched. Photos no longer near are let go of (Firefox then stops their download;
   Chrome and Safari finish it into their cache).
-- **Crossfade** between photos, shortened when the visitor asks for reduced motion.
+- **Crossfade** between photos, shortened when the visitor asks for reduced motion, and
+  skipped while the page is hidden.
 - **A photo that cannot be loaded** keeps its place, with its description and a note
   saying so; the show goes on.
 - **Screen readers** hear the show as a carousel of slides ("3 of 24"), and the visitor's

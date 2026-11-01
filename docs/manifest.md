@@ -108,6 +108,21 @@ and kept for other programs. Any other property Clack does not know is an error,
 message — in particular, metadata outside the five classes is refused rather than shown or
 dropped silently.
 
+## Fetching
+
+Clack fetches a manifest with the page's cookies only if it is on the page's own origin, and
+accepts it only if:
+
+- the response is a success (2xx), served as `application/json` (or another `+json` type);
+- it is at most 16 MB — refused as soon as it is known to be larger, whether the server said
+  so or not;
+- it is UTF-8, and JSON;
+- it is a valid `clack-manifest/1`, with nothing it does not know (but `x-` properties).
+
+Relative URLs in it are resolved against the URL it was finally fetched from, after any
+redirects. A manifest is refused whole, never shown in part: one bad slide is a bad
+manifest.
+
 ## Checks beyond the schema
 
 The schema cannot say everything; Clack also refuses a manifest whose slide ids repeat, and

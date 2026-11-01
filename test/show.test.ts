@@ -215,6 +215,7 @@ test("a photo that cannot be loaded keeps its place and says so", async () => {
 });
 
 test("the crossfade ends with one slide on screen, or there is none", async () => {
+  if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing fades in a hidden page");
   const show = makeShow(three);
   show.style.setProperty("--clack-transition-duration", "300ms");
   await settledOn(show, "1 of 3");
@@ -379,6 +380,15 @@ test("fills the width of its line, with or without a height", async () => {
   assert(stage.right <= r.right && stage.left >= r.left, "the stage stays inside the show");
 });
 
+test("in a hidden page, a new slide replaces the old at once", async () => {
+  if (document.visibilityState !== "hidden") skip("this engine's window is visible");
+  const show = makeShow(three);
+  show.style.setProperty("--clack-transition-duration", "3s");
+  await settledOn(show, "1 of 3");
+  await show.next();
+  assertEqual(figures(show).length, 1, "no fade");
+});
+
 test("adds nothing to the page outside its own box", async () => {
   const show = makeShow(three);
   await settledOn(show, "1 of 3");
@@ -466,6 +476,7 @@ test("after a swipe, the next click is not swallowed", async () => {
 });
 
 test("a swiped photo leaves the way the finger went, right to left too", async () => {
+  if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing animates in a hidden page");
   const show = makeShow(three);
   show.dir = "rtl";
   show.style.setProperty("--clack-transition-duration", "400ms");

@@ -6,6 +6,8 @@ import "./element.test";
 import "./nav.test";
 import "./slides.test";
 import "./show.test";
+import "./manifest.test";
+import "./schema.test";
 import "./schemas.test";
 
 declare global {

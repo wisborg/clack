@@ -372,8 +372,14 @@ side with the version before.
 **1 — First release**
 - Core: slides, manual navigation (controls, keys, swipe), responsive images,
   decode-before-show, preloading, ThumbHash placeholders, crossfade. *(done but for
-  ThumbHash, which comes with the manifest loader; what the element does is in
-  `docs/component.md`, and `design/demo/` shows it with the design photographs)*
+  ThumbHash, which comes next; what the element does is in `docs/component.md`, and
+  `design/demo/` shows it with the design photographs)*
+- Manifests: `<clack-show src>`, every value checked before any is used, against the same
+  shared cases as the Go reference, and fuzzed in both. *(done. Clack checks against the
+  published schemas themselves — shipped without their annotations, about 1.2 KB compressed
+  each — with a validator of its own for the same subset of JSON Schema as the Go one, so
+  the browser and the tools cannot disagree about a rule; themes will be checked the same
+  way.)*
 - Sizing modes and the full-size view with zoom and pan.
 - Auto-play with pause control, visibility and reduced-motion handling.
 - Metadata display (hidden by default), theme loading and validation, the five themes.

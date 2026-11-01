@@ -13,6 +13,8 @@ import (
 	"strings"
 
 	"github.com/evanw/esbuild/pkg/api"
+
+	"github.com/wisborg/clack/tools/internal/jsonschema"
 )
 
 // Engines are the oldest browser versions the output must run in: the
@@ -69,6 +71,7 @@ func Build(o Options) ([]File, error) {
 		LegalComments: api.LegalCommentsEndOfFile,
 		Write:         o.Write,
 		LogLevel:      api.LogLevelSilent,
+		Plugins:       []api.Plugin{schemas},
 	}
 	if o.Minify {
 		opts.MinifyWhitespace = true
@@ -76,7 +79,7 @@ func Build(o Options) ([]File, error) {
 		opts.MinifySyntax = true
 		// The CSS arrives as text, which esbuild would otherwise embed as
 		// written, comments and all.
-		opts.Plugins = []api.Plugin{minifyCSS}
+		opts.Plugins = append(opts.Plugins, minifyCSS)
 	}
 	if o.Banner != "" {
 		opts.Banner = map[string]string{"js": o.Banner}
@@ -97,6 +100,28 @@ func Build(o Options) ([]File, error) {
 		files = append(files, File{Path: f.Path, Contents: f.Contents})
 	}
 	return files, nil
+}
+
+// schemas loads each imported JSON Schema (*.schema.json) without its
+// annotations: Clack checks themes and manifests against the published
+// schemas themselves, and needs their rules, not their explanations. A
+// schema the Go validator would refuse fails the build.
+var schemas = api.Plugin{
+	Name: "schemas",
+	Setup: func(b api.PluginBuild) {
+		b.OnLoad(api.OnLoadOptions{Filter: `\.schema\.json$`}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+			src, err := os.ReadFile(args.Path)
+			if err != nil {
+				return api.OnLoadResult{}, err
+			}
+			out, err := jsonschema.StripAnnotations(src)
+			if err != nil {
+				return api.OnLoadResult{}, fmt.Errorf("%s: %w", args.Path, err)
+			}
+			text := string(out)
+			return api.OnLoadResult{Contents: &text, Loader: api.LoaderJSON}, nil
+		})
+	},
 }
 
 // minifyCSS loads each imported stylesheet minified, still as text.

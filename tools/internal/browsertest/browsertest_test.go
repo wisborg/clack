@@ -111,3 +111,46 @@ func TestTestImages(t *testing.T) {
 		t.Errorf("log after reset = %s", logBody)
 	}
 }
+
+func TestEcho(t *testing.T) {
+	srv, err := Serve(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	resp, err := http.Get(srv.URL + "echo/a/b.json?body=%7B%7D&type=text/plain&status=404")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 404 || resp.Header.Get("Content-Type") != "text/plain" || string(body) != "{}" {
+		t.Errorf("echo: %d %q %q", resp.StatusCode, resp.Header.Get("Content-Type"), body)
+	}
+	resp, err = http.Get(srv.URL + "big?bytes=100000&declare=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if len(body) != 100002 || resp.ContentLength != 100002 {
+		t.Errorf("big: %d bytes, declared %d", len(body), resp.ContentLength)
+	}
+	resp, err = http.Get(srv.URL + "redirect?to=/echo/x.json%3Fbody%3D1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.Request.URL.Path != "/echo/x.json" || string(body) != "1" {
+		t.Errorf("redirect: ended at %s with %q", resp.Request.URL, body)
+	}
+	resp, err = http.Get(srv.URL + "redirect?to=//example.com/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 400 {
+		t.Errorf("redirect elsewhere: %d", resp.StatusCode)
+	}
+}

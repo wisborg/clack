@@ -58,7 +58,7 @@ type Server struct {
 
 // Serve starts the test server on a free loopback port. files maps a path
 // such as "/test.js" to its contents. It also serves made-up images for the
-// tests (see testImages).
+// tests (see testImages), and manifests of any kind (see registerEcho).
 func Serve(files map[string][]byte) (*Server, error) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -66,6 +66,7 @@ func Serve(files map[string][]byte) (*Server, error) {
 	}
 	mux := http.NewServeMux()
 	(&testImages{}).register(mux)
+	registerEcho(mux)
 	return serveOn(l, mux, files)
 }
 

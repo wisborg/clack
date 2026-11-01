@@ -53,6 +53,14 @@ for contrast, and `tools/internal/jsonschema` is our validator for exactly the s
 Schema the schemas use — it refuses any other keyword, so a schema needing one means adding
 it there, with a test. Patterns must be valid both in Go (RE2) and in JavaScript.
 
+Clack checks themes and manifests against the published schemas themselves: the build ships
+them stripped of their annotations (`tools/internal/bundle`), and `src/schema.ts` is the
+browser's validator for the same subset as the Go one, reporting errors at the same places.
+A keyword added to one validator is added to the other. Both must give the same verdict on
+every case in `test/fixtures/manifests.json`. Both are fuzzed: the browser test does it on every run, and the Go
+targets go further with `go test ./tools/internal/formats -fuzz=FuzzManifest -fuzztime=60s`
+(also `FuzzTheme`, and `FuzzStrip` in `tools/internal/jsonc`).
+
 ## Dependencies
 
 Every build or test dependency is in `DEPENDENCIES.md` with its reason and how it is

@@ -11,6 +11,7 @@ import css from "./clack.css";
 import { icon } from "./icons";
 import { photoKey, Photos, type Photo } from "./images";
 import { canStep, drawnWidth, preloadOrder, step } from "./nav";
+import { load } from "./manifest";
 import { fromInput, readMarkup, type Keyed, type Slide, type SlideInput } from "./slides";
 import { listen } from "./swipe";
 
@@ -26,6 +27,7 @@ const text = {
   of: (n: number, count: number) => `${n} of ${count}`,
   announce: (n: number, count: number, title: string) => `Photo ${n} of ${count}${title ? `: ${title}` : ""}`,
   failed: "This photo could not be loaded.",
+  noManifest: "The photos could not be loaded.",
 };
 
 /** What `slidechange` says. */
@@ -73,10 +75,12 @@ interface Running {
 
 /** The `<clack-show>` element. */
 export class ClackShow extends HTMLElement {
-  static readonly observedAttributes = ["loop", "fit", "label"];
+  static readonly observedAttributes = ["loop", "fit", "label", "src"];
 
   readonly #internals: ElementInternals;
+  readonly #show: HTMLDivElement;
   readonly #stage: HTMLDivElement;
+  readonly #notice: HTMLParagraphElement;
   readonly #title: HTMLSpanElement;
   readonly #credit: HTMLSpanElement;
   readonly #counter: HTMLSpanElement;
@@ -87,8 +91,12 @@ export class ClackShow extends HTMLElement {
   #slides: Keyed[] = [];
   readonly #indexById = new Map<string, number>();
   readonly #indexByKey = new Map<string, number>();
-  /** Set when the slides came from script; markup is then not read. */
+  /** Set when the slides came from script; neither markup nor manifest is then read. */
   #scripted = false;
+  /** The manifest's title, which names the show when the page has not. */
+  #showTitle = "";
+  /** Cancels the manifest being fetched, if one is. */
+  #abort: AbortController | null = null;
   readonly #photos = new Photos();
   /** The slide asked for, which may still be loading. */
   #target = -1;
@@ -123,10 +131,16 @@ export class ClackShow extends HTMLElement {
     root.adoptedStyleSheets = [styles()];
 
     const show = el("div", "show", "show");
+    this.#show = show;
     // Focusable by a click (not by Tab), so the keys work after clicking
     // the photo; the controls are what Tab reaches.
     this.#stage = el("div", "stage", "stage");
     this.#stage.tabIndex = -1;
+    // Says so when the manifest could not be had; a polite status, read once.
+    this.#notice = el("p", "notice", "notice");
+    this.#notice.role = "status";
+    this.#notice.hidden = true;
+    this.#stage.append(this.#notice);
 
     const below = el("div", "below", "below");
     const caption = el("p", "caption", "caption");
@@ -188,12 +202,13 @@ export class ClackShow extends HTMLElement {
       }
     }
     if (!this.#scripted) {
-      this.#mutations.observe(this, { childList: true, subtree: true, attributes: true, characterData: true });
-      this.#readMarkup();
+      this.#source();
     }
   }
 
   disconnectedCallback(): void {
+    this.#abort?.abort();
+    this.#abort = null;
     this.#resize.disconnect();
     this.#mutations.disconnect();
     this.#stopSwipe?.();
@@ -204,7 +219,10 @@ export class ClackShow extends HTMLElement {
   attributeChangedCallback(name: string, _old: string | null, value: string | null): void {
     switch (name) {
       case "label":
-        this.#internals.ariaLabel = value || text.show;
+        this.#internals.ariaLabel = value || this.#showTitle || text.show;
+        break;
+      case "src":
+        if (this.isConnected && !this.#scripted) this.#source();
         break;
       case "loop":
         this.#updateControls();
@@ -234,15 +252,15 @@ export class ClackShow extends HTMLElement {
   set slides(input: readonly (SlideInput | Slide)[] | null) {
     if (input === null) {
       this.#scripted = false;
-      if (this.isConnected) {
-        this.#mutations.observe(this, { childList: true, subtree: true, attributes: true, characterData: true });
-        this.#readMarkup();
-      }
+      if (this.isConnected) this.#source();
       return;
     }
     const slides = fromInput(input);
     this.#scripted = true;
+    this.#abort?.abort();
+    this.#abort = null;
     this.#mutations.disconnect();
+    this.#setTitle("", "");
     this.#setSlides(slides);
   }
 
@@ -286,6 +304,68 @@ export class ClackShow extends HTMLElement {
 
   #readMarkup(): void {
     this.#setSlides(readMarkup(this, (m) => console.warn(`Clack: ${m}`)));
+  }
+
+  /**
+   * Reads the slides from where they now come from, when not from script:
+   * the manifest named by src, or else the markup. While a manifest loads,
+   * the markup's slides are shown (they are what a page without script
+   * shows too); a manifest that cannot be had leaves them, says so in the
+   * show, and fires an error event.
+   */
+  #source(): void {
+    this.#abort?.abort();
+    this.#abort = null;
+    const src = this.getAttribute("src");
+    if (!src) {
+      this.#setTitle("", "");
+      this.#mutations.observe(this, { childList: true, subtree: true, attributes: true, characterData: true });
+      this.#readMarkup();
+      return;
+    }
+    this.#mutations.disconnect();
+    if (this.#slides.length === 0) this.#readMarkup();
+    const abort = new AbortController();
+    this.#abort = abort;
+    let url: string;
+    try {
+      url = new URL(src, document.baseURI).href;
+    } catch {
+      this.#manifestFailed(new Error(`Clack: src is not a URL: ${src}`));
+      return;
+    }
+    load(url, abort.signal).then(
+      (m) => {
+        if (abort.signal.aborted) return;
+        this.#abort = null;
+        this.#notice.hidden = true;
+        this.#setTitle(m.title, m.lang);
+        this.#setSlides(m.slides);
+      },
+      (e: unknown) => {
+        if (abort.signal.aborted) return;
+        this.#abort = null;
+        this.#manifestFailed(e);
+      },
+    );
+  }
+
+  #manifestFailed(e: unknown): void {
+    console.error(e);
+    this.#notice.textContent = text.noManifest;
+    this.#notice.hidden = false;
+    this.dispatchEvent(new Event("error"));
+  }
+
+  /** The manifest's title names the show if the page has not; its language is the slides' text's. */
+  #setTitle(title: string, lang: string): void {
+    this.#showTitle = title;
+    this.#internals.ariaLabel = this.getAttribute("label") || title || text.show;
+    if (lang) {
+      this.#show.lang = lang;
+    } else {
+      this.#show.removeAttribute("lang");
+    }
   }
 
   /**
@@ -571,8 +651,16 @@ export class ClackShow extends HTMLElement {
     }
   }
 
-  /** The crossfade's length in milliseconds, from the theme, shortened when motion is reduced. */
+  /**
+   * The crossfade's length in milliseconds, from the theme, shortened when
+   * motion is reduced, and none while the page is hidden: nobody sees it,
+   * and an engine may not run animations in a hidden page at all, which
+   * would leave the old slide in place until the page is shown again.
+   */
   #duration(): number {
+    if (document.visibilityState === "hidden") {
+      return 0;
+    }
     const style = getComputedStyle(this);
     if (style.getPropertyValue("--clack-transition").trim() === "none") {
       return 0;

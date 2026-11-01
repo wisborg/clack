@@ -1,6 +1,7 @@
 package jsonc
 
 import (
+	"bytes"
 	"encoding/json"
 	"testing"
 )
@@ -55,4 +56,29 @@ func TestStrippedIsJSON(t *testing.T) {
 	if v["name"] != "Mine" || v["url"] != "https://example.com/x" {
 		t.Errorf("got %v", v)
 	}
+}
+
+// Stripping never panics, keeps the length, and keeps every newline where
+// it was; text without comments comes back as it was.
+func FuzzStrip(f *testing.F) {
+	for _, s := range []string{"{}", `{"a": "//"} // c`, "/* a\nb */", `"\"`, "/*", "//\n//", `{"a":"\\"}`} {
+		f.Add([]byte(s))
+	}
+	f.Fuzz(func(t *testing.T, in []byte) {
+		out, err := Strip(in)
+		if err != nil {
+			return
+		}
+		if len(out) != len(in) {
+			t.Fatalf("length %d, want %d", len(out), len(in))
+		}
+		for i := range in {
+			if (in[i] == '\n') != (out[i] == '\n') {
+				t.Fatalf("a newline moved at %d", i)
+			}
+		}
+		if !bytes.Contains(in, []byte("/")) && !bytes.Equal(in, out) {
+			t.Fatal("text without a slash changed")
+		}
+	})
 }

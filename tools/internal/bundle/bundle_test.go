@@ -88,3 +88,28 @@ export const sheet: string = css;
 		t.Errorf("the CSS is not minified as expected:\n%s", js)
 	}
 }
+
+func TestSchemasArriveWithoutAnnotations(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "a.schema.json", `{"description": "only words", "properties": {"title": {"type": "string", "title": "T"}}}`)
+	entry := write(t, dir, "a.ts", `import schema from "./a.schema.json";
+export const s: unknown = schema;
+`)
+	files, err := Build(Options{Entry: entry, Outfile: filepath.Join(dir, "out.js"), Minify: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var js string
+	for _, f := range files {
+		if filepath.Base(f.Path) == "out.js" {
+			js = string(f.Contents)
+		}
+	}
+	if strings.Contains(js, "only words") || !strings.Contains(js, `properties:{title:{type:"string"}}`) {
+		t.Errorf("the schema is not stripped as expected:\n%s", js)
+	}
+	write(t, dir, "a.schema.json", `{"format": "email"}`)
+	if _, err := Build(Options{Entry: entry, Outfile: filepath.Join(dir, "out.js")}); err == nil {
+		t.Error("a schema the validator refuses was bundled")
+	}
+}

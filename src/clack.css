@@ -318,3 +318,20 @@
     animation: clack-appear 200ms 400ms both;
   }
 }
+
+/* When the manifest could not be had. */
+.notice {
+  grid-area: 1 / 1;
+  place-self: center;
+  z-index: 1;
+  margin: 0;
+  padding: 8px 14px;
+  border-radius: 6px;
+  background: var(--clack-surface);
+  color: var(--clack-muted);
+  font-size: 13px;
+}
+
+.notice[hidden] {
+  display: none;
+}

@@ -283,3 +283,35 @@ func TestRecursionInsideAllOfIsNotALoop(t *testing.T) {
 		t.Error(errs)
 	}
 }
+
+func TestStripAnnotations(t *testing.T) {
+	schema := `{
+		"$schema": "x", "title": "T", "description": "D",
+		"type": "object",
+		"properties": {
+			"description": {"type": "string", "description": "a property called description"},
+			"title": {"$ref": "#/$defs/t", "examples": ["a"]}
+		},
+		"$defs": {"t": {"type": "string", "maxLength": 3, "$comment": "c"}},
+		"oneOf": [{"required": ["title"], "markdownDescription": "m"}, {"required": ["description"]}]
+	}`
+	out, err := StripAnnotations([]byte(schema))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"$defs":{"t":{"maxLength":3,"type":"string"}},"oneOf":[{"required":["title"]},{"required":["description"]}],"properties":{"description":{"type":"string"},"title":{"$ref":"#/$defs/t"}},"type":"object"}`
+	if string(out) != want {
+		t.Errorf("got  %s\nwant %s", out, want)
+	}
+	// The same rules: what one accepts and refuses, so does the other.
+	a := mustCompile(t, schema)
+	b := mustCompile(t, string(out))
+	for _, doc := range []string{`{"title":"abc"}`, `{"title":"abcd"}`, `{"description":"x"}`, `{}`, `{"title":"a","description":"b"}`} {
+		if (len(validate(t, a, doc)) == 0) != (len(validate(t, b, doc)) == 0) {
+			t.Errorf("%s: the stripped schema decides otherwise", doc)
+		}
+	}
+	if _, err := StripAnnotations([]byte(`{"format": "email"}`)); err == nil {
+		t.Error("stripped a schema the validator refuses")
+	}
+}
