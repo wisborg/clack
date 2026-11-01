@@ -29,7 +29,8 @@ other formats — is a slide, and so is each child `<img>`. Anything else is lef
   `sizes` itself, from the size each photo is drawn at.
 - The `<figcaption>` is the title; a `<small>` inside it is the credit.
 - The figure's `id` is the slide's id, used by `goTo` and in events. A slide without one is
-  numbered; a repeated one is renumbered, with a warning.
+  numbered by its place, and Clack recognises it by its photo, so it keeps its place when
+  others are added before it; a repeated id is renumbered, with a warning.
 - `data-full` names the full-size file, for the full-size view still to come (an http,
   https or relative URL; anything else is ignored, with a warning). `data-color` is a
   colour (`#rrggbb`) that holds the first photo's place while it loads.
@@ -44,7 +45,8 @@ caption fixed or a slide added changes only the words and the count: the photo o
 and every photo whose slide is unchanged, stays as it is.
 
 A property set on the element before Clack has loaded (`slides`, `loop`) is taken up when it
-loads.
+loads; slides it refuses are reported as an error (`reportError`), and the markup is read
+instead. A slide still on its way when the slides change arrives where it now is.
 
 ## Slides from script
 
@@ -59,8 +61,10 @@ show.slides = [
 ];
 ```
 
-The shape is a manifest's slide (see [`manifest.md`](manifest.md)). Sources are grouped by
-type into a `<picture>`; the untyped ones make the `<img>`. A slide that cannot be shown
+The shape is a manifest's slide (see [`manifest.md`](manifest.md)), or Clack's own, as the
+`slides` getter returns it — so `show.slides = show.slides.filter(…)` works, and the photos
+of the slides kept are not fetched again. Sources are grouped by type into a `<picture>`;
+the untyped ones make the `<img>`. Every URL is checked, those in a `srcset` included. A slide that cannot be shown
 throws a `TypeError` that names it and says why — a URL that is not http, https or relative,
 a missing size, a repeated id — and the show keeps the slides it had. While slides come from
 script the markup is not read; `show.slides = null` goes back to it.

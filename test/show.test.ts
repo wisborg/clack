@@ -542,3 +542,92 @@ test("the first photo's place is held in its colour while it loads", async () =>
   assertEqual(part(show, ".placeholder").ariaBusy, "true", "marked busy");
   await settledOn(show, "1 of 1");
 });
+
+test("a swipe while the first photo loads steps from where the visitor is going", async () => {
+  const show = makeShow([{ delay: 800 }, {}, {}, {}], { loop: "" });
+  await waitFor(() => !!show.shadowRoot!.querySelector(".placeholder"), "the placeholder");
+  const p = pointer(show);
+  const x = p.left + p.width * 0.2;
+  p.swipe(x, x + 320); // rightwards: the previous, which wraps to the last
+  assertEqual(show.index, 3, "the last slide, not the one before it");
+  await settledOn(show, "4 of 4");
+});
+
+test("a slidechange listener can go elsewhere at once", async () => {
+  const show = makeShow([{}, {}, {}, {}, {}, { delay: 600 }]);
+  await settledOn(show, "1 of 6");
+  let sent = false;
+  show.addEventListener("slidechange", () => {
+    if (!sent) {
+      sent = true;
+      void show.goTo(5);
+    }
+  });
+  await show.next();
+  await settledOn(show, "6 of 6");
+  const photo = figures(show)[0]!.querySelector("img")!;
+  assert(photo.complete && photo.naturalWidth > 0, "the slide it went to has its photo");
+});
+
+test("slides without ids keep their place, and their photos, when one is added", async () => {
+  const show = makeShow([{}, {}, {}]);
+  await settledOn(show, "1 of 3");
+  await show.goTo(2);
+  await settledOn(show, "3 of 3");
+  const slide = figures(show)[0]!;
+  const photo = slide.querySelector("img")!;
+  show.prepend(figure({}));
+  await waitFor(() => show.count === 4, "the new slide");
+  assertEqual(show.index, 3, "still on the same photo, now fourth");
+  assertEqual(figures(show)[0], slide, "the same slide on screen");
+  assertEqual(slide.querySelector("img"), photo, "the same photo, not fetched again");
+});
+
+test("a slide still loading arrives, and says so, when the markup changes meanwhile", async () => {
+  const show = makeShow([{ title: "A" }, { delay: 500, title: "B" }]);
+  await settledOn(show, "1 of 2");
+  const going = show.goTo(1);
+  await sleep(50);
+  show.children[0]!.querySelector("figcaption")!.firstChild!.textContent = "A, fixed";
+  assertEqual(await going, true, "the slide asked for was shown");
+  assertEqual(onScreen(show), "2 of 2", "on screen");
+});
+
+test("slides set wrongly before Clack loads are reported, and the show still works", async () => {
+  const inert = document.implementation.createHTMLDocument("");
+  const early = inert.createElement(tagName) as unknown as Record<string, unknown>;
+  early["slides"] = [{ id: "bad", alt: "", width: 1, height: 1, sources: [{ url: "javascript:alert(1)", width: 1 }] }];
+  const show = document.adoptNode(early as unknown as ClackShow);
+  show.append(figure({}));
+  show.style.setProperty("--clack-transition-duration", "40ms");
+  let reported: unknown = null;
+  const onError = (e: ErrorEvent): void => {
+    reported = e.error;
+    e.preventDefault();
+  };
+  window.addEventListener("error", onError);
+  try {
+    fixture().append(show);
+  } finally {
+    window.removeEventListener("error", onError);
+  }
+  assert(reported instanceof TypeError, `the bad slides were reported (${String(reported)})`);
+  assertEqual(show.count, 1, "and the markup is read instead");
+  await settledOn(show, "1 of 1");
+});
+
+test("the slides read from a show can be given back to it", async () => {
+  const show = makeShow([{ id: "a" }, { id: "b" }, { id: "c" }]);
+  await settledOn(show, "1 of 3");
+  const photo = figures(show)[0]!.querySelector("img")!;
+  show.slides = show.slides.filter((s) => s.id !== "b");
+  assertEqual(show.count, 2, "the slides given back");
+  assertEqual(figures(show)[0]!.querySelector("img"), photo, "the photo on screen is the same");
+  let threw = false;
+  try {
+    show.slides = [{ ...show.slides[0]!, srcset: "a.jpg 1x, javascript:alert(1) 2x" }];
+  } catch (e) {
+    threw = e instanceof TypeError;
+  }
+  assert(threw, "a URL in a srcset that is not http(s) is refused");
+});

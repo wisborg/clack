@@ -1,4 +1,4 @@
-import { fromInput, readMarkup, usableURL, type SlideInput } from "../src/slides";
+import { fromInput, readMarkup, srcsetURLs, usableURL, type SlideInput } from "../src/slides";
 import { assert, assertEqual, assertThrows, fixture, test } from "./harness";
 
 function markup(html: string[]): HTMLElement {
@@ -147,5 +147,20 @@ test("usableURL allows http, https and relative URLs only", () => {
   }
   for (const u of ["javascript:alert(1)", " javascript:alert(1)", "JAVASCRIPT:x", "data:,x", "blob:x", "file:///x", "mailto:a@b"]) {
     assert(!usableURL(u), `accepted ${u}`);
+  }
+});
+
+test("srcsetURLs reads a srcset as browsers do", () => {
+  const cases: [string, string[]][] = [
+    ["a.jpg 640w, b.jpg 1280w", ["a.jpg", "b.jpg"]],
+    ["a.jpg", ["a.jpg"]],
+    ["  a.jpg 1x ,b.jpg 2x  ", ["a.jpg", "b.jpg"]],
+    ["a,b.jpg 640w, c.jpg", ["a,b.jpg", "c.jpg"]],
+    ["a.jpg,, b.jpg", ["a.jpg", "b.jpg"]],
+    ["javascript:x 1x, b.jpg 2x", ["javascript:x", "b.jpg"]],
+    ["", []],
+  ];
+  for (const [set, want] of cases) {
+    assertEqual(srcsetURLs(set).join(" | "), want.join(" | "), JSON.stringify(set));
   }
 });

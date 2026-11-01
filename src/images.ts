@@ -5,7 +5,7 @@
  * photo. Photos far from the current one are let go, cancelling their
  * download if it is still running.
  */
-import type { Slide } from "./slides";
+import type { Keyed, Slide } from "./slides";
 
 /** "dropped": let go of before it arrived, and never to be shown. */
 export type LoadState = "loading" | "ready" | "failed" | "dropped";
@@ -84,7 +84,7 @@ async function settle(img: HTMLImageElement): Promise<LoadState> {
   }
 }
 
-/** The photos of one show, by slide id. */
+/** The photos of one show, by slide key (see Keyed). */
 export class Photos {
   readonly #photos = new Map<string, Photo>();
 
@@ -92,8 +92,8 @@ export class Photos {
    * The photo for slide, building and starting it if need be. `urgent`
    * asks the browser to fetch it ahead of others.
    */
-  get(slide: Slide, sizes: string, urgent: boolean): Photo {
-    let photo = this.#photos.get(slide.id);
+  get(slide: Keyed, sizes: string, urgent: boolean): Photo {
+    let photo = this.#photos.get(slide.key);
     if (!photo) {
       const { element, img } = build(slide, sizes);
       img.fetchPriority = urgent ? "high" : "low";
@@ -109,7 +109,7 @@ export class Photos {
         p.state = state;
       });
       photo = p;
-      this.#photos.set(slide.id, photo);
+      this.#photos.set(slide.key, photo);
     } else if (urgent) {
       photo.img.fetchPriority = "high";
     }
@@ -117,9 +117,9 @@ export class Photos {
   }
 
   /** Sets the size every photo is drawn at; the browser fetches more pixels only if it needs them. */
-  resize(sizes: (id: string) => string): void {
-    for (const [id, photo] of this.#photos) {
-      const s = sizes(id);
+  resize(sizes: (key: string) => string): void {
+    for (const [key, photo] of this.#photos) {
+      const s = sizes(key);
       if (photo.img.sizes !== s) {
         for (const source of photo.element.querySelectorAll("source")) {
           source.sizes = s;
@@ -148,8 +148,8 @@ export class Photos {
    * with the same photo (its alt text brought up to date), and lets go of
    * the rest.
    */
-  carryOver(slides: readonly Slide[]): void {
-    const now = new Map(slides.map((s) => [s.id, s]));
+  carryOver(slides: readonly Keyed[]): void {
+    const now = new Map(slides.map((s) => [s.key, s]));
     for (const [id, photo] of this.#photos) {
       const slide = now.get(id);
       if (slide && photoKey(slide) === photo.key) {

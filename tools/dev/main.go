@@ -404,10 +404,25 @@ func gofmt(ctx context.Context) error {
 }
 
 // designServer serves design/ at /, the verified photos at /photos/, and
-// a fresh build of Clack at /dist/ for the demo pages.
-func designServer(ctx context.Context, addr string) (*browsertest.Server, error) {
-	if err := cmdBuild(ctx, nil); err != nil {
-		return nil, err
+// Clack's build at /dist/ for the demo pages. build says whether to build
+// it first: required, or only attempted (a failed build then breaks the
+// demo pages, not the mock-ups, which never load it).
+type buildMode int
+
+const (
+	noBuild buildMode = iota
+	tryBuild
+	mustBuild
+)
+
+func designServer(ctx context.Context, addr string, build buildMode) (*browsertest.Server, error) {
+	if build != noBuild {
+		if err := cmdBuild(ctx, nil); err != nil {
+			if build == mustBuild {
+				return nil, err
+			}
+			fmt.Fprintf(os.Stderr, "dev serve: the build failed, so the demo pages will not work: %v\n", err)
+		}
 	}
 	list, err := photos.Load("design/photos.json")
 	if err != nil {
@@ -426,7 +441,7 @@ func cmdServe(ctx context.Context, args []string) error {
 	if err := parse(fs, args); err != nil {
 		return err
 	}
-	srv, err := designServer(ctx, *addr)
+	srv, err := designServer(ctx, *addr, tryBuild)
 	if err != nil {
 		return err
 	}
@@ -441,12 +456,17 @@ func cmdServe(ctx context.Context, args []string) error {
 // load or decode -- a missing photo must fail the run, not leave an empty
 // frame in a screenshot that says "ok". The load event does not wait for
 // lazily loaded images, which a real index uses, so each is told to load
-// now and waited for. On a demo page, the images include those inside
-// each <clack-show>, once it has a photo on screen and its fade is over,
-// and a show whose photo could not be loaded counts as a failed image.
+// now and waited for. On a demo page, the images are those inside each
+// <clack-show>, once it has a photo on screen and its fade is over -- not
+// its markup's, which a visitor's browser never displays -- and a show
+// whose photo could not be loaded counts as a failed image. Both waits
+// share one deadline, well inside the session's 30 s script timeout, so a
+// page that stalls is reported rather than ending the run.
 const pageCheck = `
 const done = arguments[arguments.length - 1];
 (async () => {
+  const deadline = performance.now() + 20000;
+  const left = () => Math.max(0, deadline - performance.now());
   const shows = [...document.querySelectorAll("clack-show")];
   const onScreen = (show) => new Promise((resolve) => {
     const look = () => {
@@ -458,14 +478,17 @@ const done = arguments[arguments.length - 1];
   });
   const showsTimedOut = await Promise.race([
     Promise.all(shows.map(onScreen)).then(() => false),
-    new Promise((r) => setTimeout(() => r(true), 15000)),
+    new Promise((r) => setTimeout(() => r(true), left())),
   ]);
-  const imgs = [...document.images, ...shows.flatMap((s) => [...s.shadowRoot.querySelectorAll("img")])];
+  const imgs = [
+    ...[...document.images].filter((img) => !img.closest("clack-show")),
+    ...shows.flatMap((s) => [...s.shadowRoot.querySelectorAll("img")]),
+  ];
   const settled = imgs.map((img) => {
     img.loading = "eager";
     return img.decode().then(() => null, () => img.currentSrc || img.src);
   });
-  const timeout = new Promise((r) => setTimeout(() => r("timeout"), 15000));
+  const timeout = new Promise((r) => setTimeout(() => r("timeout"), left()));
   const r = await Promise.race([Promise.all(settled), timeout]);
   const missing = shows
     .filter((s) => s.shadowRoot.querySelector(".slide.failed"))
@@ -568,7 +591,11 @@ func cmdShots(ctx context.Context, args []string) error {
 		return usageError{"dev shots: no pages to draw"}
 	}
 
-	srv, err := designServer(ctx, "127.0.0.1:0")
+	build := noBuild
+	if *set == "demo" {
+		build = mustBuild
+	}
+	srv, err := designServer(ctx, "127.0.0.1:0", build)
 	if err != nil {
 		return err
 	}
@@ -647,7 +674,7 @@ func shootViewport(ctx context.Context, b webdriver.Browser, driver, base string
 			case !strings.HasSuffix(check.Title, title):
 				problems = append(problems, fmt.Sprintf("%s: not a design page (title %q)", url, check.Title))
 			case check.TimedOut:
-				problems = append(problems, fmt.Sprintf("%s: images still loading after 15 s", url))
+				problems = append(problems, fmt.Sprintf("%s: the page or its images still loading after 20 s", url))
 			case len(check.Failed) > 0:
 				problems = append(problems, fmt.Sprintf("%s: images failed: %s", url, strings.Join(check.Failed, ", ")))
 			}

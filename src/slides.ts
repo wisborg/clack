@@ -32,6 +32,16 @@ export interface Slide {
   credit: string;
 }
 
+/**
+ * A slide as the show keeps it: with `key`, what identifies it across
+ * changes to the slides. That is its id when it was given one; a slide
+ * without one is numbered by its place, which shifts when a slide is added
+ * before it, so it is known by its photo instead.
+ */
+export interface Keyed extends Slide {
+  key: string;
+}
+
 /** A slide as given from script: the slide format of a manifest. */
 export interface SlideInput {
   id: string;
@@ -59,9 +69,10 @@ function positive(value: string | null): number {
  * in it the credit. Problems that do not stop a slide being shown are
  * passed to warn.
  */
-export function readMarkup(host: Element, warn: (message: string) => void): Slide[] {
-  const slides: Slide[] = [];
+export function readMarkup(host: Element, warn: (message: string) => void): Keyed[] {
+  const slides: Keyed[] = [];
   const ids = new Set<string>();
+  const keys = new Set<string>();
   for (const child of host.children) {
     const figure = child.localName === "figure" ? child : null;
     // The figure's photo, not an icon that happens to sit in its caption.
@@ -74,7 +85,8 @@ export function readMarkup(host: Element, warn: (message: string) => void): Slid
       continue;
     }
     const n = slides.length + 1;
-    let id = collapse(figure?.id || img.dataset["id"]) || String(n);
+    const given = collapse(figure?.id || img.dataset["id"]);
+    let id = given || String(n);
     if (ids.has(id)) {
       // Its number, unless that is taken too (an earlier figure may have
       // it as its id), and then its number with a suffix.
@@ -134,13 +146,22 @@ export function readMarkup(host: Element, warn: (message: string) => void): Slid
       );
     }
 
+    const src = img.getAttribute("src") ?? "";
+    const srcset = img.getAttribute("srcset") ?? "";
+    let key = given ? `id:${id}` : `photo:${src} ${srcset}`;
+    for (let k = 2; keys.has(key); k++) {
+      key = `${given ? `id:${id}` : `photo:${src} ${srcset}`}#${k}`;
+    }
+    keys.add(key);
+
     slides.push({
+      key,
       id,
       alt: alt ?? "",
       width,
       height,
-      src: img.getAttribute("src") ?? "",
-      srcset: img.getAttribute("srcset") ?? "",
+      src,
+      srcset,
       alternatives,
       full,
       page: "",
@@ -170,12 +191,18 @@ export function usableURL(url: string): boolean {
  * shown with a TypeError that says which slide and why. The full manifest
  * format is checked by the manifest loader; this checks what a slide needs.
  */
-export function fromInput(input: readonly SlideInput[]): Slide[] {
+export function fromInput(input: readonly (SlideInput | Slide)[]): Keyed[] {
   if (!Array.isArray(input)) {
     throw new TypeError("Clack: slides must be an array");
   }
   const ids = new Set<string>();
-  return input.map((s, i): Slide => {
+  const keys = new Set<string>();
+  const unique = (slide: Keyed): Keyed => {
+    if (keys.has(slide.key)) slide.key = `id:${slide.id}`;
+    keys.add(slide.key);
+    return slide;
+  };
+  return input.map((s, i): Keyed => {
     const fail = (why: string): never => {
       throw new TypeError(`Clack: slide ${i + 1}: ${why}`);
     };
@@ -186,6 +213,9 @@ export function fromInput(input: readonly SlideInput[]): Slide[] {
     if (typeof s.alt !== "string") fail("alt must be a string");
     for (const [name, v] of [["width", s.width], ["height", s.height]] as const) {
       if (!Number.isInteger(v) || v < 1) fail(`${name} must be a positive integer`);
+    }
+    if (isSlide(s)) {
+      return unique(checkSlide(s, fail));
     }
     if (!Array.isArray(s.sources) || s.sources.length === 0) fail("sources must have at least one source");
 
@@ -213,7 +243,8 @@ export function fromInput(input: readonly SlideInput[]): Slide[] {
     if (page && !usableURL(page)) fail("the page URL must be http, https or relative");
     const color = s.placeholder?.color ?? "";
 
-    return {
+    return unique({
+      key: `id:${s.id}`,
       id: s.id,
       alt: s.alt,
       width: s.width,
@@ -226,7 +257,7 @@ export function fromInput(input: readonly SlideInput[]): Slide[] {
       color: /^#[0-9a-fA-F]{6}$/.test(color) ? color : "",
       title: collapse(s.description?.title),
       credit: collapse(s.description?.credit),
-    };
+    });
   });
 }
 
@@ -236,4 +267,88 @@ export function fromInput(input: readonly SlideInput[]): Slide[] {
  */
 function srcsetURL(url: string): string {
   return url.replace(/[,\s]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0"));
+}
+
+/** Whether a slide given from script is in Clack's own shape (as the `slides` getter returns), not a manifest's. */
+function isSlide(s: SlideInput | Slide): s is Slide {
+  return typeof (s as Slide).src === "string" && !("sources" in s);
+}
+
+/**
+ * Checks a slide in Clack's own shape -- one the page read from `slides`
+ * and gives back, perhaps changed -- as strictly as one in a manifest's:
+ * every URL, in src, in each srcset and in each source, must be http, https
+ * or relative. (The id, alt and size were checked by the caller.)
+ */
+function checkSlide(s: Slide, fail: (why: string) => never): Keyed {
+  const str = (v: unknown, what: string): string => (typeof v === "string" ? v : fail(`${what} must be a string`));
+  if (!usableURL(s.src)) fail("src must be an http, https or relative URL");
+  const srcsetOK = (set: string, what: string): string => {
+    for (const url of srcsetURLs(str(set, what))) {
+      if (!usableURL(url)) fail(`${what}: every URL must be http, https or relative`);
+    }
+    return set;
+  };
+  if (!Array.isArray(s.alternatives)) fail("alternatives must be an array");
+  const full = str(s.full ?? "", "full");
+  if (full && !usableURL(full)) fail("the full-size URL must be http, https or relative");
+  const page = str(s.page ?? "", "page");
+  if (page && !usableURL(page)) fail("the page URL must be http, https or relative");
+  const color = str(s.color ?? "", "color");
+  // A slide read from the show and given back keeps its identity, so its
+  // photo is not fetched again; the caller makes sure keys are unique.
+  const key = (s as Partial<Keyed>).key;
+  return {
+    key: typeof key === "string" && key ? key : `id:${s.id}`,
+    id: s.id,
+    alt: s.alt,
+    width: s.width,
+    height: s.height,
+    src: s.src,
+    srcset: srcsetOK(s.srcset ?? "", "srcset"),
+    alternatives: s.alternatives.map((a, k) => ({
+      type: str(a?.type ?? "", `alternative ${k + 1}: type`),
+      media: str(a?.media ?? "", `alternative ${k + 1}: media`),
+      srcset: srcsetOK(a?.srcset, `alternative ${k + 1}: srcset`),
+    })),
+    full,
+    page,
+    color: /^#[0-9a-fA-F]{6}$/.test(color) ? color : "",
+    title: collapse(str(s.title ?? "", "title")),
+    credit: collapse(str(s.credit ?? "", "credit")),
+  };
+}
+
+/**
+ * The URLs in a srcset, read as the HTML standard reads one: a URL runs to
+ * the next whitespace, loses any commas at its end, and its descriptors run
+ * to the next comma.
+ */
+export function srcsetURLs(srcset: string): string[] {
+  const urls: string[] = [];
+  let i = 0;
+  const space = /[\t\n\f\r ]/;
+  while (i < srcset.length) {
+    while (i < srcset.length && (space.test(srcset[i]!) || srcset[i] === ",")) i++;
+    if (i >= srcset.length) break;
+    let j = i;
+    while (j < srcset.length && !space.test(srcset[j]!)) j++;
+    let url = srcset.slice(i, j);
+    i = j;
+    if (url.endsWith(",")) {
+      url = url.replace(/,+$/, "");
+    } else {
+      // Descriptors, to the next comma outside parentheses.
+      let depth = 0;
+      while (i < srcset.length) {
+        const c = srcset[i]!;
+        if (c === "(") depth++;
+        else if (c === ")") depth = Math.max(0, depth - 1);
+        else if (c === "," && depth === 0) break;
+        i++;
+      }
+    }
+    if (url) urls.push(url);
+  }
+  return urls;
 }
