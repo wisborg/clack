@@ -238,9 +238,15 @@ show returns focus to the same thumbnail.
 - **Decided (2026-11-01): Clack draws the index, not each host.** The index needs what the
   slideshow already has — `srcset`, ThumbHash placeholders, lazy loading, keyboard use and
   screen-reader labels — and the Contact sheet theme is only useful if the index is Clack's.
-- **Markup first, like the show.** The light DOM is a plain list of links to each photo's
-  page, so with no script the index is still a working index, styled by the host. With
-  script, Clack lays it out from the theme.
+- **Markup first, like the show, and enhanced in place.** The light DOM is the list of links
+  to each photo's page, which the host may already lay out as the justified grid in CSS
+  alone (`flex-grow` in proportion to each photo's shape, every box sized before its photo
+  arrives) — Shoebox does, from the same theme tokens. With script, Clack draws the same rows
+  from the same rule, so nothing moves when it takes over, and a visitor returning with Back
+  lands where they were.
+- **Sections.** An index can be divided under headings — Shoebox shows a trip's days this
+  way, a heading per day and its photos beneath — each section a group of its own in the
+  markup.
 - **Large albums come a page at a time.** A `rel="next"` link at the end works without
   script; with script, the next page is fetched as the visitor nears the end, and the rows
   continue without reflowing the ones above. (Whether pages also come as manifests is
@@ -372,7 +378,9 @@ side with the version before.
 - Auto-play with pause control, visibility and reduced-motion handling.
 - Metadata display (hidden by default), theme loading and validation, the five themes.
 - The index, `<clack-index>`: justified and contact-sheet layouts, paired with a show,
-  paging.
+  sections, paging, enhancing the host's layout in place.
+- Title slides: a slide type that introduces a part of a show (a day of a trip), for
+  Shoebox's slideshows of an album with its sub-albums.
 - Accessibility pass, strict-CSP test page, documentation, a demo page.
 
 **2 — Polish**
