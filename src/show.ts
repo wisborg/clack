@@ -9,7 +9,7 @@
  */
 import css from "./clack.css";
 import { icon } from "./icons";
-import { Photos, type Photo } from "./images";
+import { photoKey, Photos, type Photo } from "./images";
 import { canStep, drawnWidth, preloadOrder, step } from "./nav";
 import { fromInput, readMarkup, type Slide, type SlideInput } from "./slides";
 import { listen } from "./swipe";
@@ -39,8 +39,12 @@ export interface SlideChangeDetail {
 interface How {
   /** By the visitor, through Clack's controls, keys or a swipe: announced. */
   user: boolean;
-  /** A committed swipe, and the drag offset it left the photo at. */
-  swipe?: { direction: -1 | 1; offset: number };
+  /**
+   * A committed swipe: the way the finger went on screen (-1 left, 1
+   * right), which the old photo carries on in, and the drag offset it left
+   * that photo at.
+   */
+  swipe?: { exit: -1 | 1; offset: number };
 }
 
 // One stylesheet, shared by every instance in the document.
@@ -81,6 +85,7 @@ export class ClackShow extends HTMLElement {
   readonly #live: HTMLDivElement;
 
   #slides: Slide[] = [];
+  readonly #indexById = new Map<string, number>();
   /** Set when the slides came from script; markup is then not read. */
   #scripted = false;
   readonly #photos = new Photos();
@@ -160,6 +165,17 @@ export class ClackShow extends HTMLElement {
   }
 
   connectedCallback(): void {
+    // A page may set a property before Clack is loaded: the value then sits
+    // on the element itself, hiding the class's accessor, and is moved
+    // through the accessor now.
+    const own = this as unknown as Record<string, unknown>;
+    for (const name of ["slides", "loop"]) {
+      if (Object.hasOwn(this, name)) {
+        const value = own[name];
+        delete own[name];
+        own[name] = value;
+      }
+    }
     this.#resize.observe(this.#stage);
     this.#stopSwipe = listen(this.#stage, {
       move: (dx) => this.#drag(dx),
@@ -188,7 +204,7 @@ export class ClackShow extends HTMLElement {
         this.#updateControls();
         break;
       case "fit":
-        this.#photos.resize((i) => this.#sizes(i));
+        this.#photos.resize((id) => this.#sizes(this.#indexById.get(id) ?? -1));
         break;
     }
   }
@@ -262,28 +278,52 @@ export class ClackShow extends HTMLElement {
     this.#setSlides(readMarkup(this, (m) => console.warn(`Clack: ${m}`)));
   }
 
+  /**
+   * Takes a new list of slides, keeping what it can: the visitor's place
+   * (by slide id), the photo on screen if its slide is still there with the
+   * same photo, and every other photo that has not changed. A caption fixed
+   * or a slide added changes nothing on screen but the words and the count.
+   */
   #setSlides(slides: Slide[]): void {
-    const keep = this.#slides[this.#target]?.id;
-    const unchanged =
-      slides.length === this.#slides.length && slides.every((s, i) => JSON.stringify(s) === JSON.stringify(this.#slides[i]));
-    if (unchanged) {
+    const old = this.#slides;
+    if (slides.length === old.length && slides.every((s, i) => JSON.stringify(s) === JSON.stringify(old[i]))) {
       return;
     }
-    this.#finishTransitions();
-    this.#photos.clear();
-    this.#figure?.remove();
-    this.#figure = null;
-    this.#slides = slides;
-    this.#shown = -1;
-    this.#target = -1;
+    const keepId = old[this.#target]?.id;
+    const shownSlide = old[this.#shown];
     this.#token++;
     this.#pending = null;
+    this.#stage.classList.remove("loading");
+    this.#slides = slides;
+    this.#indexById.clear();
+    slides.forEach((s, i) => this.#indexById.set(s.id, i));
+    this.#photos.carryOver(slides);
+
+    // Where the slide on screen is now, if it is still there unchanged.
+    const shownAt = shownSlide ? (this.#indexById.get(shownSlide.id) ?? -1) : -1;
+    this.#shown = shownAt >= 0 && photoKey(slides[shownAt]!) === photoKey(shownSlide!) ? shownAt : -1;
+    if (this.#figure && this.#shown >= 0) {
+      this.#figure.ariaLabel = text.of(this.#shown + 1, slides.length);
+    }
+    this.#target = -1;
+
     if (slides.length === 0) {
+      this.#finishTransitions();
+      this.#figure?.remove();
+      this.#figure = null;
       this.#caption(null);
       this.#updateControls();
       return;
     }
-    const at = Math.max(0, slides.findIndex((s) => s.id === keep));
+    const at = Math.max(0, keepId === undefined ? 0 : (this.#indexById.get(keepId) ?? 0));
+    if (at === this.#shown) {
+      this.#target = at;
+      this.#caption(slides[at]!);
+      this.#updateControls();
+      this.#preload(at);
+      return;
+    }
+    // Whatever is on screen stays until the new slide's photo is ready.
     void this.#request(at, { user: false });
   }
 
@@ -294,15 +334,19 @@ export class ClackShow extends HTMLElement {
     if (!canStep(from, this.#slides.length, delta, this.loop)) {
       return Promise.resolve(false);
     }
-    this.#direction = delta;
-    return this.#request(step(from, this.#slides.length, delta, this.loop), how);
+    return this.#request(step(from, this.#slides.length, delta, this.loop), how, delta);
   }
 
   #user(delta: 1 | -1): void {
     void this.#go(delta, { user: true });
   }
 
-  #request(target: number, how: How): Promise<boolean> {
+  /**
+   * Asks for slide target. direction is the way the visitor is going, when
+   * a step says so (on from the last slide of a looping show is forward,
+   * though the index falls); a jump works it out from the indexes.
+   */
+  #request(target: number, how: How, direction?: 1 | -1): Promise<boolean> {
     if (target === this.#target && this.#pending) {
       return this.#pending;
     }
@@ -316,17 +360,24 @@ export class ClackShow extends HTMLElement {
       this.#updateControls();
       return Promise.resolve(true);
     }
-    if (this.#shown >= 0 && target !== this.#shown && !how.swipe) {
+    if (direction) {
+      this.#direction = direction;
+    } else if (this.#shown >= 0) {
       this.#direction = target > this.#shown ? 1 : -1;
     }
     this.#target = target;
     this.#updateControls();
     const token = ++this.#token;
-    const photo = this.#photos.get(this.#slides, target, this.#sizes(target), true);
-    // Let go of what is no longer near; what is ahead waits until this one
-    // is on screen (see #preload).
-    this.#photos.keepOnly(new Set([target, this.#shown]));
+    const photo = this.#photos.get(this.#slides[target]!, this.#sizes(target), true);
+    // Let go of what is no longer near. What is ahead of the target is kept
+    // if it is already coming, but not started until the target is on
+    // screen (see #preload).
+    const ahead = preloadOrder(target, this.#slides.length, this.#direction, this.loop);
+    this.#photos.keepOnly(this.#ids([target, this.#shown, ...ahead]));
     this.#stage.classList.toggle("loading", photo.state === "loading");
+    if (!this.#figure || this.#figure.classList.contains("placeholder")) {
+      this.#placeholder(target);
+    }
     const pending = photo.settled.then(() => {
       if (token !== this.#token) {
         return false;
@@ -350,9 +401,42 @@ export class ClackShow extends HTMLElement {
   #preload(target: number): void {
     const order = preloadOrder(target, this.#slides.length, this.#direction, this.loop);
     for (const i of order) {
-      this.#photos.get(this.#slides, i, this.#sizes(i), false);
+      this.#photos.get(this.#slides[i]!, this.#sizes(i), false);
     }
-    this.#photos.keepOnly(new Set([target, this.#shown, ...order]));
+    this.#photos.keepOnly(this.#ids([target, this.#shown, ...order]));
+  }
+
+  /** The ids of the slides at these indexes (any out of range left out). */
+  #ids(indexes: number[]): Set<string> {
+    const ids = new Set<string>();
+    for (const i of indexes) {
+      const slide = this.#slides[i];
+      if (slide) ids.add(slide.id);
+    }
+    return ids;
+  }
+
+  /**
+   * Holds the place of the first photo while it loads: a frame of its
+   * proportions, in its colour if it has one, so the page does not wait on
+   * an empty box. The photo fades in over it.
+   */
+  #placeholder(index: number): void {
+    const slide = this.#slides[index]!;
+    this.#figure?.remove();
+    const figure = el("figure", "slide placeholder", "slide");
+    figure.role = "group";
+    figure.ariaRoleDescription = text.slide;
+    figure.ariaLabel = text.of(index + 1, this.#slides.length);
+    figure.ariaBusy = "true";
+    figure.style.setProperty("--clack-aspect", String(slide.width / slide.height));
+    if (slide.color) {
+      // Checked as #rrggbb when the slide was read.
+      figure.style.setProperty("--clack-placeholder", slide.color);
+    }
+    figure.append(el("div", "fill"));
+    this.#stage.append(figure);
+    this.#figure = figure;
   }
 
   // ---- Showing a slide -------------------------------------------------
@@ -378,7 +462,7 @@ export class ClackShow extends HTMLElement {
       const outgoing: Keyframe[] = how.swipe
         ? [
             { opacity: 1, transform: `translateX(${how.swipe.offset}px)` },
-            { opacity: 0, transform: `translateX(${how.swipe.direction * -12}%)` },
+            { opacity: 0, transform: `translateX(${how.swipe.exit * 12}%)` },
           ]
         : [{ opacity: 1 }, { opacity: 0 }];
       const animations = [figure.animate([{ opacity: 0 }, { opacity: 1 }], timing), old.animate(outgoing, timing)];
@@ -524,16 +608,16 @@ export class ClackShow extends HTMLElement {
     const go = outcome !== 0 && canStep(this.#shown, this.#slides.length, delta, this.loop);
     if (go) {
       const target = step(this.#shown, this.#slides.length, delta, this.loop);
-      const photo = this.#photos.get(this.#slides, target, this.#sizes(target), true);
+      const photo = this.#photos.get(this.#slides[target]!, this.#sizes(target), true);
       if (photo.state !== "loading") {
-        // Ready: it takes over from the photo where the finger left it.
-        this.#direction = delta;
-        void this.#request(target, { user: true, swipe: { direction: delta, offset } });
+        // Ready: it takes over from the photo where the finger left it,
+        // which carries on the way the finger went.
+        const exit = outcome === -1 ? -1 : 1;
+        void this.#request(target, { user: true, swipe: { exit, offset } }, delta);
         return;
       }
       this.#springBack(figure, offset);
-      this.#direction = delta;
-      void this.#request(target, { user: true });
+      void this.#request(target, { user: true }, delta);
       return;
     }
     this.#springBack(figure, offset);
@@ -557,7 +641,7 @@ export class ClackShow extends HTMLElement {
       return;
     }
     this.#frame = { width: box.width, height: box.height };
-    this.#photos.resize((i) => this.#sizes(i));
+    this.#photos.resize((id) => this.#sizes(this.#indexById.get(id) ?? -1));
   }
 
   /** What the `sizes` of slide i's photo should say: the width it is drawn at. */

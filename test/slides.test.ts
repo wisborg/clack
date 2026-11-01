@@ -61,6 +61,29 @@ test("readMarkup reads figures, pictures and bare images", () => {
   assertEqual(warnings.length, 0, `warnings: ${warnings.join("; ")}`);
 });
 
+test("readMarkup takes the figure's photo, not an image in its caption", () => {
+  const host = markup(["figure>figcaption>img[src=icon.png][width=16][height=16][alt=icon]"]);
+  host.firstElementChild!.append(build("img[src=photo.jpg][width=3][height=2][alt=Photo]"));
+  const [slide] = readMarkup(host, () => {});
+  assertEqual(slide!.src, "photo.jpg", "the photo");
+});
+
+test("readMarkup never gives two slides one id", () => {
+  // Slide 1 is called "2"; slide 2 has no id, so would be "2" by number.
+  const host = markup(["figure#2>img[src=a.jpg][width=3][height=2][alt=A]", "figure>img[src=b.jpg][width=3][height=2][alt=B]", "figure#2-2>img[src=c.jpg][width=3][height=2][alt=C]"]);
+  const ids = readMarkup(host, () => {}).map((s) => s.id);
+  assertEqual(new Set(ids).size, 3, `ids ${ids.join(", ")}`);
+  assertEqual(ids[0], "2", "the first keeps its own");
+});
+
+test("readMarkup ignores a full-size URL that is not http(s)", () => {
+  const host = markup(["figure>img[src=a.jpg][width=3][height=2][alt=A][data-full=javascript:alert(1)]"]);
+  const warnings: string[] = [];
+  const [slide] = readMarkup(host, (m) => warnings.push(m));
+  assertEqual(slide!.full, "", "the full-size URL is dropped");
+  assert(warnings.some((w) => w.includes("data-full")), "with a warning");
+});
+
 test("readMarkup warns of what it has to guess", () => {
   const host = markup(["figure#x>img[src=a.jpg]", "figure#x>img[src=b.jpg][width=3][height=2][alt=]"]);
   const warnings: string[] = [];

@@ -442,15 +442,17 @@ func cmdServe(ctx context.Context, args []string) error {
 // frame in a screenshot that says "ok". The load event does not wait for
 // lazily loaded images, which a real index uses, so each is told to load
 // now and waited for. On a demo page, the images include those inside
-// each <clack-show>, once it has a slide on screen and its fade is over.
+// each <clack-show>, once it has a photo on screen and its fade is over,
+// and a show whose photo could not be loaded counts as a failed image.
 const pageCheck = `
 const done = arguments[arguments.length - 1];
 (async () => {
   const shows = [...document.querySelectorAll("clack-show")];
   const onScreen = (show) => new Promise((resolve) => {
     const look = () => {
-      const slides = show.shadowRoot ? show.shadowRoot.querySelectorAll(".slide") : [];
-      if (slides.length === 1) resolve(); else setTimeout(look, 50);
+      const root = show.shadowRoot;
+      const settled = root && root.querySelectorAll(".slide").length === 1 && !root.querySelector(".placeholder");
+      if (settled) resolve(); else setTimeout(look, 50);
     };
     look();
   });
@@ -465,10 +467,13 @@ const done = arguments[arguments.length - 1];
   });
   const timeout = new Promise((r) => setTimeout(() => r("timeout"), 15000));
   const r = await Promise.race([Promise.all(settled), timeout]);
+  const missing = shows
+    .filter((s) => s.shadowRoot.querySelector(".slide.failed"))
+    .map((s) => "a <clack-show> could not load its photo");
   done({
     title: document.title,
     timedOut: showsTimedOut || r === "timeout",
-    failed: r === "timeout" ? [] : r.filter((x) => x),
+    failed: r === "timeout" ? missing : [...r.filter((x) => x), ...missing],
   });
 })().catch((e) => done({title: "", timedOut: false, failed: ["the page check failed: " + e]}));
 `

@@ -28,16 +28,23 @@ other formats — is a slide, and so is each child `<img>`. Anything else is lef
 - `srcset` (with `w` descriptors) offers the photo at several sizes. Clack works out the
   `sizes` itself, from the size each photo is drawn at.
 - The `<figcaption>` is the title; a `<small>` inside it is the credit.
-- The figure's `id` is the slide's id, used by `goTo` and in events.
-- `data-full` names the full-size file (for the full-size view, still to come), and
-  `data-color` a colour (`#rrggbb`) for the moment before the photo arrives.
+- The figure's `id` is the slide's id, used by `goTo` and in events. A slide without one is
+  numbered; a repeated one is renumbered, with a warning.
+- `data-full` names the full-size file, for the full-size view still to come (an http,
+  https or relative URL; anything else is ignored, with a warning). `data-color` is a
+  colour (`#rrggbb`) that holds the first photo's place while it loads.
 
 **Give the images `loading="lazy"`.** Without script the markup is a plain list of photos —
 what a reader without script, or a search engine, sees. With script, Clack draws its own
 copies of the photos and the markup is not displayed, but a browser fetches every image in
 the page that is not lazy, displayed or not.
 
-Clack follows changes to the markup as they happen, keeping its place by slide id.
+Clack follows changes to the markup as they happen, keeping its place by slide id. A
+caption fixed or a slide added changes only the words and the count: the photo on screen,
+and every photo whose slide is unchanged, stays as it is.
+
+A property set on the element before Clack has loaded (`slides`, `loop`) is taken up when it
+loads.
 
 ## Slides from script
 

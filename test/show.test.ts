@@ -389,3 +389,156 @@ test("adds nothing to the page outside its own box", async () => {
     assert(r.bottom <= box.bottom + 0.5 && r.right <= box.right + 0.5, `.${e.className} reaches outside the show`);
   }
 });
+
+test("a property set before Clack is loaded is not lost", async () => {
+  // An element made in a document with no window is not upgraded, like one
+  // in a page whose Clack script has not run yet.
+  const inert = document.implementation.createHTMLDocument("");
+  const early = inert.createElement(tagName) as unknown as Record<string, unknown>;
+  early["loop"] = true;
+  early["slides"] = [{ id: "s", alt: "early", width: 300, height: 200, sources: [{ url: img(300, 200), width: 300 }] }];
+  const show = document.adoptNode(early as unknown as ClackShow);
+  show.style.setProperty("--clack-transition-duration", "40ms");
+  fixture().append(show);
+  assert(show instanceof HTMLElement && "goTo" in show, "upgraded");
+  assertEqual(show.count, 1, "the slides set before");
+  assertEqual(show.hasAttribute("loop"), true, "loop set before");
+  await settledOn(show, "1 of 1");
+});
+
+/** Pointer events on the stage, as a mouse, pen or finger would send them. */
+function pointer(show: ClackShow) {
+  const stage = part(show, ".stage");
+  const r = stage.getBoundingClientRect();
+  const y = r.top + r.height / 2;
+  return {
+    stage,
+    left: r.left,
+    width: r.width,
+    send(type: string, x: number, init: PointerEventInit = {}): void {
+      stage.dispatchEvent(
+        new PointerEvent(type, { pointerId: 1, pointerType: "mouse", isPrimary: true, button: 0, buttons: 1, clientX: x, clientY: y, bubbles: true, cancelable: true, composed: true, ...init }),
+      );
+    },
+    swipe(from: number, to: number): void {
+      this.send("pointerdown", from);
+      for (let i = 1; i <= 8; i++) {
+        this.send("pointermove", from + ((to - from) * i) / 8);
+      }
+      this.send("pointerup", to, { buttons: 0 });
+    },
+  };
+}
+
+test("a mouse let go of outside the photo does not leave a drag behind", async () => {
+  const show = makeShow(three);
+  await settledOn(show, "1 of 3");
+  const p = pointer(show);
+  const x = p.left + p.width * 0.8;
+  p.send("pointerdown", x);
+  // Released elsewhere, unheard; then it comes back with no button held.
+  p.send("pointermove", x - 300, { buttons: 0 });
+  await sleep(50);
+  assertEqual(show.index, 0, "no button, no swipe");
+  assertEqual(figures(show)[0]!.style.getPropertyValue("--clack-drag"), "", "the photo does not follow it");
+  p.swipe(x, x - 320);
+  assertEqual(show.index, 1, "the next drag works");
+});
+
+test("after a swipe, the next click is not swallowed", async () => {
+  const show = makeShow(three);
+  await settledOn(show, "1 of 3");
+  const p = pointer(show);
+  const x = p.left + p.width * 0.8;
+  p.swipe(x, x - 320);
+  await settledOn(show, "2 of 3");
+  let clicks = 0;
+  show.addEventListener("click", () => clicks++);
+  // A touch swipe is often followed by no click; a later click, from a
+  // keyboard or a script with no pointer before it, is not the swipe's.
+  await sleep(450);
+  p.stage.click();
+  assertEqual(clicks, 1, "the click reached the page");
+  // The click a mouse sends straight after a drag is the drag's own.
+  p.swipe(x, x - 320);
+  p.stage.click();
+  assertEqual(clicks, 1, "the drag's own click is held back");
+});
+
+test("a swiped photo leaves the way the finger went, right to left too", async () => {
+  const show = makeShow(three);
+  show.dir = "rtl";
+  show.style.setProperty("--clack-transition-duration", "400ms");
+  await settledOn(show, "1 of 3");
+  await sleep(300); // slide 2, preloaded
+  const p = pointer(show);
+  const x = p.left + p.width * 0.2;
+  const leaving = figures(show)[0]!;
+  p.swipe(x, x + 320); // rightwards: the next, in a right-to-left show
+  await waitFor(() => leaving.getAnimations().length > 0, "the old photo to animate");
+  const frames = (leaving.getAnimations()[0]!.effect as KeyframeEffect).getKeyframes();
+  const end = String(frames[frames.length - 1]!["transform"]);
+  assert(/translateX\(12%\)/.test(end), `it leaves to the right: ${end}`);
+  assertEqual(show.index, 1, "the next slide");
+});
+
+test("a change to the markup leaves the photo on screen alone", async () => {
+  const show = makeShow([{ id: "a", title: "A" }, { id: "b", title: "Typo" }]);
+  await settledOn(show, "1 of 2");
+  await show.goTo("b");
+  await settledOn(show, "2 of 2");
+  const slide = figures(show)[0]!;
+  const photo = slide.querySelector("img")!;
+  show.children[1]!.querySelector("figcaption")!.firstChild!.textContent = "Fixed";
+  await waitFor(() => part(show, ".title").textContent === "Fixed", "the new caption");
+  show.prepend(figure({ id: "z" }));
+  await waitFor(() => show.count === 3, "the new slide");
+  assertEqual(figures(show).length, 1, "nothing else drawn");
+  assertEqual(figures(show)[0], slide, "the same slide on screen");
+  assertEqual(slide.querySelector("img"), photo, "the same photo, not fetched again");
+  assertEqual(slide.ariaLabel, "3 of 3", "its label follows its new place");
+  assertEqual(show.index, 2, "and so does the index");
+});
+
+test("a looping show loads ahead forwards when it wraps round", async () => {
+  const show = makeShow([], { loop: "" });
+  const slide = (n: number, url = img(300, 200)): SlideInput => ({ id: `s${n}`, alt: "", width: 300, height: 200, sources: [{ url, width: 300 }] });
+  const slides = [0, 1, 2, 3, 4, 5].map((n) => slide(n));
+  show.slides = slides;
+  await settledOn(show, "1 of 6");
+  await show.goTo(5);
+  await settledOn(show, "6 of 6");
+  // Slide 3 was loaded when the show opened; a new URL for it means only
+  // loading ahead from slide 1, forwards, fetches it now. (From script, so
+  // no image of the page's own can have fetched it first.)
+  const fresh = img(300, 200);
+  slides[2] = slide(2, fresh);
+  show.slides = slides;
+  await resetImageLog();
+  await show.next(); // from the last to the first: forwards
+  await logged((e) => e === fresh, "slide 3, two ahead");
+});
+
+test("moving on keeps the downloads it will need next", async () => {
+  await resetImageLog();
+  const show = makeShow([{}, {}, { delay: 1500 }, {}]);
+  const urls = Array.from(show.querySelectorAll("img"), (i) => new URL(i.src).pathname + new URL(i.src).search);
+  await settledOn(show, "1 of 4");
+  await logged((e) => e === urls[2], "slow slide 3, preloaded");
+  await show.next(); // slide 2 is ready; slide 3 is still coming
+  await settledOn(show, "2 of 4");
+  await show.next();
+  await settledOn(show, "3 of 4");
+  const log = await imageLog();
+  assertEqual(log.filter((e) => e.endsWith(urls[2]!)).length, 1, `slide 3 fetched once: ${log.join(" ")}`);
+});
+
+test("the first photo's place is held in its colour while it loads", async () => {
+  const show = makeShow([{ delay: 600 }]);
+  show.querySelector("img")!.dataset["color"] = "#336699";
+  await waitFor(() => !!show.shadowRoot!.querySelector(".placeholder .fill"), "the placeholder");
+  const fill = part(show, ".placeholder .fill");
+  await waitFor(() => getComputedStyle(fill).backgroundColor === "rgb(51, 102, 153)", `its colour (${getComputedStyle(fill).backgroundColor})`);
+  assertEqual(part(show, ".placeholder").ariaBusy, "true", "marked busy");
+  await settledOn(show, "1 of 1");
+});

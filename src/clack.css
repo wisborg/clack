@@ -127,6 +127,13 @@
   box-shadow: none;
 }
 
+/* The first photo's place while it loads: its proportions, in its colour. */
+.fill {
+  width: min(100cqw, 100cqh * var(--clack-aspect));
+  aspect-ratio: var(--clack-aspect);
+  background: var(--clack-placeholder, var(--clack-hairline));
+}
+
 /* A photo that could not be loaded keeps its place, and says so. */
 .missing {
   box-sizing: border-box;

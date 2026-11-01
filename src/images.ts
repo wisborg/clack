@@ -15,11 +15,18 @@ export interface Photo {
   /** What goes in the slide: the `<picture>`, or the `<img>` alone. */
   readonly element: HTMLElement;
   readonly img: HTMLImageElement;
+  /** What the photo was built from; another key is another photo. */
+  readonly key: string;
   state: LoadState;
   /** Settles when the photo is decoded, has failed, or is dropped; never rejects. */
   readonly settled: Promise<LoadState>;
   /** Settles it as dropped, if it has not settled yet. */
   readonly drop: () => void;
+}
+
+/** What makes a slide's photo the photo it is: a change to any of these is a new photo. */
+export function photoKey(slide: Slide): string {
+  return JSON.stringify([slide.src, slide.srcset, slide.alternatives, slide.width, slide.height]);
 }
 
 function build(slide: Slide, sizes: string): { element: HTMLElement; img: HTMLImageElement } {
@@ -77,21 +84,17 @@ async function settle(img: HTMLImageElement): Promise<LoadState> {
   }
 }
 
-/** The photos of one show, by slide index. */
+/** The photos of one show, by slide id. */
 export class Photos {
-  readonly #photos = new Map<number, Photo>();
+  readonly #photos = new Map<string, Photo>();
 
   /**
-   * The photo for slides[index], building and starting it if need be.
-   * `urgent` asks the browser to fetch it ahead of others.
+   * The photo for slide, building and starting it if need be. `urgent`
+   * asks the browser to fetch it ahead of others.
    */
-  get(slides: readonly Slide[], index: number, sizes: string, urgent: boolean): Photo {
-    let photo = this.#photos.get(index);
+  get(slide: Slide, sizes: string, urgent: boolean): Photo {
+    let photo = this.#photos.get(slide.id);
     if (!photo) {
-      const slide = slides[index];
-      if (!slide) {
-        throw new RangeError(`no slide ${index}`);
-      }
       const { element, img } = build(slide, sizes);
       img.fetchPriority = urgent ? "high" : "low";
       // A photo let go of while loading may never fire load or error (the
@@ -101,12 +104,12 @@ export class Photos {
         drop = () => resolve("dropped");
       });
       const settled = Promise.race([settle(img), dropped]);
-      const p: Photo = { element, img, state: "loading", settled, drop };
+      const p: Photo = { element, img, key: photoKey(slide), state: "loading", settled, drop };
       void settled.then((state) => {
         p.state = state;
       });
       photo = p;
-      this.#photos.set(index, photo);
+      this.#photos.set(slide.id, photo);
     } else if (urgent) {
       photo.img.fetchPriority = "high";
     }
@@ -114,9 +117,9 @@ export class Photos {
   }
 
   /** Sets the size every photo is drawn at; the browser fetches more pixels only if it needs them. */
-  resize(sizes: (index: number) => string): void {
-    for (const [index, photo] of this.#photos) {
-      const s = sizes(index);
+  resize(sizes: (id: string) => string): void {
+    for (const [id, photo] of this.#photos) {
+      const s = sizes(id);
       if (photo.img.sizes !== s) {
         for (const source of photo.element.querySelectorAll("source")) {
           source.sizes = s;
@@ -127,35 +130,50 @@ export class Photos {
   }
 
   /**
-   * Lets go of every photo but those in keep: one still loading stops, and
-   * none is drawn again without being fetched afresh (the browser's cache
-   * usually answers).
+   * Lets go of every photo but those of the slides in keep. One still
+   * loading stops, and none is drawn again without being fetched afresh
+   * (the browser's cache usually answers). One on screen stays there until
+   * it is replaced.
    */
-  keepOnly(keep: ReadonlySet<number>): void {
-    for (const [index, photo] of this.#photos) {
-      if (keep.has(index) || photo.element.isConnected) {
-        continue;
+  keepOnly(keep: ReadonlySet<string>): void {
+    for (const [id, photo] of this.#photos) {
+      if (!keep.has(id)) {
+        this.#let(id, photo);
       }
-      if (photo.state === "loading") {
-        // An empty URL drops the request. Firefox then stops the download;
-        // Chrome and Safari (2026) finish it into their cache, which no
-        // way of letting go of the image changes -- hence preloading only
-        // once a photo is on screen, so skipping through slides does not
-        // start downloads nobody will see.
-        for (const source of photo.element.querySelectorAll("source")) {
-          source.srcset = "";
-        }
-        photo.img.srcset = "";
-        photo.img.src = "";
-        photo.drop();
-      }
-      this.#photos.delete(index);
     }
   }
 
-  /** Forgets every photo: the slides have changed. */
-  clear(): void {
-    this.keepOnly(new Set());
-    this.#photos.clear();
+  /**
+   * The slides have changed: keeps each photo whose slide is still there
+   * with the same photo (its alt text brought up to date), and lets go of
+   * the rest.
+   */
+  carryOver(slides: readonly Slide[]): void {
+    const now = new Map(slides.map((s) => [s.id, s]));
+    for (const [id, photo] of this.#photos) {
+      const slide = now.get(id);
+      if (slide && photoKey(slide) === photo.key) {
+        photo.img.alt = slide.alt;
+      } else {
+        this.#let(id, photo);
+      }
+    }
+  }
+
+  #let(id: string, photo: Photo): void {
+    if (photo.state === "loading" && !photo.element.isConnected) {
+      // An empty URL drops the request. Firefox then stops the download;
+      // Chrome and Safari (2026) finish it into their cache, which no way
+      // of letting go of the image changes -- hence preloading only once a
+      // photo is on screen, so skipping through slides does not start
+      // downloads nobody will see.
+      for (const source of photo.element.querySelectorAll("source")) {
+        source.srcset = "";
+      }
+      photo.img.srcset = "";
+      photo.img.src = "";
+    }
+    photo.drop();
+    this.#photos.delete(id);
   }
 }

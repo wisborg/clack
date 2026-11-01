@@ -87,9 +87,12 @@ export function onScreen(show: ClackShow): string {
   return f[f.length - 1]?.ariaLabel ?? "";
 }
 
-/** Waits for the show to have exactly one slide on screen, with that label. */
+/** Waits for the show to have exactly one slide on screen, its photo (not a placeholder), with that label. */
 export async function settledOn(show: ClackShow, label: string): Promise<void> {
-  await waitFor(() => figures(show).length === 1 && onScreen(show) === label, `the show to settle on "${label}" (it shows "${onScreen(show)}")`);
+  await waitFor(
+    () => figures(show).length === 1 && !figures(show)[0]!.classList.contains("placeholder") && onScreen(show) === label,
+    `the show to settle on "${label}" (it shows "${onScreen(show)}")`,
+  );
 }
 
 export function part(show: ClackShow, selector: string): HTMLElement {

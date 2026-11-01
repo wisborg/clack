@@ -38,10 +38,23 @@ export function listen(target: HTMLElement, handlers: SwipeHandlers): () => void
     startX = e.clientX;
     startY = e.clientY;
     samples = [{ x: e.clientX, t: e.timeStamp }];
+    // Captured from the start, so a pointer released outside the photo
+    // still ends the gesture here rather than leaving it open.
+    try {
+      target.setPointerCapture(e.pointerId);
+    } catch {
+      // A synthetic pointer cannot be captured; see move().
+    }
   };
 
   const move = (e: PointerEvent): void => {
     if (e.pointerId !== id) {
+      return;
+    }
+    // A mouse whose button was let go of where this element did not hear it
+    // (when it could not be captured) has ended its gesture.
+    if (e.pointerType === "mouse" && e.buttons === 0) {
+      reset();
       return;
     }
     const dx = e.clientX - startX;
@@ -55,13 +68,6 @@ export function listen(target: HTMLElement, handlers: SwipeHandlers): () => void
         return;
       }
       swiping = true;
-      // Keep the gesture even if the pointer leaves the photo.
-      try {
-        target.setPointerCapture(e.pointerId);
-      } catch {
-        // A synthetic or already-released pointer cannot be captured; the
-        // gesture still works while the pointer stays over the photo.
-      }
     }
     e.preventDefault();
     samples.push({ x: e.clientX, t: e.timeStamp });
@@ -81,22 +87,28 @@ export function listen(target: HTMLElement, handlers: SwipeHandlers): () => void
       const first = samples[0]!;
       const elapsed = e.timeStamp - first.t;
       const velocity = elapsed > 0 ? (e.clientX - first.x) / elapsed : 0;
-      handlers.end(e.type === "pointercancel" ? 0 : swipeOutcome(dx, velocity, target.clientWidth));
+      // Cancelled, or capture lost without a release: spring back.
+      handlers.end(e.type === "pointerup" ? swipeOutcome(dx, velocity, target.clientWidth) : 0);
     }
     reset();
   };
 
-  // A swipe that moved must not also count as a click on the photo.
+  // A swipe that moved must not also count as a click on the photo. Only
+  // the click that follows the swipe straight away is its own: a touch
+  // swipe is often followed by none, and a later click -- from a tap, the
+  // keyboard or a script -- is not the swipe's.
+  let swipeEnded = -Infinity;
   const click = (e: MouseEvent): void => {
-    if (suppressClick) {
+    if (e.timeStamp - swipeEnded < 400) {
       e.stopPropagation();
       e.preventDefault();
-      suppressClick = false;
+      swipeEnded = -Infinity;
     }
   };
-  let suppressClick = false;
   const upCapture = (e: PointerEvent): void => {
-    suppressClick = e.pointerId === id && swiping;
+    if (e.pointerId === id && swiping) {
+      swipeEnded = e.timeStamp;
+    }
   };
 
   target.addEventListener("pointerdown", down);
@@ -104,6 +116,7 @@ export function listen(target: HTMLElement, handlers: SwipeHandlers): () => void
   target.addEventListener("pointerup", upCapture, { capture: true });
   target.addEventListener("pointerup", up);
   target.addEventListener("pointercancel", up);
+  target.addEventListener("lostpointercapture", up);
   target.addEventListener("click", click, { capture: true });
   return () => {
     target.removeEventListener("pointerdown", down);
@@ -111,6 +124,7 @@ export function listen(target: HTMLElement, handlers: SwipeHandlers): () => void
     target.removeEventListener("pointerup", upCapture, { capture: true });
     target.removeEventListener("pointerup", up);
     target.removeEventListener("pointercancel", up);
+    target.removeEventListener("lostpointercapture", up);
     target.removeEventListener("click", click, { capture: true });
   };
 }

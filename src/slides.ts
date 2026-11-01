@@ -64,15 +64,26 @@ export function readMarkup(host: Element, warn: (message: string) => void): Slid
   const ids = new Set<string>();
   for (const child of host.children) {
     const figure = child.localName === "figure" ? child : null;
-    const img = figure ? figure.querySelector("img") : child.localName === "img" ? child : null;
+    // The figure's photo, not an icon that happens to sit in its caption.
+    const img = figure
+      ? Array.from(figure.querySelectorAll("img")).find((i) => !i.closest("figcaption"))
+      : child.localName === "img"
+        ? child
+        : null;
     if (!(img instanceof HTMLImageElement)) {
       continue;
     }
     const n = slides.length + 1;
     let id = collapse(figure?.id || img.dataset["id"]) || String(n);
     if (ids.has(id)) {
-      warn(`slide ${n}: the id "${id}" is already used; using "${n}" instead`);
+      // Its number, unless that is taken too (an earlier figure may have
+      // it as its id), and then its number with a suffix.
+      const asked = id;
       id = String(n);
+      for (let k = 2; ids.has(id); k++) {
+        id = `${n}-${k}`;
+      }
+      warn(`slide ${n}: the id "${asked}" is already used; using "${id}" instead`);
     }
     ids.add(id);
 
@@ -101,6 +112,14 @@ export function readMarkup(host: Element, warn: (message: string) => void): Slid
       }
     }
 
+    // Checked now, though nothing uses it yet: the full-size view will,
+    // and a URL that is not http(s) must never reach a link or an image.
+    let full = img.dataset["full"] ?? "";
+    if (full && !usableURL(full)) {
+      warn(`slide ${n}: data-full must be an http, https or relative URL; it is ignored`);
+      full = "";
+    }
+
     const caption = figure?.querySelector(":scope > figcaption");
     let title = "";
     let credit = "";
@@ -123,7 +142,7 @@ export function readMarkup(host: Element, warn: (message: string) => void): Slid
       src: img.getAttribute("src") ?? "",
       srcset: img.getAttribute("srcset") ?? "",
       alternatives,
-      full: img.dataset["full"] ?? "",
+      full,
       page: "",
       color: /^#[0-9a-fA-F]{6}$/.test(img.dataset["color"] ?? "") ? img.dataset["color"]! : "",
       title,
