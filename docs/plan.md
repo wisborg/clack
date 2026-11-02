@@ -29,7 +29,9 @@ for what the element does so far.
 - **No third party at view time.** Clack requests the images and manifest it is given, and
   nothing else: no fonts from a font service, no analytics, no telemetry.
 - **The host site stays in charge.** Clack never leaks styles into the page, never needs the
-  page to loosen its Content-Security-Policy, and never shows metadata nobody asked it to.
+  page to loosen its Content-Security-Policy, and never shows metadata nobody asked it to
+  (a slide's title and credit are its caption, shown as a `<figcaption>` is; see
+  [Metadata](#metadata)).
 
 ---
 
@@ -207,7 +209,16 @@ What makes a slideshow look professional or cheap is mostly what happens between
 
 ### Metadata
 
-Hidden by default. When enabled: `metadata="toggle"` (an info button reveals it) or
+**The caption is not metadata.** A slide's title and credit are its caption — shown beneath
+it by default, as a `<figcaption>` is in markup, and set as the theme says (`caption`
+tokens). This is what a museum label or a printed photo book shows, and what the approved
+mock-ups show; Shoebox's plan treats the `description` class the same way, as visible to
+anyone who can see the photo. A page that wants no caption at all can turn it off (an
+attribute, `caption="none"`, to come with metadata display). *(Decided with the user,
+2026-11-02.)*
+
+**Everything else is metadata, and hidden by default:** the caption's longer text, keywords,
+camera, time, place, technical details and extra facts. When enabled: `metadata="toggle"` (an info button reveals it) or
 `"visible"`; placed as an overlay, below the image, or in a side panel (a theme decision).
 Shown fields and their order are configurable; structured fields (camera, lens, focal length,
 aperture, shutter, ISO, date, place) are formatted by Clack using `Intl` for the visitor's

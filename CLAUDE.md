@@ -41,7 +41,11 @@ delegates; do not add a target that does the work itself.
   `createElement`/`textContent`, styles are constructable stylesheets adopted by the shadow
   root. The strict-policy test page enforces this.
 - Clack never reads metadata from image files, never requests anything but the images and
-  manifest it is given, and never shows metadata unless the page asked for it.
+  manifest it is given, and never shows metadata unless the page asked for it. A slide's
+  title and credit are its caption, not metadata in this sense: shown by default, as a
+  `<figcaption>` is (decided with the user, 2026-11-02). Everything else about a photo — the
+  caption's longer text, keywords, camera, time, place, technical details, extra facts —
+  stays hidden until the page asks.
 - CSS imported from TypeScript arrives as text (esbuild's text loader).
 
 ## Theme and manifest formats

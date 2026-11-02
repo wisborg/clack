@@ -90,9 +90,14 @@ Metadata comes in the same classes Shoebox grants access by, so a host includes 
 whole classes. Each is optional, and so is everything in it. Clack formats numbers and dates
 for the visitor's locale.
 
+A slide's `title` and `credit` are its caption: Clack shows them beneath the photo by
+default, as a `<figcaption>` is shown in markup. Everything else here is shown only when the
+page asks for it (with the `metadata` attribute, to come). A host that would not have even
+the title and credit shown leaves them out of the manifest, or turns the caption off.
+
 | class | properties |
 |---|---|
-| `description` | `title`, `caption`, `credit`, `keywords` |
+| `description` | `title` and `credit`, shown as the slide's caption by default; `caption` (a longer text) and `keywords`, shown only if the page asks |
 | `camera` | `make`, `model`, `lens`, `focalLength` and `focalLength35` (mm), `aperture` (the f-number: `2.8` is ƒ/2.8), `exposure` (seconds: `0.004` is 1/250 s), `exposureBias` (stops), `iso`, `flash` |
 | `time` | `taken`: local time where the photo was taken, as precisely as it is known (below) |
 | `location` | `latitude`, `longitude`, `altitude` (m), `direction` (degrees from true north), `precision` (`exact` or `approximate`), `place` (`name`, `locality`, `region`, `country`) |

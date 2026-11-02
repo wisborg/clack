@@ -31,7 +31,9 @@ other formats — is a slide, and so is each child `<img>`. Anything else is lef
   page never jumps. Without them Clack warns and assumes 3:2.
 - `srcset` (with `w` descriptors) offers the photo at several sizes. Clack works out the
   `sizes` itself, from the size each photo is drawn at.
-- The `<figcaption>` is the title; a `<small>` inside it is the credit.
+- The `<figcaption>` is the title; a `<small>` inside it is the credit. Together they are the
+  slide's caption, shown beneath the photo — as are a manifest slide's `title` and
+  `credit`. Nothing else about a photo is shown unless the page asks.
 - The figure's `id` is the slide's id, used by `goTo` and in events. A slide without one is
   numbered by its place, and Clack recognises it by its photo, so it keeps its place when
   others are added before it; a repeated id is renumbered, with a warning.
