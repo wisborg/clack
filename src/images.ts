@@ -5,7 +5,7 @@
  * photo. Photos far from the current one are let go, cancelling their
  * download if it is still running.
  */
-import type { Keyed, Slide } from "./slides";
+import { applyLang, type Keyed, type Slide } from "./slides";
 
 /** "dropped": let go of before it arrived, and never to be shown. */
 export type LoadState = "loading" | "ready" | "failed" | "dropped";
@@ -156,8 +156,7 @@ export class Photos {
         // The same photo, perhaps described anew, perhaps in another
         // language: the description and its language follow the slide.
         photo.img.alt = slide.alt;
-        if (slide.lang) photo.img.lang = slide.lang;
-        else photo.img.removeAttribute("lang");
+        applyLang(photo.img, slide.lang);
       } else {
         this.#let(id, photo);
       }

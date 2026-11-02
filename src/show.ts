@@ -12,7 +12,7 @@ import { icon } from "./icons";
 import { photoKey, Photos, type Photo } from "./images";
 import { canStep, drawnWidth, preloadOrder, step } from "./nav";
 import { load, ManifestError, type Manifest } from "./manifest";
-import { fromInput, readMarkup, type Keyed, type Slide, type SlideInput } from "./slides";
+import { applyLang, fromInput, readMarkup, type Keyed, type Slide, type SlideInput } from "./slides";
 import { listen } from "./swipe";
 
 export const tagName = "clack-show";
@@ -112,8 +112,12 @@ export class ClackShow extends HTMLElement {
    * when it arrives then.
    */
   #loaded: { url: string; manifest: Manifest } | null = null;
-  /** Set when #loaded arrived while the show was out of the page, to be shown when it is back. */
-  #parked = false;
+  /**
+   * What happened to the manifest while the show was out of the page, to
+   * be shown when it is back: it arrived, or it failed. Nothing is drawn,
+   * and no photo fetched, for a show that may be gone for good.
+   */
+  #parked: "arrived" | "failed" | null = null;
   /**
    * The manifest src names, resolved, once Clack has acted on it: loading,
    * shown, or failed. "" while the slides come from the markup. A src equal
@@ -307,9 +311,18 @@ export class ClackShow extends HTMLElement {
   set slides(input: readonly (SlideInput | Slide)[] | null) {
     if (input === null) {
       this.#scripted = false;
-      // With no manifest to come back to, the markup is read now, as when
-      // the show connects: count and goTo answer at once.
-      if (this.isConnected && !this.getAttribute("src")) this.#markup();
+      // What comes back is there at once, as when the show connects, so
+      // count and goTo answer straight away: the markup, with no src; the
+      // manifest, if it was loaded and is still the one src names.
+      if (this.isConnected) {
+        const loaded = this.#loaded;
+        if (!this.getAttribute("src")) {
+          this.#dropManifest();
+          this.#markup();
+        } else if (loaded && !this.#failed && loaded.url === this.#wanted && loaded.url === this.#srcURL()) {
+          this.#showManifest(loaded.manifest);
+        }
+      }
       this.#schedule();
       return;
     }
@@ -402,10 +415,9 @@ export class ClackShow extends HTMLElement {
     if (!src) {
       this.#notice.hidden = true;
       this.#failed = false;
-      if (this.#origin !== "markup" || this.#wanted) {
-        this.#dropManifest();
-        this.#markup();
-      }
+      this.#dropManifest();
+      // Read again only if something else was on screen.
+      if (this.#origin !== "markup") this.#markup();
       return;
     }
     // What src names, resolved; a src that is not a URL is remembered as
@@ -417,10 +429,15 @@ export class ClackShow extends HTMLElement {
       // the show was out of the page, or one put aside for slides from
       // script, is shown now; one that failed, behind slides from script
       // since, gives way to the markup.
-      if (this.#loaded?.url === wanted && (this.#parked || this.#origin === "script")) {
+      if (this.#parked === "failed") {
+        this.#parked = null;
+        this.#showFailure();
+      } else if (this.#failed) {
+        // Failed, and slides from script shown since: the markup again,
+        // and the notice, which the script's slides had put away.
+        if (this.#origin === "script") this.#showFailure();
+      } else if (this.#loaded?.url === wanted && (this.#parked === "arrived" || this.#origin === "script")) {
         this.#showManifest(this.#loaded.manifest);
-      } else if (this.#failed && this.#origin === "script") {
-        this.#markup();
       }
       return;
     }
@@ -442,7 +459,7 @@ export class ClackShow extends HTMLElement {
         if (this.isConnected) {
           this.#showManifest(m);
         } else {
-          this.#parked = true;
+          this.#parked = "arrived";
         }
       },
       (e: unknown) => {
@@ -458,11 +475,11 @@ export class ClackShow extends HTMLElement {
     this.#abort?.abort();
     this.#abort = null;
     this.#wanted = "";
-    this.#parked = false;
+    this.#parked = null;
   }
 
   #showManifest(m: Manifest): void {
-    this.#parked = false;
+    this.#parked = null;
     this.#origin = "manifest";
     this.#mutations.disconnect();
     this.#setTitle(m.title, m.lang);
@@ -502,7 +519,22 @@ export class ClackShow extends HTMLElement {
       console.error(`Clack: the manifest ${url} could not be loaded:`, e);
     }
     this.#failed = true;
-    // The markup's slides -- read again only if something else was shown.
+    // A copy of this manifest loaded before is not the manifest now: it is
+    // never brought back.
+    if (this.#loaded?.url === url) this.#loaded = null;
+    this.dispatchEvent(new Event("error"));
+    if (this.isConnected) {
+      this.#showFailure();
+    } else {
+      this.#parked = "failed";
+    }
+  }
+
+  /**
+   * The markup's slides -- read again only if something else was shown --
+   * and the notice saying the manifest could not be had.
+   */
+  #showFailure(): void {
     if (this.#origin !== "markup") this.#markup();
     // Shown first and given its words a moment later: a status that
     // appears with its text already in it, or is given the same text
@@ -512,7 +544,6 @@ export class ClackShow extends HTMLElement {
     setTimeout(() => {
       if (!this.#notice.hidden) this.#notice.textContent = text.noManifest;
     }, 100);
-    this.dispatchEvent(new Event("error"));
   }
 
   /**
@@ -522,11 +553,11 @@ export class ClackShow extends HTMLElement {
    * from ElementInternals; otherwise by the text alone. (The slides' own
    * language goes with each slide -- see Keyed.lang.)
    */
-  #setTitle(title: string, lang: string): void {
+  #setTitle(title: string, lang: string | null): void {
     this.#showTitle = title;
     this.#name();
     this.#nameBox.textContent = title;
-    this.#inLang(this.#nameBox, lang);
+    applyLang(this.#nameBox, lang);
   }
 
   /** Names the show: its label, else the manifest's title, else "Photos". */
@@ -534,22 +565,11 @@ export class ClackShow extends HTMLElement {
     const label = this.getAttribute("label");
     const byElement = "ariaLabelledByElements" in this.#internals;
     const internals = this.#internals as ElementInternals & { ariaLabelledByElements: Element[] | null };
-    if (!label && this.#showTitle && byElement) {
-      this.#internals.ariaLabel = null;
-      internals.ariaLabelledByElements = [this.#nameBox];
-    } else {
-      if (byElement) internals.ariaLabelledByElements = null;
-      this.#internals.ariaLabel = label || this.#showTitle || text.show;
-    }
-  }
-
-  /**
-   * Marks e as being in lang, the language of a slide's own text; Clack's
-   * own words are left in the page's.
-   */
-  #inLang(e: HTMLElement, lang: string): void {
-    if (lang) e.lang = lang;
-    else e.removeAttribute("lang");
+    // The text is always given too: an engine that does not follow a
+    // reference from the host into its own shadow tree falls back to it,
+    // so the show is never left without a name.
+    this.#internals.ariaLabel = label || this.#showTitle || text.show;
+    if (byElement) internals.ariaLabelledByElements = !label && this.#showTitle ? [this.#nameBox] : null;
   }
 
   /**
@@ -603,6 +623,7 @@ export class ClackShow extends HTMLElement {
       // for it is told it was shown.
       this.#target = target;
       this.#updateControls();
+      this.#refreshShown();
       // Its placeholder, if it has one up, is drawn again: its colour or
       // shape may be what changed.
       if (this.#figure?.classList.contains("placeholder")) {
@@ -616,14 +637,7 @@ export class ClackShow extends HTMLElement {
     const at = (wanted ? this.#indexByKey.get(wanted.key) : undefined) ?? (this.#shown >= 0 ? this.#shown : 0);
     if (at === this.#shown) {
       this.#target = at;
-      this.#caption(slides[at]!);
-      // A photo that could not be loaded shows its description in its
-      // place; that follows the slide too, as the photo's alt does.
-      const missing = this.#figure?.querySelector<HTMLElement>(".missing-alt");
-      if (missing) {
-        missing.textContent = slides[at]!.alt;
-        this.#inLang(missing, slides[at]!.lang);
-      }
+      this.#refreshShown();
       this.#updateControls();
       this.#preload(at);
       return;
@@ -631,6 +645,22 @@ export class ClackShow extends HTMLElement {
     // Whatever is on screen stays until the new slide's photo is ready.
     this.#target = -1;
     void this.#request(at, { user: false });
+  }
+
+  /**
+   * The slide on screen, kept across a change to the slides: its caption,
+   * and a missing photo's description in its place, follow the slide as it
+   * now is (the photo's own alt and lang follow in Photos.carryOver).
+   */
+  #refreshShown(): void {
+    const slide = this.#slides[this.#shown];
+    if (!slide) return;
+    this.#caption(slide);
+    const missing = this.#figure?.querySelector<HTMLElement>(".missing-alt");
+    if (missing) {
+      missing.textContent = slide.alt;
+      applyLang(missing, slide.lang);
+    }
   }
 
   /** Forgets the slide on its way, if any: whoever asked for it is told it was not shown. */
@@ -831,7 +861,7 @@ export class ClackShow extends HTMLElement {
     }
     // The photo's description is the manifest's text, in its language.
     const described = figure.querySelector("img, .missing-alt");
-    if (described instanceof HTMLElement) this.#inLang(described, slide.lang);
+    if (described instanceof HTMLElement) applyLang(described, slide.lang);
     return figure;
   }
 
@@ -869,7 +899,7 @@ export class ClackShow extends HTMLElement {
   }
 
   #caption(slide: Keyed | null): void {
-    this.#inLang(this.#captionBox, slide?.lang ?? "");
+    applyLang(this.#captionBox, slide ? slide.captionLang : null);
     this.#title.textContent = slide?.title ?? "";
     this.#credit.textContent = slide?.credit ?? "";
     this.#credit.hidden = !slide?.credit;
@@ -898,7 +928,7 @@ export class ClackShow extends HTMLElement {
       const [before, after] = text.announceTitled(n, count);
       const t = el("span", "");
       t.textContent = slide.title;
-      this.#inLang(t, slide.lang);
+      applyLang(t, slide.captionLang);
       this.#live.replaceChildren(before, t, after);
     });
   }

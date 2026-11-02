@@ -2,7 +2,6 @@
  * Slides: what Clack shows, read from the host page's markup or given from
  * script, in one shape whatever the source.
  */
-import manifestSchema from "../schema/manifest-1.schema.json";
 
 /** One `<source>` of a `<picture>`: the same photo in another format. */
 export interface Alternative {
@@ -42,16 +41,22 @@ export interface Slide {
 export interface Keyed extends Slide {
   key: string;
   /**
-   * The language of the slide's own text (its caption, its description),
-   * or "" for the page's: a manifest's, for its slides; the markup's, for
-   * those read from the page. Text on screen is marked with the language
-   * of the slide it belongs to, whichever show it came from.
+   * The language of the photo's description, as an HTML lang attribute
+   * gives it ("" meaning unknown), or null to inherit the page's: a
+   * manifest's, for its slides; for markup, a lang on the <img> or on
+   * anything between it and the show. Text on screen is marked with the
+   * language of the slide it belongs to, whichever source it came from.
    */
-  lang: string;
+  lang: string | null;
+  /** The language of the caption, likewise: a lang on the <figcaption> or around it. */
+  captionLang: string | null;
 }
 
-// The published schema's rule for a language tag, not a copy of it.
-const langPattern = new RegExp(manifestSchema.$defs.lang.pattern, "u");
+/** Marks e as in lang (see Keyed.lang): set, even to "" (unknown), or removed to inherit. */
+export function applyLang(e: HTMLElement, lang: string | null): void {
+  if (lang === null) e.removeAttribute("lang");
+  else e.lang = lang;
+}
 
 /** A slide as given from script: the slide format of a manifest. */
 export interface SlideInput {
@@ -167,7 +172,8 @@ export function readMarkup(host: Element, warn: (message: string) => void): Keye
 
     slides.push({
       key,
-      lang: markupLang(figure ?? img, host),
+      lang: markupLang(img, host),
+      captionLang: caption ? markupLang(caption, host) : markupLang(figure ?? img, host),
       id,
       alt: alt ?? "",
       width,
@@ -186,17 +192,17 @@ export function readMarkup(host: Element, warn: (message: string) => void): Keye
 }
 
 /**
- * The language a slide's markup is marked with inside the show, or "" to
- * inherit the page's, as the show's own text does. Only lang attributes
- * between the slide and the show count: one further out applies to the
- * whole show already, and is followed as it changes.
+ * The language e is marked with inside the show -- by its own lang or one
+ * between it and the show -- or null to inherit the page's, as the show's
+ * own text does. A lang further out applies to the whole show already, and
+ * is followed as it changes. lang="" (unknown) is kept as it is.
  */
-function markupLang(e: Element, host: Element): string {
+function markupLang(e: Element, host: Element): string | null {
   for (let at: Element | null = e; at && at !== host; at = at.parentElement) {
     const lang = at.getAttribute("lang");
     if (lang !== null) return lang;
   }
-  return "";
+  return null;
 }
 
 /**
@@ -259,7 +265,7 @@ export function fromInput(input: readonly (SlideInput | Slide)[]): Keyed[] {
     text(s.description?.title, "the title");
     text(s.description?.credit, "the credit");
     text(s.placeholder?.color, "the placeholder colour");
-    return unique(convert(s, ""));
+    return unique(convert(s, null));
   });
 }
 
@@ -268,7 +274,7 @@ export function fromInput(input: readonly (SlideInput | Slide)[]): Keyed[] {
  * the caller has (fromInput, or the manifest loader, which checks the whole
  * manifest against its schema first).
  */
-export function convert(s: SlideInput, lang: string): Keyed {
+export function convert(s: SlideInput, lang: string | null): Keyed {
   // Sources are grouped by type, in the order each type first appears.
   // The untyped group makes the <img>; each typed group makes a <source>.
   // With no untyped group, the last typed one -- conventionally the most
@@ -288,6 +294,7 @@ export function convert(s: SlideInput, lang: string): Keyed {
   return {
     key: `id:${s.id}`,
     lang,
+    captionLang: lang,
     id: s.id,
     alt: s.alt,
     width: s.width,
@@ -339,10 +346,13 @@ function checkSlide(s: Slide, fail: (why: string) => never): Keyed {
   const color = str(s.color ?? "", "color");
   // A slide read from the show and given back keeps its identity, so its
   // photo is not fetched again; the caller makes sure keys are unique.
-  const { key, lang } = s as Partial<Keyed>;
+  const { key, lang, captionLang } = s as Partial<Keyed>;
   return {
     key: typeof key === "string" && key ? key : `id:${s.id}`,
-    lang: typeof lang === "string" && langPattern.test(lang) ? lang : "",
+    // Kept as given, any string an HTML lang attribute takes, so a slide
+    // read from the show and given back keeps its language.
+    lang: typeof lang === "string" ? lang : null,
+    captionLang: typeof captionLang === "string" ? captionLang : typeof lang === "string" ? lang : null,
     id: s.id,
     alt: s.alt,
     width: s.width,

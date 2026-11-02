@@ -513,6 +513,27 @@
         "/slides/0/sources/0/url": "https://photos.example.com:8443/a.jpg"
       },
       "error": null
+    },
+    {
+      "name": "a backslash after the slash",
+      "set": {
+        "/slides/0/sources/0/url": "/\\a:99999/x.jpg"
+      },
+      "error": "/slides/0/sources/0/url"
+    },
+    {
+      "name": "two backslashes",
+      "set": {
+        "/slides/0/sources/0/url": "\\\\[x/a.jpg"
+      },
+      "error": "/slides/0/sources/0/url"
+    },
+    {
+      "name": "an internationalised host",
+      "set": {
+        "/slides/0/sources/0/url": "https://xn--a.example/a.jpg"
+      },
+      "error": "/slides/0/sources/0/url"
     }
   ],
   "raw": [

@@ -4,6 +4,7 @@ import { check, decode, load, ManifestError, maxBytes, parse } from "../src/mani
 import example from "../schema/examples/manifest.json";
 import fixture from "./fixtures/manifests.json";
 import patternCases from "./fixtures/patterns.json";
+import manifestSchemaForTest from "../schema/manifest-1.schema.json";
 import { assert, assertEqual, fixture as fixtureEl, test } from "./harness";
 import { figure, img, imageLog, resetImageLog, settledOn, waitFor } from "./util";
 
@@ -47,7 +48,14 @@ test("the shared manifest cases get the verdicts the Go reference gives", () => 
     // JSON.stringify writes -0 as 0, so -0 is carried through as a marker
     // and put back in the text, to reach the checker as it would.
     const text = JSON.stringify(doc, (_k, v: unknown) => (Object.is(v, -0) ? "\u0000minus-zero" : v)).replaceAll('"\\u0000minus-zero"', "-0");
-    const problems = check(JSON.parse(text));
+    // Through parse(), as a fetched manifest goes: its URLs resolved too,
+    // so a refusal at that step is compared with the tools' as well.
+    let problems: { path: string; message: string }[] = [];
+    try {
+      parse(text, "https://example.com/albums/coast/manifest.json");
+    } catch (e) {
+      problems = e instanceof ManifestError ? e.problems : [{ path: "", message: String(e) }];
+    }
     const got = new Set(problems.map((p) => p.path));
     if (want === null && problems.length > 0) {
       failures.push(`${c.name}: refused: ${problems.map((p) => `${p.path}: ${p.message}`).join("; ")}`);
@@ -139,9 +147,11 @@ test("no manifest, however broken, makes the checker throw or the parser fail ot
     for (let edits = 1 + Math.floor(next() * 4); edits > 0; edits--) {
       const at = pick(places(doc));
       const r = next();
-      if (r < 0.6) doc = setPointer(doc, at, pick(values));
+      // A copy of each value, so no two places share one object and no
+      // object ends up inside itself.
+      if (r < 0.6) doc = setPointer(doc, at, structuredClone(pick(values)));
       else if (r < 0.8 && at) doc = setPointer(doc, at, null);
-      else doc = setPointer(doc, `${at === "" ? "" : at}/${pick(keys)}`.replace(/^\/\//, "/"), pick(values));
+      else doc = setPointer(doc, `${at === "" ? "" : at}/${pick(keys)}`.replace(/^\/\//, "/"), structuredClone(pick(values)));
     }
     const text = JSON.stringify(doc) ?? "null";
     let problems: unknown;
@@ -596,4 +606,102 @@ test("the manifest's title names the show in the manifest's language", async () 
   assertEqual(name.textContent, "From a manifest", "the title");
   assertEqual(name.getAttribute("lang"), "da", "its language");
   assertEqual(name.hidden, true, "hidden: it names, it is not shown");
+});
+
+test("random URLs: whatever the schema's pattern accepts, the browser resolves", () => {
+  const url = new RegExp((manifestSchemaForTest.$defs.url as { pattern: string }).pattern, "u");
+  const bits = ["a", "x", "n", "X", "N", "-", "--", "_", "1", "9", ".", "/", "//", "\\", ":", "%", "[", "]", "@", "?", "#", "xn--", "255", "256", ":65535", ":65536", "https://", "http://", "//"];
+  const next = random(7);
+  let accepted = 0;
+  for (let i = 0; i < 20000; i++) {
+    let u = "";
+    for (let n = 1 + Math.floor(next() * 8); n > 0; n--) u += bits[Math.floor(next() * bits.length)];
+    if (!url.test(u)) continue;
+    accepted++;
+    let resolved = true;
+    try {
+      new URL(u, "https://example.com/albums/coast/manifest.json");
+    } catch {
+      resolved = false;
+    }
+    assert(resolved, `accepted by the pattern, refused by the URL parser: ${u}`);
+  }
+  assert(accepted > 500, `enough of them were accepted to mean something (${accepted})`);
+});
+
+test("a manifest that failed on a refetch is never brought back from before", async () => {
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    // The same URL: it works the first time, and fails every time after.
+    const url = `/once/m${Math.random().toString(36).slice(2)}?${new URLSearchParams({ body: manifestOf(3) })}`;
+    const s = show({ src: url }, 1);
+    await waitFor(() => s.count === 3, "the manifest");
+    s.removeAttribute("src");
+    await waitFor(() => s.count === 1, "the markup");
+    let failed = false;
+    s.addEventListener("error", () => (failed = true));
+    s.setAttribute("src", url);
+    await waitFor(() => failed, "the refetch failing");
+    s.slides = [{ id: "s", alt: "", width: 300, height: 200, sources: [{ url: img(300, 200), width: 300 }] }];
+    s.slides = null;
+    await new Promise((r) => setTimeout(r, 100));
+    assertEqual(s.count, 1, "the markup, not the copy from before");
+    assertEqual(s.shadowRoot!.querySelector<HTMLElement>(".notice")!.hidden, false, "and the notice, back with it");
+  } finally {
+    console.error = quiet;
+  }
+});
+
+test("slides withdrawn bring a loaded manifest back at once: goTo works straight away", async () => {
+  const s = show({ src: echo(manifestOf(3)) });
+  await waitFor(() => s.count === 3, "the manifest");
+  s.slides = [{ id: "s", alt: "", width: 300, height: 200, sources: [{ url: img(300, 200), width: 300 }] }];
+  s.slides = null;
+  assertEqual(s.count, 3, "the manifest, at once");
+  assert(await s.goTo("m2"), "goTo one of its slides, at once");
+});
+
+test("a manifest that fails while the show is out of the page fetches nothing until it is back", async () => {
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    const s = show({ src: echo(manifestOf(2)) });
+    await waitFor(() => s.count === 2 && s.slides[0]!.alt === "manifest photo 1", "the manifest");
+    // Markup whose photos nobody has fetched yet, so a fetch would show.
+    s.append(figure({}, 0), figure({}, 1));
+    s.setAttribute("src", echo("{}", { status: 500, delay: 300 }));
+    await new Promise((r) => setTimeout(r, 20));
+    const parent = s.parentElement!;
+    s.remove();
+    await resetImageLog();
+    await new Promise((r) => setTimeout(r, 600)); // it fails while the show is out
+    assertEqual((await imageLog()).filter((e) => e.startsWith("/img/")).length, 0, "no photo fetched for a show out of the page");
+    parent.append(s);
+    await waitFor(() => s.slides[0]?.alt === "photo 1", "the markup, once back");
+    assertEqual(s.shadowRoot!.querySelector<HTMLElement>(".notice")!.hidden, false, "with the notice");
+  } finally {
+    console.error = quiet;
+  }
+});
+
+test("a new manifest's captions show at once, even while a photo is still coming", async () => {
+  const manifest = (lang: string, title: string, slow: boolean): string =>
+    JSON.stringify({
+      format: "clack-manifest/1",
+      lang,
+      slides: [
+        { id: "a", alt: "A", width: 300, height: 200, sources: [{ url: photoA, width: 300 }], description: { title } },
+        { id: "b", alt: "B", width: 300, height: 200, sources: [{ url: slow ? photoSlow : photoB, width: 300 }] },
+      ],
+    });
+  const photoA = img(300, 200, "557799");
+  const photoB = img(300, 200, "557799");
+  const photoSlow = img(300, 200, "557799", 1500);
+  const s = show({ src: echo(manifest("en", "Low tide", true)) });
+  await settledOn(s, "1 of 2");
+  void s.next(); // slide 2's photo is slow: a request is in flight
+  s.setAttribute("src", echo(manifest("da", "Lavvande", true)));
+  await waitFor(() => s.shadowRoot!.querySelector(".title")!.textContent === "Lavvande", "the caption of the slide on screen, at once");
+  assertEqual(s.shadowRoot!.querySelector(".caption")!.getAttribute("lang"), "da", "in its language");
 });

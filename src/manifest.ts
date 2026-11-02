@@ -182,7 +182,7 @@ function build(doc: unknown, base: string): Manifest {
     if (s.full) out.full = { ...s.full, url: resolve(s.full.url, `/slides/${i}/full/url`) };
     if (s.page) out.page = resolve(s.page, `/slides/${i}/page`);
     // Checked whole already, against the schema: converted, not checked again.
-    return convert(out, m.lang ?? "");
+    return convert(out, m.lang ?? null);
   });
   if (unresolved.length > 0) {
     throw new ManifestError(unresolved);
@@ -274,21 +274,20 @@ export async function load(url: string, signal: AbortSignal): Promise<Manifest> 
       at += p.byteLength;
     }
   }
-  // A large manifest takes a while to read; it is done in steps, with the
-  // page free to draw and answer input between them.
+  // Decoded, then read as parse() reads any manifest -- one way in, which
+  // the tests exercise too -- with the page free to draw and answer input
+  // in between.
   const text = decode(bytes);
   await yieldToPage();
-  const doc = parseJSON(text);
-  await yieldToPage();
-  const problems = check(doc);
-  if (problems.length > 0) {
-    throw new ManifestError(problems);
-  }
-  await yieldToPage();
-  return build(doc, response.url || url);
+  return parse(text, response.url || url);
 }
 
-/** Lets the page draw and answer input before going on. */
+/**
+ * Lets the page draw and answer input before going on -- unless it is
+ * hidden: then nobody is waiting, and a timer there may be held back for a
+ * second or more.
+ */
 function yieldToPage(): Promise<void> {
+  if (document.visibilityState === "hidden") return Promise.resolve();
   return new Promise((resolve) => setTimeout(resolve, 0));
 }

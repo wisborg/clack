@@ -276,7 +276,8 @@ function validate(n: Node, v: Json, path: string, out: Problem[]): void {
 
   if (typeof v === "object" && v !== null && !Array.isArray(v)) {
     for (const r of n.required ?? []) if (!own(v, r)) add(`"${r}" is required`);
-    const keys = Object.keys(v).sort(byCodePoint);
+    // In the object's own order: the problems are sorted by place at the end.
+    const keys = Object.keys(v);
     for (const k of keys) {
       for (const r of n.dependentRequired?.get(k) ?? []) if (!own(v, r)) add(`"${r}" is required with "${k}"`);
     }

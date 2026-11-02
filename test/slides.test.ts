@@ -150,12 +150,31 @@ test("fromInput takes null for an absent field, as serialisers write it", () => 
   assertEqual(s!.title, "", "title");
 });
 
-test("a markup slide's language is only one set inside the show", () => {
-  const host = markup(["figure>img[src=a.jpg][width=3][height=2][alt=A]", "figure[lang=da]>img[src=b.jpg][width=3][height=2][alt=B]"]);
+test("a markup slide's languages are those set inside the show", () => {
+  const host = markup([
+    "figure>img[src=a.jpg][width=3][height=2][alt=A]",
+    "figure[lang=da]>img[src=b.jpg][width=3][height=2][alt=B]",
+    "figure>img[src=c.jpg][width=3][height=2][alt=C][lang=de]",
+    "figure[lang=]>img[src=d.jpg][width=3][height=2][alt=D]",
+  ]);
+  const cap = document.createElement("figcaption");
+  cap.lang = "fr";
+  cap.textContent = "Un chien";
+  host.children[2]!.append(cap);
   host.setAttribute("lang", "en");
-  const [a, b] = readMarkup(host, () => {});
-  assertEqual(a!.lang, "", "inherits the page's");
-  assertEqual(b!.lang, "da", "its own");
+  const [a, b, c, d] = readMarkup(host, () => {});
+  assertEqual(a!.lang, null, "none set: the page's, inherited");
+  assertEqual(b!.lang, "da", "the figure's");
+  assertEqual(c!.lang, "de", "the photo's own, for its description");
+  assertEqual(c!.captionLang, "fr", "the caption's own, for the caption");
+  assertEqual(d!.lang, "", "unknown, kept as unknown");
+});
+
+test("a slide's language survives being read and given back", () => {
+  const host = markup(["figure[lang=x-klingon]>img[src=a.jpg][width=3][height=2][alt=A]"]);
+  const [slide] = readMarkup(host, () => {});
+  const [back] = fromInput([slide!]);
+  assertEqual(back!.lang, "x-klingon", "kept");
 });
 
 test("usableURL allows http, https and relative URLs only", () => {

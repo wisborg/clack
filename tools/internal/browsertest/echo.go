@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -20,6 +21,9 @@ import (
 //	    body is streamed without saying its size.
 //	GET /redirect?to=URL
 //	    a 302 to URL, which must be a path on this server.
+//	GET /once/{name}?body=..
+//	    body, as JSON, the first time; 503 every time after: the same URL
+//	    that worked once and then fails.
 //
 // Each /echo request is added to the image log (see testImages) as
 // "manifest <path and query>", so a test can count the fetches.
@@ -57,6 +61,24 @@ func registerEcho(mux *http.ServeMux, log *testImages) {
 		headers(w, ct)
 		w.WriteHeader(status)
 		w.Write([]byte(q.Get("body")))
+	})
+	var onceMu sync.Mutex
+	served := map[string]bool{}
+	mux.HandleFunc("GET /once/{name}", func(w http.ResponseWriter, r *http.Request) {
+		log.mu.Lock()
+		log.log = append(log.log, "manifest "+r.URL.RequestURI())
+		log.mu.Unlock()
+		onceMu.Lock()
+		again := served[r.PathValue("name")]
+		served[r.PathValue("name")] = true
+		onceMu.Unlock()
+		if again {
+			securityHeaders(w)
+			http.Error(w, "gone wrong since", http.StatusServiceUnavailable)
+			return
+		}
+		headers(w, "application/json")
+		w.Write([]byte(r.URL.Query().Get("body")))
 	})
 	mux.HandleFunc("GET /big", func(w http.ResponseWriter, r *http.Request) {
 		n, err := strconv.Atoi(r.URL.Query().Get("bytes"))

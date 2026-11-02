@@ -21,8 +21,10 @@ What the element does today, as built (phase 1, in progress). The plan for the r
 Each child `<figure>` holding an `<img>` — bare, or in a `<picture>` with `<source>`s for
 other formats — is a slide, and so is each child `<img>`. Anything else is left alone.
 
-- A `lang` attribute on a figure (or within the show) marks its caption and description as
-  in that language; otherwise they are in the page's.
+- A `lang` attribute marks a slide's text as in that language: on the `<img>` (or around it,
+  inside the show) for its description, on the `<figcaption>` (or around it) for its
+  caption. Without one, they are in the page's language. `lang=""` says the language is
+  unknown, and is kept so.
 - `alt` is the photo's description. Without it Clack warns in the console; `alt=""` says the
   caption already describes it.
 - `width` and `height` are required: they keep the photo's space before it loads, so the
