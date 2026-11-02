@@ -75,15 +75,14 @@ Every URL is `http://` or `https://`, or relative — resolved against the manif
 or the page's when the slides come from JavaScript. Every other scheme is refused: no
 `data:`, `blob:` or `javascript:`. A URL is printable ASCII: anything else, a space or a
 letter like `ø` included, is percent-encoded (`%C3%B8`), which every server and every
-browser read the same way. A host is a domain name of ASCII labels, the last beginning with a letter
-(`photos.example.com`), or an IPv4 address (`192.0.2.7`), with a port up to 65535 if any;
-and a relative URL does not begin with a backslash where a browser would read it as a
-slash. These are the forms every URL parser reads alike, so a URL the schema accepts always
-resolves, in the tools as in the browser. Not allowed: bracketed IPv6 hosts, user names in
-URLs, and internationalised domain names (labels beginning `xn--`), whose validity only a
-full IDN implementation can judge — a photo host with such a name is given by an ASCII
-alias. The schema says so, and Clack checks each resolved URL again
-before using it. Clack requests these URLs and nothing else.
+browser read the same way. A host is a domain name of ASCII labels, the last beginning
+with a letter (`photos.example.com`), or an IPv4 address (`192.0.2.7`), with a port up to
+65535 if any; and a relative URL does not begin with a backslash where a browser would read
+it as a slash. These are the forms every URL parser reads alike, so a URL the schema accepts
+always resolves, in the tools as in the browser. Not allowed: bracketed IPv6 hosts, user
+names in URLs, and internationalised domain names — see
+[Not supported, and why](#not-supported-and-why). The schema says so, and Clack checks each
+resolved URL again before using it. Clack requests these URLs and nothing else.
 
 ## Metadata, by class
 
@@ -131,6 +130,41 @@ accepts it only if:
 Relative URLs in it are resolved against the URL it was finally fetched from, after any
 redirects. A manifest is refused whole, never shown in part: one bad slide is a bad
 manifest.
+
+## Not supported, and why
+
+### Internationalised domain names
+
+A manifest's URLs cannot name a host by an internationalised domain name — one with letters
+beyond ASCII, such as `bücher.example`, which is written `xn--bcher-kva.example` in a URL.
+No label of a host may begin `xn--`. A photo host with such a name is given by an ASCII
+name for the same server instead. *(Decided 2026-11-02, with the user.)*
+
+**Why.** Clack's rule is that the tools (Go) and the browser reach the same verdict on every
+manifest: a manifest that passes the tools is never refused by Clack on a visitor's screen.
+Whether an `xn--` label is valid is decided by the browser's URL parser, through the IDNA
+rules of Unicode's UTS #46: the label must decode as Punycode, and what it decodes to must
+pass a set of mapping, normalisation and script checks. `xn--a` is refused; `xn--bcher-kva`
+is accepted. None of that can be expressed in the schema's pattern, which is a regular
+expression; and Go's standard library has no implementation of it to check with. Allowing
+such hosts would therefore let manifests through the tools that browsers then refuse, so the
+schema refuses them all.
+
+**What allowing them would take,** if it is needed:
+
+1. A UTS #46 implementation on the tools' side, to check each `xn--` host as browsers do:
+   `golang.org/x/net/idna` (the Go team's, but a new dependency, to be decided as such —
+   `DEPENDENCIES.md`), or one of our own (Punycode is short; UTS #46's mapping and validity
+   tables are not).
+2. The pattern loosened to let `xn--` labels through, with the check in the tools and in
+   Clack's loader (the browser's `new URL()` already does it) as a rule beyond the schema,
+   like unique slide ids.
+3. Shared cases for valid and invalid IDN hosts in `test/fixtures/manifests.json`, which both
+   sides must judge alike — the cases now refused (`xn--a`, `xn--bcher-kva`) move to the
+   accepted or refused lists by what UTS #46 says.
+
+Bracketed IPv6 hosts and user names in URLs are left out for the same reason, with less
+cost: the browser and Go parse them differently, and photo hosts have no need of them.
 
 ## Checks beyond the schema
 

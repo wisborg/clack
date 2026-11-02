@@ -384,7 +384,9 @@ side with the version before.
   published schemas themselves — shipped without their annotations, about 1.2 KB compressed
   each — with a validator of its own for the same subset of JSON Schema as the Go one, so
   the browser and the tools cannot disagree about a rule; themes will be checked the same
-  way.)*
+  way. Known limit: manifest URLs cannot use internationalised domain names, until the tools
+  can check them as browsers do — the reasons, and what lifting it would take, are in
+  `docs/manifest.md`, "Not supported, and why".)*
 - Sizing modes and the full-size view with zoom and pan.
 - Auto-play with pause control, visibility and reduced-motion handling.
 - Metadata display (hidden by default), theme loading and validation, the five themes.
