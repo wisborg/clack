@@ -252,40 +252,42 @@ function closest(failures: Problem[][], path: string): Problem[] {
   return best ?? [{ path, message: "matches none of the allowed forms" }];
 }
 
+/** Records a problem at path. A function of its own, not a closure made for every value checked. */
+function push(out: Problem[], path: string, message: string): void {
+  out.push({ path, message });
+}
+
 function validate(n: Node, v: Json, path: string, out: Problem[]): void {
-  const add = (message: string, at = path): void => {
-    out.push({ path: at, message });
-  };
   if (!isJson(v)) {
     // Given from script rather than parsed: undefined, a function, a
     // BigInt, a class instance. Never valid, and never looked into.
-    add("is not a JSON value");
+    push(out, path, "is not a JSON value");
     return;
   }
   if (n.always !== undefined) {
-    if (!n.always) add("is not allowed here");
+    if (!n.always) push(out, path, "is not allowed here");
     return;
   }
   if (n.ref) validate(n.ref, v, path, out);
   if (n.types && !n.types.some((t) => isType(v, t))) {
-    add(`must be ${n.types.join(" or ")}, not ${typeOf(v)}`);
+    push(out, path, `must be ${n.types.join(" or ")}, not ${typeOf(v)}`);
     return;
   }
-  if (n.hasConst && !equal(v, n.constVal!)) add(`must be ${show(n.constVal!)}`);
-  if (n.enum && !n.enum.some((e) => equal(v, e))) add(`must be one of ${n.enum.map(show).join(", ")}, not ${show(v)}`);
+  if (n.hasConst && !equal(v, n.constVal!)) push(out, path, `must be ${show(n.constVal!)}`);
+  if (n.enum && !n.enum.some((e) => equal(v, e))) push(out, path, `must be one of ${n.enum.map(show).join(", ")}, not ${show(v)}`);
 
   if (typeof v === "object" && v !== null && !Array.isArray(v)) {
-    for (const r of n.required ?? []) if (!own(v, r)) add(`"${r}" is required`);
+    for (const r of n.required ?? []) if (!own(v, r)) push(out, path, `"${r}" is required`);
     // In the object's own order: the problems are sorted by place at the end.
     const keys = Object.keys(v);
     for (const k of keys) {
-      for (const r of n.dependentRequired?.get(k) ?? []) if (!own(v, r)) add(`"${r}" is required with "${k}"`);
+      for (const r of n.dependentRequired?.get(k) ?? []) if (!own(v, r)) push(out, path, `"${r}" is required with "${k}"`);
     }
-    if (n.minProps !== undefined && keys.length < n.minProps) add(`must have at least ${n.minProps} properties`);
-    if (n.maxProps !== undefined && keys.length > n.maxProps) add(`must have at most ${n.maxProps} properties`);
+    if (n.minProps !== undefined && keys.length < n.minProps) push(out, path, `must have at least ${n.minProps} properties`);
+    if (n.maxProps !== undefined && keys.length > n.maxProps) push(out, path, `must have at most ${n.maxProps} properties`);
     for (const k of keys) {
       const at = `${path}/${escape(k)}`;
-      if (n.propertyNames) for (const p of check(n.propertyNames, k, at)) add(`property name ${p.message}`, at);
+      if (n.propertyNames) for (const p of check(n.propertyNames, k, at)) out.push({ path: at, message: `property name ${p.message}` });
       let matched = false;
       const p = n.properties?.get(k);
       if (p) {
@@ -299,13 +301,13 @@ function validate(n: Node, v: Json, path: string, out: Problem[]): void {
         }
       }
       if (!matched && n.additional) {
-        if (n.additional.always === false) add("is not a property this object has", at);
+        if (n.additional.always === false) out.push({ path: at, message: "is not a property this object has" });
         else validate(n.additional, v[k]!, at, out);
       }
     }
   } else if (Array.isArray(v)) {
-    if (n.minItems !== undefined && v.length < n.minItems) add(`must have at least ${n.minItems} items`);
-    if (n.maxItems !== undefined && v.length > n.maxItems) add(`must have at most ${n.maxItems} items`);
+    if (n.minItems !== undefined && v.length < n.minItems) push(out, path, `must have at least ${n.minItems} items`);
+    if (n.maxItems !== undefined && v.length > n.maxItems) push(out, path, `must have at most ${n.maxItems} items`);
     if (n.items) v.forEach((item, i) => validate(n.items!, item, `${path}/${i}`, out));
   } else if (typeof v === "string") {
     // Characters are code points, one or two UTF-16 units each, so a
@@ -313,16 +315,16 @@ function validate(n: Node, v: Json, path: string, out: Problem[]): void {
     // counted when that cannot settle it.
     const atLeast = (k: number): boolean => v.length >= 2 * k || (v.length >= k && chars(v) >= k);
     const tooLong = n.maxLength !== undefined && atLeast(n.maxLength + 1);
-    if (n.minLength !== undefined && !atLeast(n.minLength)) add(`must be at least ${n.minLength} characters`);
-    if (tooLong) add(`must be at most ${n.maxLength} characters`);
+    if (n.minLength !== undefined && !atLeast(n.minLength)) push(out, path, `must be at least ${n.minLength} characters`);
+    if (tooLong) push(out, path, `must be at most ${n.maxLength} characters`);
     // A string already too long is not also matched: the patterns are
     // written to match in linear time, and this bounds the work besides.
-    if (n.pattern && !tooLong && !n.pattern.test(v)) add(`${show(v)} does not have the expected form`);
+    if (n.pattern && !tooLong && !n.pattern.test(v)) push(out, path, `${show(v)} does not have the expected form`);
   } else if (typeof v === "number") {
-    if (n.minimum !== undefined && v < n.minimum) add(`must be at least ${n.minimum}`);
-    if (n.maximum !== undefined && v > n.maximum) add(`must be at most ${n.maximum}`);
-    if (n.exclusiveMinimum !== undefined && v <= n.exclusiveMinimum) add(`must be more than ${n.exclusiveMinimum}`);
-    if (n.exclusiveMaximum !== undefined && v >= n.exclusiveMaximum) add(`must be less than ${n.exclusiveMaximum}`);
+    if (n.minimum !== undefined && v < n.minimum) push(out, path, `must be at least ${n.minimum}`);
+    if (n.maximum !== undefined && v > n.maximum) push(out, path, `must be at most ${n.maximum}`);
+    if (n.exclusiveMinimum !== undefined && v <= n.exclusiveMinimum) push(out, path, `must be more than ${n.exclusiveMinimum}`);
+    if (n.exclusiveMaximum !== undefined && v >= n.exclusiveMaximum) push(out, path, `must be less than ${n.exclusiveMaximum}`);
   }
 
   for (const s of n.allOf ?? []) validate(s, v, path, out);
@@ -340,9 +342,9 @@ function validate(n: Node, v: Json, path: string, out: Problem[]): void {
       }
     }
     if (matches === 0) out.push(...closest(failures, path));
-    else if (one && matches > 1) add("matches more than one of the allowed forms");
+    else if (one && matches > 1) push(out, path, "matches more than one of the allowed forms");
   }
-  if (n.not && check(n.not, v, path).length === 0) add("has a form that is not allowed here");
+  if (n.not && check(n.not, v, path).length === 0) push(out, path, "has a form that is not allowed here");
   if (n.if) {
     if (check(n.if, v, path).length === 0) {
       if (n.then) validate(n.then, v, path, out);

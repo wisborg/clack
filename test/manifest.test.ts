@@ -705,3 +705,82 @@ test("a new manifest's captions show at once, even while a photo is still coming
   await waitFor(() => s.shadowRoot!.querySelector(".title")!.textContent === "Lavvande", "the caption of the slide on screen, at once");
   assertEqual(s.shadowRoot!.querySelector(".caption")!.getAttribute("lang"), "da", "in its language");
 });
+
+test("a page that answers a failed manifest with slides of its own keeps them", async () => {
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    const s = document.createElement(tagName);
+    s.append(figure({}));
+    s.addEventListener("error", () => {
+      assertEqual(s.count, 1, "the markup is shown by the time error fires");
+      s.slides = [
+        { id: "f1", alt: "fallback", width: 300, height: 200, sources: [{ url: img(300, 200), width: 300 }] },
+        { id: "f2", alt: "fallback", width: 300, height: 200, sources: [{ url: img(300, 200), width: 300 }] },
+      ];
+    });
+    s.setAttribute("src", echo("{}", { status: 500 }));
+    fixtureEl().append(s);
+    await waitFor(() => s.count === 2, "the page's fallback");
+    s.append(figure({}), figure({}));
+    await new Promise((r) => setTimeout(r, 100));
+    assertEqual(s.count, 2, "the fallback stays, whatever the markup does");
+    assertEqual(s.slides[0]!.alt, "fallback", "the page's slides");
+  } finally {
+    console.error = quiet;
+  }
+});
+
+test("a relative src means what it meant when it was set, wherever the page goes", async () => {
+  await resetImageLog();
+  const before = location.href;
+  const s = show({ src: `echo/manifest.json?${new URLSearchParams({ body: manifestOf(2) })}` });
+  await waitFor(() => s.count === 2, "the manifest");
+  try {
+    history.pushState(null, "", "/somewhere/else/");
+    const parent = s.parentElement!;
+    s.remove();
+    parent.append(s);
+    s.slides = [{ id: "s", alt: "", width: 300, height: 200, sources: [{ url: img(300, 200), width: 300 }] }];
+    s.slides = null;
+    await new Promise((r) => setTimeout(r, 200));
+    assertEqual(s.count, 2, "the same manifest");
+    assertEqual(await manifestFetches(), 1, "fetched once");
+  } finally {
+    history.replaceState(null, "", before);
+  }
+});
+
+test("a manifest with no language leaves the show's name in the page's", async () => {
+  const s = show({ src: echo(JSON.stringify({ format: "clack-manifest/1", title: "Coast", slides: [] })) });
+  await waitFor(() => s.shadowRoot!.querySelector(".name")!.textContent === "Coast", "the name");
+  assertEqual(s.shadowRoot!.querySelector(".name")!.hasAttribute("lang"), false, "inherited, not unknown");
+});
+
+test("slides withdrawn while the show is out of the page are back as soon as it is", () => {
+  const s = show({}, 2);
+  const parent = s.parentElement!;
+  s.slides = [{ id: "s", alt: "", width: 300, height: 200, sources: [{ url: img(300, 200), width: 300 }] }];
+  s.remove();
+  s.slides = null;
+  parent.append(s);
+  assertEqual(s.count, 2, "the markup, at once");
+});
+
+test("a manifest failing while the show is out of the page fires error once it is back", async () => {
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    let errors = 0;
+    const s = show({ src: echo("{}", { status: 500, delay: 200 }) });
+    s.addEventListener("error", () => errors++);
+    const parent = s.parentElement!;
+    s.remove();
+    await new Promise((r) => setTimeout(r, 500));
+    assertEqual(errors, 0, "not while out of the page");
+    parent.append(s);
+    assertEqual(errors, 1, "once back");
+  } finally {
+    console.error = quiet;
+  }
+});

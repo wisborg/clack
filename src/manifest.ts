@@ -19,8 +19,14 @@ export type { Problem };
 export interface Manifest {
   title: string;
   description: string;
-  lang: string;
+  /** The language of its text, or null to inherit the page's. */
+  lang: string | null;
   slides: Keyed[];
+}
+
+/** Problems as lines for a person to read: each indented, by its place in the file. */
+export function describeProblems(problems: readonly Problem[]): string[] {
+  return problems.map((p) => `  ${p.path || "(the whole file)"}: ${p.message}`);
 }
 
 /** A manifest that was refused, with every problem found. */
@@ -28,7 +34,7 @@ export class ManifestError extends Error {
   readonly problems: Problem[];
 
   constructor(problems: Problem[]) {
-    const shown = problems.slice(0, 5).map((p) => `${p.path || "(document)"}: ${p.message}`);
+    const shown = describeProblems(problems.slice(0, 5)).map((l) => l.trim());
     if (problems.length > 5) shown.push(`and ${problems.length - 5} more`);
     super(`Clack: the manifest was refused: ${shown.join("; ")}`);
     this.name = "ManifestError";
@@ -136,11 +142,26 @@ export function check(doc: unknown): Problem[] {
  * problem, or a SyntaxError for text that is not JSON; nothing else.
  */
 export function parse(text: string, base: string): Manifest {
+  const steps = reading(text, base);
+  for (;;) {
+    const step = steps.next();
+    if (step.done) return step.value;
+  }
+}
+
+/**
+ * The one way a manifest's text becomes a Manifest, in steps: parse() runs
+ * them straight through; load() lets the page draw and answer input
+ * between them, so a large manifest is not one long task.
+ */
+function* reading(text: string, base: string): Generator<void, Manifest> {
   const doc = parseJSON(text);
+  yield;
   const problems = check(doc);
   if (problems.length > 0) {
     throw new ManifestError(problems);
   }
+  yield;
   return build(doc, base);
 }
 
@@ -190,7 +211,7 @@ function build(doc: unknown, base: string): Manifest {
   return {
     title: m.title ?? "",
     description: m.description ?? "",
-    lang: m.lang ?? "",
+    lang: m.lang ?? null,
     slides,
   };
 }
@@ -276,10 +297,15 @@ export async function load(url: string, signal: AbortSignal): Promise<Manifest> 
   }
   // Decoded, then read as parse() reads any manifest -- one way in, which
   // the tests exercise too -- with the page free to draw and answer input
-  // in between.
+  // between the steps.
   const text = decode(bytes);
   await yieldToPage();
-  return parse(text, response.url || url);
+  const steps = reading(text, response.url || url);
+  for (;;) {
+    const step = steps.next();
+    if (step.done) return step.value;
+    await yieldToPage();
+  }
 }
 
 /**

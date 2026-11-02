@@ -11,7 +11,7 @@ import css from "./clack.css";
 import { icon } from "./icons";
 import { photoKey, Photos, type Photo } from "./images";
 import { canStep, drawnWidth, preloadOrder, step } from "./nav";
-import { load, ManifestError, type Manifest } from "./manifest";
+import { describeProblems, load, ManifestError, type Manifest } from "./manifest";
 import { applyLang, fromInput, readMarkup, type Keyed, type Slide, type SlideInput } from "./slides";
 import { listen } from "./swipe";
 
@@ -32,6 +32,23 @@ const text = {
   failed: "This photo could not be loaded.",
   noManifest: "The photos could not be loaded.",
 };
+
+/** What has become of the manifest src names (see ClackShow.#manifest). */
+type ManifestState =
+  | { state: "none" }
+  | { state: "loading"; url: string; abort: AbortController }
+  | { state: "loaded"; url: string; manifest: Manifest }
+  | { state: "failed"; url: string };
+
+/** src resolved against the page, "" for none, or "invalid:<src>" for one that is not a URL. */
+function resolveSrc(src: string | null): string {
+  if (!src) return "";
+  try {
+    return new URL(src, document.baseURI).href;
+  } catch {
+    return `invalid:${src}`;
+  }
+}
 
 /** What `slidechange` says. */
 export interface SlideChangeDetail {
@@ -96,43 +113,31 @@ export class ClackShow extends HTMLElement {
   #slides: Keyed[] = [];
   readonly #indexById = new Map<string, number>();
   readonly #indexByKey = new Map<string, number>();
-  /** Set when the slides came from script; neither markup nor manifest is then read. */
+  /** Set while slides given from script are shown, in place of the manifest's or the markup's. */
   #scripted = false;
   /** The manifest's title, which names the show when the page has not. */
   #showTitle = "";
-  /** Markup warnings already given, so the same one is not repeated each time the markup is read. */
-  readonly #warned = new Set<string>();
-  /** Set when the manifest src names could not be had: setting src again retries it. */
-  #failed = false;
-  /** Cancels the manifest being fetched, if one is. */
-  #abort: AbortController | null = null;
+  /** The warnings of the last reading of the markup: one is given again only if it went away and came back. */
+  #warnings = new Set<string>();
   /**
-   * The last manifest loaded, by its URL: shown again at once when slides
-   * from script are withdrawn, and held while the show is out of the page
-   * when it arrives then.
+   * The manifest src names, resolved when src is set -- so a relative src
+   * keeps meaning what it meant then, whatever the page's address becomes
+   * -- or "" with no src. A src that is not a URL is kept as
+   * "invalid:<src>", so it fails once, like any other.
    */
-  #loaded: { url: string; manifest: Manifest } | null = null;
+  #src = "";
   /**
-   * What happened to the manifest while the show was out of the page, to
-   * be shown when it is back: it arrived, or it failed. Nothing is drawn,
-   * and no photo fetched, for a show that may be gone for good.
+   * What has become of the manifest #src names. One state, with the URL
+   * it is for: a src set again, or changed, starts it afresh; nothing else
+   * does -- not a move, not slides from script withdrawn.
    */
-  #parked: "arrived" | "failed" | null = null;
-  /**
-   * The manifest src names, resolved, once Clack has acted on it: loading,
-   * shown, or failed. "" while the slides come from the markup. A src equal
-   * to it needs nothing done -- which is what keeps a moved show, or a
-   * second call for the same src, from fetching it again.
-   */
-  #wanted = "";
-  /**
-   * Where the slides on screen came from: nothing yet, the markup (followed
-   * as it changes), a manifest, or script. A manifest's or script's slides
-   * stay on screen until a new manifest replaces them.
-   */
-  #origin: "none" | "markup" | "manifest" | "script" = "none";
-  /** Set while #sync is due to run: every reason to look again within one task leads to one look. */
-  #syncQueued = false;
+  #manifest: ManifestState = { state: "none" };
+  /** Where the slides on screen came from. */
+  #showing: "none" | "markup" | "manifest" | "script" = "none";
+  /** The manifest whose slides are on screen, when they are a manifest's. */
+  #shownManifest: Manifest | null = null;
+  /** An error event owed to the page: the manifest failed while the show was out of it. */
+  #owedError = false;
   readonly #photos = new Photos();
   /** The slide asked for, which may still be loading. */
   #target = -1;
@@ -249,22 +254,18 @@ export class ClackShow extends HTMLElement {
         }
       }
     }
-    // The markup is read now, not a moment later: a page that imports
-    // Clack and at once calls goTo, or reads count, finds its slides. After
-    // a reconnect it is read again, in case it changed while the show was
-    // out of the page and not watching it.
-    if (!this.#scripted && (this.#origin === "none" || this.#origin === "markup")) {
-      this.#markup();
-    }
-    this.#schedule();
+    // The markup is read again on a reconnect, in case it changed while
+    // the show was out of the page and not watching it.
+    if (this.#showing === "markup") this.#showing = "none";
+    this.#render();
   }
 
   disconnectedCallback(): void {
     document.removeEventListener("visibilitychange", this.#onVisibility);
     // A manifest on its way is not dropped: there is no telling a move --
     // however long it takes -- from a removal, and a show that is moved must
-    // not download it again. One that arrives while the show is out of the
-    // page is held until it is back (#parked); a show removed for good
+    // not download it again. What becomes of it is shown when the show is
+    // back (#render does nothing out of the page); a show removed for good
     // downloads it once, and is collected with it.
     this.#resize.disconnect();
     this.#mutations.disconnect();
@@ -273,16 +274,21 @@ export class ClackShow extends HTMLElement {
     this.#finishTransitions();
   }
 
-  attributeChangedCallback(name: string): void {
+  attributeChangedCallback(name: string, _old: string | null, value: string | null): void {
     switch (name) {
       case "label":
         this.#name();
         break;
-      case "src":
-        // Setting src again after a failure is how a page retries.
-        if (this.#failed) this.#wanted = "";
-        this.#schedule();
+      case "src": {
+        const src = resolveSrc(value);
+        // The same src again does nothing -- unless what it names failed:
+        // setting src again is how a page retries.
+        if (src === this.#src && this.#manifest.state !== "failed") break;
+        this.#src = src;
+        this.#dropManifest();
+        this.#render();
         break;
+      }
       case "loop":
         this.#updateControls();
         break;
@@ -303,38 +309,28 @@ export class ClackShow extends HTMLElement {
   }
 
   /**
-   * Gives the show its slides from script, in place of its markup: in the
-   * manifest's slide format, or in Clack's own (as the getter returns them).
-   * Throws a TypeError naming the slide and the problem if one cannot be
-   * shown. null goes back to reading the markup.
+   * Gives the show its slides from script, in place of its manifest's or
+   * markup's: in the manifest's slide format, or in Clack's own (as the
+   * getter returns them). Throws a TypeError naming the slide and the
+   * problem if one cannot be shown. null goes back to the manifest or the
+   * markup, at once.
    */
   set slides(input: readonly (SlideInput | Slide)[] | null) {
     if (input === null) {
       this.#scripted = false;
-      // What comes back is there at once, as when the show connects, so
-      // count and goTo answer straight away: the markup, with no src; the
-      // manifest, if it was loaded and is still the one src names.
-      if (this.isConnected) {
-        const loaded = this.#loaded;
-        if (!this.getAttribute("src")) {
-          this.#dropManifest();
-          this.#markup();
-        } else if (loaded && !this.#failed && loaded.url === this.#wanted && loaded.url === this.#srcURL()) {
-          this.#showManifest(loaded.manifest);
-        }
-      }
-      this.#schedule();
+      this.#render();
       return;
     }
     const slides = fromInput(input);
     this.#scripted = true;
-    // A manifest on its way is dropped; one already loaded is kept, to come
-    // back to when these slides are withdrawn.
-    if (this.#abort) this.#dropManifest();
-    this.#origin = "script";
+    // A manifest on its way is dropped, and fetched again if these slides
+    // are withdrawn; one already loaded is kept, to come back to at once.
+    if (this.#manifest.state === "loading") this.#dropManifest();
+    this.#showing = "script";
+    this.#shownManifest = null;
     this.#notice.hidden = true;
     this.#mutations.disconnect();
-    this.#setTitle("", "");
+    this.#setTitle("", null);
     this.#setSlides(slides);
   }
 
@@ -377,168 +373,131 @@ export class ClackShow extends HTMLElement {
   // ---- Slides ----------------------------------------------------------
 
   #readMarkup(): void {
-    this.#setSlides(
-      readMarkup(this, (m) => {
-        if (!this.#warned.has(m)) {
-          this.#warned.add(m);
-          console.warn(`Clack: ${m}`);
-        }
-      }),
-    );
-  }
-
-  /** Looks again, once this task is done, at where the slides should come from (see #sync). */
-  #schedule(): void {
-    if (this.#syncQueued) return;
-    this.#syncQueued = true;
-    queueMicrotask(() => {
-      this.#syncQueued = false;
-      this.#sync();
+    // A warning is given when it first appears, and again only if it went
+    // away and came back -- not at every reading of the same markup.
+    const now = new Set<string>();
+    const slides = readMarkup(this, (m) => {
+      now.add(m);
+      if (!this.#warnings.has(m)) console.warn(`Clack: ${m}`);
     });
+    this.#warnings = now;
+    this.#setSlides(slides);
   }
 
   /**
-   * Makes the slides come from where they now should, when not from
-   * script: the manifest src names, or else the markup. Every way in -- the
-   * element connecting, src changing, slides from script withdrawn -- goes
-   * through here, after the task that caused it, so however they combine
-   * there is one decision and at most one fetch.
+   * Shows what should be shown now, from the state of things -- slides
+   * from script, else the manifest's state, else the markup -- and starts
+   * fetching the manifest src names, if it is not on its way. Every change
+   * comes through here, at once, so whatever order they come in there is
+   * one decision, and at most one fetch for a src. Out of the page, nothing
+   * is done until the show is back.
    *
    * While a manifest loads, what is shown stays: at first the markup's
-   * slides, as without script, followed as the markup changes; after that,
-   * a previous manifest's or script's slides. A manifest that cannot be
-   * had brings back the markup's slides, says so, and fires error.
+   * slides, followed as the markup changes; after that, a previous
+   * manifest's or script's. A manifest that cannot be had brings back the
+   * markup's slides, says so, and fires error -- after the show has drawn
+   * itself, so a page that answers by giving slides of its own keeps them.
    */
-  #sync(): void {
-    if (!this.isConnected || this.#scripted) return;
-    const src = this.getAttribute("src");
-    if (!src) {
-      this.#notice.hidden = true;
-      this.#failed = false;
-      this.#dropManifest();
-      // Read again only if something else was on screen.
-      if (this.#origin !== "markup") this.#markup();
-      return;
-    }
-    // What src names, resolved; a src that is not a URL is remembered as
-    // itself, so it too fails once, not again at every move.
-    const url = this.#srcURL();
-    const wanted = url || `invalid:${src}`;
-    if (wanted === this.#wanted) {
-      // Loading, shown, or failed already. A manifest that arrived while
-      // the show was out of the page, or one put aside for slides from
-      // script, is shown now; one that failed, behind slides from script
-      // since, gives way to the markup.
-      if (this.#parked === "failed") {
-        this.#parked = null;
-        this.#showFailure();
-      } else if (this.#failed) {
-        // Failed, and slides from script shown since: the markup again,
-        // and the notice, which the script's slides had put away.
-        if (this.#origin === "script") this.#showFailure();
-      } else if (this.#loaded?.url === wanted && (this.#parked === "arrived" || this.#origin === "script")) {
-        this.#showManifest(this.#loaded.manifest);
+  #render(): void {
+    if (!this.isConnected) return;
+    if (!this.#scripted) {
+      if (this.#src && this.#manifest.state === "none") this.#startLoad();
+      const m = this.#manifest;
+      switch (m.state) {
+        case "loaded":
+          this.#notice.hidden = true;
+          if (this.#showing !== "manifest" || this.#shownManifest !== m.manifest) this.#showManifest(m.manifest);
+          break;
+        case "failed":
+          if (this.#showing !== "markup") this.#markup();
+          this.#noticeOn();
+          break;
+        case "loading":
+          this.#notice.hidden = true;
+          if (this.#showing === "none") this.#markup();
+          break;
+        case "none":
+          this.#notice.hidden = true;
+          if (this.#showing !== "markup") this.#markup();
+          break;
       }
-      return;
     }
-    this.#dropManifest();
-    this.#notice.hidden = true;
-    this.#failed = false;
-    this.#wanted = wanted;
-    if (!url) {
-      this.#manifestFailed(src, new Error(`Clack: src is not a URL`));
+    if (this.#owedError) {
+      this.#owedError = false;
+      this.dispatchEvent(new Event("error"));
+    }
+  }
+
+  /** Starts fetching the manifest #src names. */
+  #startLoad(): void {
+    const url = this.#src;
+    if (url.startsWith("invalid:")) {
+      this.#failed(url.slice("invalid:".length), new Error("Clack: src is not a URL"));
       return;
     }
     const abort = new AbortController();
-    this.#abort = abort;
+    this.#manifest = { state: "loading", url, abort };
     load(url, abort.signal).then(
-      (m) => {
+      (manifest) => {
         if (abort.signal.aborted) return;
-        this.#abort = null;
-        this.#loaded = { url, manifest: m };
-        if (this.isConnected) {
-          this.#showManifest(m);
-        } else {
-          this.#parked = "arrived";
-        }
+        this.#manifest = { state: "loaded", url, manifest };
+        this.#render();
       },
       (e: unknown) => {
         if (abort.signal.aborted) return;
-        this.#abort = null;
-        this.#manifestFailed(url, e);
+        this.#failed(url, e);
+        this.#render();
       },
     );
   }
 
-  /** Stops the manifest on its way, if any, and forgets which src was acted on. */
+  /**
+   * The manifest could not be had: said to the console, with every
+   * problem by its place; the markup and a notice follow when the show
+   * renders, and the page's error event after that.
+   */
+  #failed(url: string, e: unknown): void {
+    if (e instanceof ManifestError) {
+      const lines = describeProblems(e.problems);
+      console.error(`Clack: the manifest ${url} was refused, for ${lines.length} problem${lines.length === 1 ? "" : "s"}:\n${lines.join("\n")}`);
+    } else {
+      console.error(`Clack: the manifest ${url} could not be loaded:`, e);
+    }
+    this.#manifest = { state: "failed", url };
+    this.#owedError = true;
+  }
+
+  /** Stops the manifest on its way, if any, and forgets what became of the last: src is to be read afresh. */
   #dropManifest(): void {
-    this.#abort?.abort();
-    this.#abort = null;
-    this.#wanted = "";
-    this.#parked = null;
+    if (this.#manifest.state === "loading") this.#manifest.abort.abort();
+    this.#manifest = { state: "none" };
   }
 
   #showManifest(m: Manifest): void {
-    this.#parked = null;
-    this.#origin = "manifest";
+    this.#showing = "manifest";
+    this.#shownManifest = m;
     this.#mutations.disconnect();
     this.#setTitle(m.title, m.lang);
     this.#setSlides(m.slides);
   }
 
-  /** src, resolved against the page, or "" if it is not a URL. */
-  #srcURL(): string {
-    const src = this.getAttribute("src");
-    if (!src) return "";
-    try {
-      return new URL(src, document.baseURI).href;
-    } catch {
-      return "";
-    }
-  }
-
   /** The markup's slides, followed as the markup changes. */
   #markup(): void {
-    this.#origin = "markup";
-    this.#setTitle("", "");
+    this.#showing = "markup";
+    this.#shownManifest = null;
+    this.#setTitle("", null);
     this.#mutations.observe(this, { childList: true, subtree: true, attributes: true, characterData: true });
     this.#readMarkup();
   }
 
   /**
-   * The manifest could not be had: the markup's slides are shown, whatever
-   * was shown before (a previous manifest's would be the wrong photos), and
-   * the show says so -- to the console with every problem, each by its
-   * place, to the visitor with a notice, and to the page with error.
+   * Shows the notice that the manifest could not be had, if it is not up
+   * already: shown first and given its words a moment later, since a
+   * status that appears with its text already in it is not reliably read
+   * out.
    */
-  #manifestFailed(url: string, e: unknown): void {
-    if (e instanceof ManifestError) {
-      const lines = e.problems.map((p) => `  ${p.path || "(the whole file)"}: ${p.message}`);
-      console.error(`Clack: the manifest ${url} was refused, for ${lines.length} problem${lines.length === 1 ? "" : "s"}:\n${lines.join("\n")}`);
-    } else {
-      console.error(`Clack: the manifest ${url} could not be loaded:`, e);
-    }
-    this.#failed = true;
-    // A copy of this manifest loaded before is not the manifest now: it is
-    // never brought back.
-    if (this.#loaded?.url === url) this.#loaded = null;
-    this.dispatchEvent(new Event("error"));
-    if (this.isConnected) {
-      this.#showFailure();
-    } else {
-      this.#parked = "failed";
-    }
-  }
-
-  /**
-   * The markup's slides -- read again only if something else was shown --
-   * and the notice saying the manifest could not be had.
-   */
-  #showFailure(): void {
-    if (this.#origin !== "markup") this.#markup();
-    // Shown first and given its words a moment later: a status that
-    // appears with its text already in it, or is given the same text
-    // again, is not reliably read out.
+  #noticeOn(): void {
+    if (!this.#notice.hidden) return;
     this.#notice.textContent = "";
     this.#notice.hidden = false;
     setTimeout(() => {

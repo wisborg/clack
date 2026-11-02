@@ -701,3 +701,21 @@ test("a markup warning is given once, however often the markup is read", async (
     console.warn = quiet;
   }
 });
+
+test("a markup warning that goes away and comes back is given again", async () => {
+  const warned: string[] = [];
+  const quiet = console.warn;
+  console.warn = (m: unknown) => warned.push(String(m));
+  try {
+    const show = makeShow([{}]);
+    const photo = show.querySelector("img")!;
+    photo.removeAttribute("alt");
+    await waitFor(() => warned.length === 1, "the warning");
+    photo.alt = "fixed";
+    await waitFor(() => show.slides[0]!.alt === "fixed", "the fix");
+    photo.removeAttribute("alt");
+    await waitFor(() => warned.length === 2, "the warning again");
+  } finally {
+    console.warn = quiet;
+  }
+});

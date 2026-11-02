@@ -140,21 +140,19 @@ func CheckJSON(doc any) []jsonschema.Error {
 			if f, err := x.Float64(); err != nil || math.IsInf(f, 0) {
 				errs = append(errs, jsonschema.Error{Path: pathOf(it), Message: "is a number too large to hold"})
 			}
-		case map[string]any:
+		case map[string]any, []any:
 			if it.depth > MaxDepth {
 				errs = append(errs, jsonschema.Error{Path: pathOf(it), Message: fmt.Sprintf("nests more than %d deep", MaxDepth)})
 				continue
 			}
-			for k, sub := range x {
-				stack = append(stack, &item{sub, it, k, it.depth + 1})
-			}
-		case []any:
-			if it.depth > MaxDepth {
-				errs = append(errs, jsonschema.Error{Path: pathOf(it), Message: fmt.Sprintf("nests more than %d deep", MaxDepth)})
-				continue
-			}
-			for i, sub := range x {
-				stack = append(stack, &item{sub, it, strconv.Itoa(i), it.depth + 1})
+			if m, ok := x.(map[string]any); ok {
+				for k, sub := range m {
+					stack = append(stack, &item{sub, it, k, it.depth + 1})
+				}
+			} else {
+				for i, sub := range x.([]any) {
+					stack = append(stack, &item{sub, it, strconv.Itoa(i), it.depth + 1})
+				}
 			}
 		}
 	}

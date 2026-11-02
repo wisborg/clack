@@ -185,7 +185,12 @@
       "https://xn.example/a",
       "https://xnn--a.example/a",
       "photos/a\\b.jpg",
-      "https://example.com/a\\b"
+      "https://example.com/a\\b",
+      "HTTPS://cdn.example.com/a.jpg",
+      "Https://x.example/",
+      "https://cdn.example.com./a.jpg",
+      "https://1.2.3.4./a",
+      "https://example.com.:8080/a"
     ],
     "nomatch": [
       "a b.jpg",
@@ -207,7 +212,6 @@
       "",
       " a.jpg",
       "mailto:a@example.com",
-      "HTTPS://example.com",
       "a.jpg\n",
       "file:///etc/passwd",
       "//",
@@ -235,7 +239,10 @@
       "https://example.xn--p1ai/a",
       "https://XN--bcher-kva.example/a",
       "//xn--a/x",
-      "https://xn--bcher-kva.example/a"
+      "https://xn--bcher-kva.example/a",
+      "https://cdn.example.com../a",
+      "HTTPX://example.com/a",
+      "https://./a"
     ]
   },
   "manifest-1.schema.json#/$defs/lang": {

@@ -71,14 +71,14 @@ markup, whatever it contains.
 
 ### URLs
 
-Every URL is `http://` or `https://`, or relative — resolved against the manifest's own URL,
+Every URL is `http://` or `https://` (the scheme in any letter case), or relative — resolved against the manifest's own URL,
 or the page's when the slides come from JavaScript. Every other scheme is refused: no
 `data:`, `blob:` or `javascript:`. A URL is printable ASCII: anything else, a space or a
 letter like `ø` included, is percent-encoded (`%C3%B8`), which every server and every
 browser read the same way. A host is a domain name of ASCII labels, the last beginning
 with a letter (`photos.example.com`), or an IPv4 address (`192.0.2.7`), with a port up to
-65535 if any; and a relative URL does not begin with a backslash where a browser would read
-it as a slash. These are the forms every URL parser reads alike, so a URL the schema accepts
+65535 if any (a host may end in a dot, as a fully qualified name does); and a relative URL
+does not begin with a backslash where a browser would read it as a slash. These are the forms every URL parser reads alike, so a URL the schema accepts
 always resolves, in the tools as in the browser. Not allowed: bracketed IPv6 hosts, user
 names in URLs, and internationalised domain names — see
 [Not supported, and why](#not-supported-and-why). The schema says so, and Clack checks each
