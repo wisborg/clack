@@ -453,7 +453,7 @@ func CheckManifest(doc map[string]any) []error {
 		// skips it (src/manifest.ts check), so both report the same places.
 		if id, ok := slide["id"].(string); ok {
 			if j, ok := seen[id]; ok {
-				errs = append(errs, fmt.Errorf("/slides/%d/id: %q is also the id of slide %d", i, id, j))
+				errs = append(errs, jsonschema.Error{Path: fmt.Sprintf("/slides/%d/id", i), Message: fmt.Sprintf("%q is also the id of slide %d", id, j)})
 			} else {
 				seen[id] = i
 			}
@@ -481,7 +481,7 @@ func CheckManifest(doc map[string]any) []error {
 			}
 			key := fmt.Sprintf("%d %s", int(width), typ)
 			if widths[key] {
-				errs = append(errs, fmt.Errorf("/slides/%d/sources/%d: another source has the same width and type", i, k))
+				errs = append(errs, jsonschema.Error{Path: fmt.Sprintf("/slides/%d/sources/%d", i, k), Message: "another source has the same width and type"})
 			}
 			widths[key] = true
 		}

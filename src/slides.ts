@@ -2,6 +2,7 @@
  * Slides: what Clack shows, read from the host page's markup or given from
  * script, in one shape whatever the source.
  */
+import manifestSchema from "../schema/manifest-1.schema.json";
 
 /** One `<source>` of a `<picture>`: the same photo in another format. */
 export interface Alternative {
@@ -49,7 +50,8 @@ export interface Keyed extends Slide {
   lang: string;
 }
 
-const langPattern = /^[a-zA-Z]{2,3}(?:-[a-zA-Z0-9]{1,8}){0,4}$/;
+// The published schema's rule for a language tag, not a copy of it.
+const langPattern = new RegExp(manifestSchema.$defs.lang.pattern, "u");
 
 /** A slide as given from script: the slide format of a manifest. */
 export interface SlideInput {
@@ -165,7 +167,7 @@ export function readMarkup(host: Element, warn: (message: string) => void): Keye
 
     slides.push({
       key,
-      lang: (figure ?? img).closest("[lang]")?.getAttribute("lang") ?? "",
+      lang: markupLang(figure ?? img, host),
       id,
       alt: alt ?? "",
       width,
@@ -181,6 +183,20 @@ export function readMarkup(host: Element, warn: (message: string) => void): Keye
     });
   }
   return slides;
+}
+
+/**
+ * The language a slide's markup is marked with inside the show, or "" to
+ * inherit the page's, as the show's own text does. Only lang attributes
+ * between the slide and the show count: one further out applies to the
+ * whole show already, and is followed as it changes.
+ */
+function markupLang(e: Element, host: Element): string {
+  for (let at: Element | null = e; at && at !== host; at = at.parentElement) {
+    const lang = at.getAttribute("lang");
+    if (lang !== null) return lang;
+  }
+  return "";
 }
 
 /**
@@ -221,8 +237,9 @@ export function fromInput(input: readonly (SlideInput | Slide)[]): Keyed[] {
     if (ids.has(s.id)) fail(`the id "${s.id}" is already used`);
     ids.add(s.id);
     if (typeof s.alt !== "string") fail("alt must be a string");
+    // Absent, null (as many serialisers write an empty field) or a string.
     const text = (v: unknown, what: string): void => {
-      if (v !== undefined && typeof v !== "string") fail(`${what} must be a string`);
+      if (v !== undefined && v !== null && typeof v !== "string") fail(`${what} must be a string`);
     };
     for (const [name, v] of [["width", s.width], ["height", s.height]] as const) {
       if (!Number.isInteger(v) || v < 1) fail(`${name} must be a positive integer`);

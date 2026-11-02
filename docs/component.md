@@ -21,6 +21,8 @@ What the element does today, as built (phase 1, in progress). The plan for the r
 Each child `<figure>` holding an `<img>` — bare, or in a `<picture>` with `<source>`s for
 other formats — is a slide, and so is each child `<img>`. Anything else is left alone.
 
+- A `lang` attribute on a figure (or within the show) marks its caption and description as
+  in that language; otherwise they are in the page's.
 - `alt` is the photo's description. Without it Clack warns in the console; `alt=""` says the
   caption already describes it.
 - `width` and `height` are required: they keep the photo's space before it loads, so the
@@ -58,11 +60,14 @@ instead. A slide still on its way when the slides change arrives where it now is
 
 `src` names a manifest ([`manifest.md`](manifest.md)). Until the first arrives, the
 markup's slides are shown, as they are without script, and followed as the markup changes;
-when `src` changes, or slides from script are withdrawn, the slides shown stay until the new
-manifest arrives. Its slides then take their place; its title names the show if `label`
-does not, and its language is set on its own text — captions, the photos' descriptions,
-titles in announcements — while Clack's own words stay in the page's. A show moved in the
-page, even while its manifest is on its way, does not fetch it again.
+when `src` changes, the slides shown stay until the new manifest arrives. Its slides then
+take their place; its title names the show if `label` does not, and its language is set on
+its own text — captions, the photos' descriptions, titles in announcements, and the show's
+name where the browser can label by element — while Clack's own words stay in the page's.
+Slides from script withdrawn (`slides = null`) bring back a manifest already loaded at once,
+without fetching it again. A show moved in the page, however long the move takes, never
+fetches its manifest again; one that arrives while the show is out of the page is shown
+when it is back.
 
 A manifest that cannot be had — a failed request, the wrong type, too large, not JSON, or
 not a valid manifest — brings back the markup's slides (never a previous manifest's), shows

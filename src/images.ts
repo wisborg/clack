@@ -153,7 +153,11 @@ export class Photos {
     for (const [id, photo] of this.#photos) {
       const slide = now.get(id);
       if (slide && photoKey(slide) === photo.key) {
+        // The same photo, perhaps described anew, perhaps in another
+        // language: the description and its language follow the slide.
         photo.img.alt = slide.alt;
+        if (slide.lang) photo.img.lang = slide.lang;
+        else photo.img.removeAttribute("lang");
       } else {
         this.#let(id, photo);
       }

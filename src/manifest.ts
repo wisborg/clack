@@ -136,19 +136,27 @@ export function check(doc: unknown): Problem[] {
  * problem, or a SyntaxError for text that is not JSON; nothing else.
  */
 export function parse(text: string, base: string): Manifest {
-  let doc: unknown;
+  const doc = parseJSON(text);
+  const problems = check(doc);
+  if (problems.length > 0) {
+    throw new ManifestError(problems);
+  }
+  return build(doc, base);
+}
+
+function parseJSON(text: string): unknown {
   try {
-    doc = JSON.parse(text);
+    return JSON.parse(text);
   } catch (e) {
     // A parser may give up on a document too deep for it with something
     // other than a SyntaxError; to the caller it is all text that is not
     // a manifest.
     throw e instanceof SyntaxError ? e : new SyntaxError(String(e));
   }
-  const problems = check(doc);
-  if (problems.length > 0) {
-    throw new ManifestError(problems);
-  }
+}
+
+/** A checked manifest, its URLs resolved against base and its slides converted. */
+function build(doc: unknown, base: string): Manifest {
   const m = doc as { title?: string; description?: string; lang?: string; slides: SlideInput[] };
   // Every URL becomes absolute, resolved against the manifest's, and must
   // then be http or https. One the URL parser refuses (a bad port, a broken
@@ -232,23 +240,55 @@ export async function load(url: string, signal: AbortSignal): Promise<Manifest> 
   if (!reader) {
     throw new Error("Clack: the manifest has no body");
   }
-  const parts: Uint8Array[] = [];
+  // Into one buffer of the size the server declared; if it says nothing,
+  // or turns out to have understated it, into pieces joined at the end.
+  let buffer = declared > 0 ? new Uint8Array(declared) : null;
+  let parts: Uint8Array[] = [];
   let size = 0;
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
-    size += value.byteLength;
-    if (size > maxBytes) {
+    if (size + value.byteLength > maxBytes) {
       await reader.cancel();
       throw new Error(`Clack: the manifest is larger than ${maxBytes} bytes`);
     }
-    parts.push(value);
+    if (buffer && size + value.byteLength <= buffer.byteLength) {
+      buffer.set(value, size);
+    } else {
+      if (buffer) {
+        parts = [buffer.subarray(0, size)];
+        buffer = null;
+      }
+      parts.push(value);
+    }
+    size += value.byteLength;
   }
-  const bytes = new Uint8Array(size);
-  let at = 0;
-  for (const p of parts) {
-    bytes.set(p, at);
-    at += p.byteLength;
+  let bytes: Uint8Array;
+  if (buffer) {
+    bytes = buffer.subarray(0, size);
+  } else {
+    bytes = new Uint8Array(size);
+    let at = 0;
+    for (const p of parts) {
+      bytes.set(p, at);
+      at += p.byteLength;
+    }
   }
-  return parse(decode(bytes), response.url || url);
+  // A large manifest takes a while to read; it is done in steps, with the
+  // page free to draw and answer input between them.
+  const text = decode(bytes);
+  await yieldToPage();
+  const doc = parseJSON(text);
+  await yieldToPage();
+  const problems = check(doc);
+  if (problems.length > 0) {
+    throw new ManifestError(problems);
+  }
+  await yieldToPage();
+  return build(doc, response.url || url);
+}
+
+/** Lets the page draw and answer input before going on. */
+function yieldToPage(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }

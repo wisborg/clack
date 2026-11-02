@@ -347,8 +347,8 @@ test("slides can be given from script, with pictures for other formats", async (
   assertEqual(show.count, 2, "and the slides stay as they were");
   show.slides = null;
   // The markup's own slides, not the script's two that happen to match
-  // them in number.
-  await waitFor(() => show.slides[0]?.alt === "photo 1", "the markup's slides back");
+  // them in number -- and at once, with no manifest to wait for.
+  assertEqual(show.slides[0]?.alt, "photo 1", "the markup's slides, at once");
   await settledOn(show, "1 of 2");
 });
 

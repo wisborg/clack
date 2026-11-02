@@ -1,7 +1,9 @@
 package formats
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -696,9 +698,9 @@ func TestSharedManifestCases(t *testing.T) {
 	}
 	var fixture struct {
 		Cases []struct {
-			Name  string                     `json:"name"`
-			Set   map[string]json.RawMessage `json:"set"`
-			Error json.RawMessage            `json:"error"`
+			Name  string          `json:"name"`
+			Set   json.RawMessage `json:"set"`
+			Error json.RawMessage `json:"error"`
 		} `json:"cases"`
 		Raw []struct {
 			Name     string `json:"name"`
@@ -728,12 +730,14 @@ func TestSharedManifestCases(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for pointer, rawValue := range c.Set {
-			v, err := jsonschema.Decode(rawValue)
+		// In the order the file gives them, as the browser applies them:
+		// edits that overlap would otherwise depend on map order.
+		for _, edit := range orderedObject(t, c.Set) {
+			v, err := jsonschema.Decode(edit.value)
 			if err != nil {
 				t.Fatalf("%s: %v", c.Name, err)
 			}
-			doc = setPointer(t, doc, pointer, v)
+			doc = setPointer(t, doc, edit.key, v)
 		}
 		data, _ := json.Marshal(doc)
 		parsed, errs := ParseManifest(manifestSchema, data)
@@ -742,11 +746,7 @@ func TestSharedManifestCases(t *testing.T) {
 		}
 		got := map[string]bool{}
 		for _, e := range errs {
-			path, _, _ := strings.Cut(e.Error(), ": ")
-			if path == "(document)" {
-				path = ""
-			}
-			got[path] = true
+			got[errorPath(e)] = true
 		}
 		switch {
 		case want == nil && len(errs) > 0:
@@ -775,4 +775,41 @@ func TestSharedManifestCases(t *testing.T) {
 			t.Errorf("raw %s: accepted %v, want %v: %v", c.Name, accepted, c.Accepted, errs)
 		}
 	}
+}
+
+type keyValue struct {
+	key   string
+	value json.RawMessage
+}
+
+// orderedObject returns an object's members in the order they are written.
+func orderedObject(t *testing.T, raw json.RawMessage) []keyValue {
+	t.Helper()
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		t.Fatalf("not an object: %s", raw)
+	}
+	var out []keyValue
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var v json.RawMessage
+		if err := dec.Decode(&v); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, keyValue{tok.(string), v})
+	}
+	return out
+}
+
+// errorPath is where an error is: a schema error's own path, or the whole
+// document for one that has none (a file that is not JSON).
+func errorPath(e error) string {
+	var je jsonschema.Error
+	if errors.As(e, &je) {
+		return je.Path
+	}
+	return ""
 }

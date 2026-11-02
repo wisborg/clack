@@ -11,7 +11,7 @@ import css from "./clack.css";
 import { icon } from "./icons";
 import { photoKey, Photos, type Photo } from "./images";
 import { canStep, drawnWidth, preloadOrder, step } from "./nav";
-import { load, ManifestError } from "./manifest";
+import { load, ManifestError, type Manifest } from "./manifest";
 import { fromInput, readMarkup, type Keyed, type Slide, type SlideInput } from "./slides";
 import { listen } from "./swipe";
 
@@ -82,6 +82,8 @@ export class ClackShow extends HTMLElement {
 
   readonly #internals: ElementInternals;
   readonly #captionBox: HTMLParagraphElement;
+  /** The manifest's title, hidden, in its language: what names the show when it does (see #name). */
+  readonly #nameBox: HTMLSpanElement;
   readonly #stage: HTMLDivElement;
   readonly #notice: HTMLParagraphElement;
   readonly #title: HTMLSpanElement;
@@ -102,10 +104,16 @@ export class ClackShow extends HTMLElement {
   readonly #warned = new Set<string>();
   /** Set when the manifest src names could not be had: setting src again retries it. */
   #failed = false;
-  /** Set by a change to src, which retries a failed manifest; a move, or slides withdrawn, does not. */
-  #retry = false;
   /** Cancels the manifest being fetched, if one is. */
   #abort: AbortController | null = null;
+  /**
+   * The last manifest loaded, by its URL: shown again at once when slides
+   * from script are withdrawn, and held while the show is out of the page
+   * when it arrives then.
+   */
+  #loaded: { url: string; manifest: Manifest } | null = null;
+  /** Set when #loaded arrived while the show was out of the page, to be shown when it is back. */
+  #parked = false;
   /**
    * The manifest src names, resolved, once Clack has acted on it: loading,
    * shown, or failed. "" while the slides come from the markup. A src equal
@@ -114,11 +122,11 @@ export class ClackShow extends HTMLElement {
    */
   #wanted = "";
   /**
-   * Where the slides on screen came from, when not from script: nothing
-   * yet, the markup (followed as it changes), or a manifest or script
-   * ("other"), which stays on screen until a new manifest replaces it.
+   * Where the slides on screen came from: nothing yet, the markup (followed
+   * as it changes), a manifest, or script. A manifest's or script's slides
+   * stay on screen until a new manifest replaces them.
    */
-  #origin: "none" | "markup" | "other" = "none";
+  #origin: "none" | "markup" | "manifest" | "script" = "none";
   /** Set while #sync is due to run: every reason to look again within one task leads to one look. */
   #syncQueued = false;
   readonly #photos = new Photos();
@@ -182,12 +190,14 @@ export class ClackShow extends HTMLElement {
     controls.append(this.#previous, this.#counter, this.#next);
     below.append(caption, controls);
 
+    this.#nameBox = el("span", "name");
+    this.#nameBox.hidden = true;
     this.#live = el("div", "live");
     this.#live.ariaLive = "polite";
     this.#live.ariaAtomic = "true";
 
     show.append(this.#stage, below);
-    root.append(show, this.#live);
+    root.append(show, this.#live, this.#nameBox);
 
     this.addEventListener("keydown", (e) => this.#onKey(e));
   }
@@ -239,7 +249,7 @@ export class ClackShow extends HTMLElement {
     // Clack and at once calls goTo, or reads count, finds its slides. After
     // a reconnect it is read again, in case it changed while the show was
     // out of the page and not watching it.
-    if (!this.#scripted && this.#origin !== "other") {
+    if (!this.#scripted && (this.#origin === "none" || this.#origin === "markup")) {
       this.#markup();
     }
     this.#schedule();
@@ -247,17 +257,11 @@ export class ClackShow extends HTMLElement {
 
   disconnectedCallback(): void {
     document.removeEventListener("visibilitychange", this.#onVisibility);
-    // A manifest on its way is dropped only if the show is not back in the
-    // page by the time this task, and what it awaits, is done: moving a show
-    // (removed, then inserted elsewhere, even after an await) does not start
-    // its download again.
-    setTimeout(() => {
-      if (!this.isConnected && this.#abort) {
-        this.#abort.abort();
-        this.#abort = null;
-        this.#wanted = "";
-      }
-    }, 0);
+    // A manifest on its way is not dropped: there is no telling a move --
+    // however long it takes -- from a removal, and a show that is moved must
+    // not download it again. One that arrives while the show is out of the
+    // page is held until it is back (#parked); a show removed for good
+    // downloads it once, and is collected with it.
     this.#resize.disconnect();
     this.#mutations.disconnect();
     this.#stopSwipe?.();
@@ -265,13 +269,14 @@ export class ClackShow extends HTMLElement {
     this.#finishTransitions();
   }
 
-  attributeChangedCallback(name: string, _old: string | null, value: string | null): void {
+  attributeChangedCallback(name: string): void {
     switch (name) {
       case "label":
-        this.#internals.ariaLabel = value || this.#showTitle || text.show;
+        this.#name();
         break;
       case "src":
-        this.#retry = true;
+        // Setting src again after a failure is how a page retries.
+        if (this.#failed) this.#wanted = "";
         this.#schedule();
         break;
       case "loop":
@@ -302,18 +307,21 @@ export class ClackShow extends HTMLElement {
   set slides(input: readonly (SlideInput | Slide)[] | null) {
     if (input === null) {
       this.#scripted = false;
+      // With no manifest to come back to, the markup is read now, as when
+      // the show connects: count and goTo answer at once.
+      if (this.isConnected && !this.getAttribute("src")) this.#markup();
       this.#schedule();
       return;
     }
     const slides = fromInput(input);
     this.#scripted = true;
-    this.#abort?.abort();
-    this.#abort = null;
-    this.#wanted = "";
-    this.#origin = "other";
+    // A manifest on its way is dropped; one already loaded is kept, to come
+    // back to when these slides are withdrawn.
+    if (this.#abort) this.#dropManifest();
+    this.#origin = "script";
     this.#notice.hidden = true;
     this.#mutations.disconnect();
-    this.#setTitle("");
+    this.#setTitle("", "");
     this.#setSlides(slides);
   }
 
@@ -390,16 +398,12 @@ export class ClackShow extends HTMLElement {
    */
   #sync(): void {
     if (!this.isConnected || this.#scripted) return;
-    const retry = this.#retry;
-    this.#retry = false;
     const src = this.getAttribute("src");
     if (!src) {
       this.#notice.hidden = true;
       this.#failed = false;
       if (this.#origin !== "markup" || this.#wanted) {
-        this.#abort?.abort();
-        this.#abort = null;
-        this.#wanted = "";
+        this.#dropManifest();
         this.#markup();
       }
       return;
@@ -408,15 +412,22 @@ export class ClackShow extends HTMLElement {
     // itself, so it too fails once, not again at every move.
     const url = this.#srcURL();
     const wanted = url || `invalid:${src}`;
-    // Loading, shown, or failed already -- unless src was set again after
-    // a failure, which is how a page retries.
-    if (wanted === this.#wanted && !(this.#failed && retry)) return;
-    this.#abort?.abort();
-    this.#abort = null;
+    if (wanted === this.#wanted) {
+      // Loading, shown, or failed already. A manifest that arrived while
+      // the show was out of the page, or one put aside for slides from
+      // script, is shown now; one that failed, behind slides from script
+      // since, gives way to the markup.
+      if (this.#loaded?.url === wanted && (this.#parked || this.#origin === "script")) {
+        this.#showManifest(this.#loaded.manifest);
+      } else if (this.#failed && this.#origin === "script") {
+        this.#markup();
+      }
+      return;
+    }
+    this.#dropManifest();
     this.#notice.hidden = true;
     this.#failed = false;
     this.#wanted = wanted;
-    if (this.#origin === "none") this.#markup();
     if (!url) {
       this.#manifestFailed(src, new Error(`Clack: src is not a URL`));
       return;
@@ -427,10 +438,12 @@ export class ClackShow extends HTMLElement {
       (m) => {
         if (abort.signal.aborted) return;
         this.#abort = null;
-        this.#origin = "other";
-        this.#mutations.disconnect();
-        this.#setTitle(m.title);
-        this.#setSlides(m.slides);
+        this.#loaded = { url, manifest: m };
+        if (this.isConnected) {
+          this.#showManifest(m);
+        } else {
+          this.#parked = true;
+        }
       },
       (e: unknown) => {
         if (abort.signal.aborted) return;
@@ -438,6 +451,22 @@ export class ClackShow extends HTMLElement {
         this.#manifestFailed(url, e);
       },
     );
+  }
+
+  /** Stops the manifest on its way, if any, and forgets which src was acted on. */
+  #dropManifest(): void {
+    this.#abort?.abort();
+    this.#abort = null;
+    this.#wanted = "";
+    this.#parked = false;
+  }
+
+  #showManifest(m: Manifest): void {
+    this.#parked = false;
+    this.#origin = "manifest";
+    this.#mutations.disconnect();
+    this.#setTitle(m.title, m.lang);
+    this.#setSlides(m.slides);
   }
 
   /** src, resolved against the page, or "" if it is not a URL. */
@@ -451,15 +480,11 @@ export class ClackShow extends HTMLElement {
     }
   }
 
-  #observeMarkup(): void {
-    this.#mutations.observe(this, { childList: true, subtree: true, attributes: true, characterData: true });
-  }
-
   /** The markup's slides, followed as the markup changes. */
   #markup(): void {
     this.#origin = "markup";
-    this.#setTitle("");
-    this.#observeMarkup();
+    this.#setTitle("", "");
+    this.#mutations.observe(this, { childList: true, subtree: true, attributes: true, characterData: true });
     this.#readMarkup();
   }
 
@@ -491,13 +516,31 @@ export class ClackShow extends HTMLElement {
   }
 
   /**
-   * The manifest's title names the show if the page has not. (Its
-   * language goes with its slides -- see Keyed.lang -- so text on screen is
-   * always marked with the language of what it belongs to.)
+   * The manifest's title names the show if the page has not, read in the
+   * manifest's language: the show is labelled by a hidden element of its
+   * own that carries it, where the engine supports labelling by element
+   * from ElementInternals; otherwise by the text alone. (The slides' own
+   * language goes with each slide -- see Keyed.lang.)
    */
-  #setTitle(title: string): void {
+  #setTitle(title: string, lang: string): void {
     this.#showTitle = title;
-    this.#internals.ariaLabel = this.getAttribute("label") || title || text.show;
+    this.#name();
+    this.#nameBox.textContent = title;
+    this.#inLang(this.#nameBox, lang);
+  }
+
+  /** Names the show: its label, else the manifest's title, else "Photos". */
+  #name(): void {
+    const label = this.getAttribute("label");
+    const byElement = "ariaLabelledByElements" in this.#internals;
+    const internals = this.#internals as ElementInternals & { ariaLabelledByElements: Element[] | null };
+    if (!label && this.#showTitle && byElement) {
+      this.#internals.ariaLabel = null;
+      internals.ariaLabelledByElements = [this.#nameBox];
+    } else {
+      if (byElement) internals.ariaLabelledByElements = null;
+      this.#internals.ariaLabel = label || this.#showTitle || text.show;
+    }
   }
 
   /**
@@ -574,6 +617,13 @@ export class ClackShow extends HTMLElement {
     if (at === this.#shown) {
       this.#target = at;
       this.#caption(slides[at]!);
+      // A photo that could not be loaded shows its description in its
+      // place; that follows the slide too, as the photo's alt does.
+      const missing = this.#figure?.querySelector<HTMLElement>(".missing-alt");
+      if (missing) {
+        missing.textContent = slides[at]!.alt;
+        this.#inLang(missing, slides[at]!.lang);
+      }
       this.#updateControls();
       this.#preload(at);
       return;

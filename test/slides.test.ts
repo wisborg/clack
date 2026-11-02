@@ -144,6 +144,20 @@ test("fromInput refuses what cannot be shown", () => {
   }
 });
 
+test("fromInput takes null for an absent field, as serialisers write it", () => {
+  const [s] = fromInput([{ ...ok, page: null, description: { title: null, credit: null }, placeholder: { color: null } } as unknown as SlideInput]);
+  assertEqual(s!.page, "", "page");
+  assertEqual(s!.title, "", "title");
+});
+
+test("a markup slide's language is only one set inside the show", () => {
+  const host = markup(["figure>img[src=a.jpg][width=3][height=2][alt=A]", "figure[lang=da]>img[src=b.jpg][width=3][height=2][alt=B]"]);
+  host.setAttribute("lang", "en");
+  const [a, b] = readMarkup(host, () => {});
+  assertEqual(a!.lang, "", "inherits the page's");
+  assertEqual(b!.lang, "da", "its own");
+});
+
 test("usableURL allows http, https and relative URLs only", () => {
   for (const u of ["a.jpg", "/a.jpg", "//cdn.example.com/a.jpg", "https://example.com/a.jpg", "http://example.com"]) {
     assert(usableURL(u), `refused ${u}`);

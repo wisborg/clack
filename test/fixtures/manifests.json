@@ -478,6 +478,41 @@
         "/slides/0/sources/0/width",
         "/slides/0/sources/1/width"
       ]
+    },
+    {
+      "name": "a port beyond 65535",
+      "set": {
+        "/slides/0/sources/0/url": "https://a:99999/x.jpg"
+      },
+      "error": "/slides/0/sources/0/url"
+    },
+    {
+      "name": "a host that is not IPv4 but ends in a number",
+      "set": {
+        "/slides/0/sources/0/url": "//1.2.3.4.5/x.jpg"
+      },
+      "error": "/slides/0/sources/0/url"
+    },
+    {
+      "name": "a bracketed host",
+      "set": {
+        "/slides/0/sources/0/url": "//[x]/a.jpg"
+      },
+      "error": "/slides/0/sources/0/url"
+    },
+    {
+      "name": "a percent-encoded host",
+      "set": {
+        "/slides/0/sources/0/url": "//%zz/a.jpg"
+      },
+      "error": "/slides/0/sources/0/url"
+    },
+    {
+      "name": "a host with a port",
+      "set": {
+        "/slides/0/sources/0/url": "https://photos.example.com:8443/a.jpg"
+      },
+      "error": null
     }
   ],
   "raw": [

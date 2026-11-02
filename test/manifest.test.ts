@@ -3,6 +3,7 @@ import { tagName } from "../src/clack";
 import { check, decode, load, ManifestError, maxBytes, parse } from "../src/manifest";
 import example from "../schema/examples/manifest.json";
 import fixture from "./fixtures/manifests.json";
+import patternCases from "./fixtures/patterns.json";
 import { assert, assertEqual, fixture as fixtureEl, test } from "./harness";
 import { figure, img, imageLog, resetImageLog, settledOn, waitFor } from "./util";
 
@@ -43,7 +44,10 @@ test("the shared manifest cases get the verdicts the Go reference gives", () => 
     // error is null, one place, or a list of places.
     const want: string[] | null = c.error === null ? null : Array.isArray(c.error) ? c.error : [c.error];
     // Through JSON text, as from the network: a "__proto__" key stays a key.
-    const problems = check(JSON.parse(JSON.stringify(doc)));
+    // JSON.stringify writes -0 as 0, so -0 is carried through as a marker
+    // and put back in the text, to reach the checker as it would.
+    const text = JSON.stringify(doc, (_k, v: unknown) => (Object.is(v, -0) ? "\u0000minus-zero" : v)).replaceAll('"\\u0000minus-zero"', "-0");
+    const problems = check(JSON.parse(text));
     const got = new Set(problems.map((p) => p.path));
     if (want === null && problems.length > 0) {
       failures.push(`${c.name}: refused: ${problems.map((p) => `${p.path}: ${p.message}`).join("; ")}`);
@@ -535,4 +539,61 @@ test("text on screen keeps the language of the slide it belongs to", async () =>
   assert(caption.getAttribute("lang") !== "da", `the markup's caption, still on screen, is not marked Danish (${caption.getAttribute("lang")})`);
   await waitFor(() => s.shadowRoot!.querySelector(".title")!.textContent === "M1", "the manifest's caption");
   assertEqual(caption.getAttribute("lang"), "da", "now Danish");
+});
+
+test("every URL the schema's pattern accepts is one the browser can resolve", () => {
+  const urls = (patternCases as unknown as Record<string, { match: string[] }>)["manifest-1.schema.json#/$defs/url"]!.match;
+  for (const u of urls) {
+    let ok = true;
+    try {
+      new URL(u, "https://example.com/albums/coast/manifest.json");
+    } catch {
+      ok = false;
+    }
+    assert(ok, `accepted by the pattern, refused by the URL parser: ${u}`);
+  }
+});
+
+test("slides from script withdrawn bring back the manifest at once, not fetched again", async () => {
+  await resetImageLog();
+  const s = show({ src: echo(manifestOf(3)) });
+  await waitFor(() => s.count === 3, "the manifest");
+  s.slides = [{ id: "s", alt: "", width: 300, height: 200, sources: [{ url: img(300, 200), width: 300 }] }];
+  s.slides = null;
+  await waitFor(() => s.count === 3, "the manifest back");
+  assertEqual(await manifestFetches(), 1, "fetches");
+});
+
+test("a show moved over several tasks does not fetch its manifest again", async () => {
+  await resetImageLog();
+  const s = show({ src: echo(manifestOf(2), { delay: 300 }) });
+  await new Promise((r) => setTimeout(r, 50));
+  const parent = s.parentElement!;
+  s.remove();
+  await new Promise((r) => setTimeout(r, 500)); // out of the page while it arrives
+  parent.append(s);
+  await waitFor(() => s.count === 2, "the manifest, held until the show was back");
+  assertEqual(await manifestFetches(), 1, "fetches");
+});
+
+test("a photo kept across manifests takes the new one's language", async () => {
+  const photo = img(300, 200, "557799");
+  const manifest = (lang: string, alt: string): string =>
+    JSON.stringify({ format: "clack-manifest/1", lang, slides: [{ id: "a", alt, width: 300, height: 200, sources: [{ url: photo, width: 300 }] }] });
+  const s = show({ src: echo(manifest("en", "Low tide")) });
+  await settledOn(s, "1 of 1");
+  const kept = s.shadowRoot!.querySelector(".slide img")!;
+  s.setAttribute("src", echo(manifest("da", "Lavvande")));
+  await waitFor(() => kept.getAttribute("alt") === "Lavvande", "the new description");
+  assertEqual(s.shadowRoot!.querySelector(".slide img"), kept, "the same photo");
+  assertEqual(kept.getAttribute("lang"), "da", "in the new language");
+});
+
+test("the manifest's title names the show in the manifest's language", async () => {
+  const s = show({ src: echo(manifestOf(1)) });
+  await waitFor(() => s.count === 1, "the manifest");
+  const name = s.shadowRoot!.querySelector<HTMLElement>(".name")!;
+  assertEqual(name.textContent, "From a manifest", "the title");
+  assertEqual(name.getAttribute("lang"), "da", "its language");
+  assertEqual(name.hidden, true, "hidden: it names, it is not shown");
 });

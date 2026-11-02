@@ -75,7 +75,10 @@ Every URL is `http://` or `https://`, or relative — resolved against the manif
 or the page's when the slides come from JavaScript. Every other scheme is refused: no
 `data:`, `blob:` or `javascript:`. A URL is printable ASCII: anything else, a space or a
 letter like `ø` included, is percent-encoded (`%C3%B8`), which every server and every
-browser read the same way. The schema says so, and Clack checks each resolved URL again
+browser read the same way. A host is a domain name whose last label begins with a letter
+(`photos.example.com`), or an IPv4 address (`192.0.2.7`), with a port up to 65535 if any:
+the forms every URL parser reads alike, so a URL the schema accepts always resolves, in the
+tools as in the browser. Bracketed IPv6 hosts and user names in URLs are not allowed. The schema says so, and Clack checks each resolved URL again
 before using it. Clack requests these URLs and nothing else.
 
 ## Metadata, by class
