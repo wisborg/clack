@@ -41,7 +41,7 @@ func FuzzManifest(f *testing.F) {
 	f.Add(raw)
 	_, schema := schemasF(f)
 	f.Fuzz(func(t *testing.T, data []byte) {
-		doc, errs := Parse(schema, data)
+		doc, errs := ParseManifest(schema, data)
 		if doc == nil {
 			return
 		}
@@ -53,7 +53,7 @@ func FuzzManifest(f *testing.F) {
 		if err != nil {
 			t.Fatalf("an accepted manifest cannot be written out: %v", err)
 		}
-		if _, errs := Parse(schema, again); len(errs) > 0 {
+		if _, errs := ParseManifest(schema, again); len(errs) > 0 {
 			t.Fatalf("an accepted manifest, written out and read again, is refused: %v", errs)
 		}
 	})

@@ -346,7 +346,9 @@ test("slides can be given from script, with pictures for other formats", async (
   assert(threw, "a slide that cannot be shown throws a TypeError");
   assertEqual(show.count, 2, "and the slides stay as they were");
   show.slides = null;
-  assertEqual(show.count, 2, "null goes back to the markup");
+  // The markup's own slides, not the script's two that happen to match
+  // them in number.
+  await waitFor(() => show.slides[0]?.alt === "photo 1", "the markup's slides back");
   await settledOn(show, "1 of 2");
 });
 
@@ -623,7 +625,7 @@ test("slides set wrongly before Clack loads are reported, and the show still wor
     window.removeEventListener("error", onError);
   }
   assert(reported instanceof TypeError, `the bad slides were reported (${String(reported)})`);
-  assertEqual(show.count, 1, "and the markup is read instead");
+  assertEqual(show.count, 1, "the markup read instead, at once");
   await settledOn(show, "1 of 1");
 });
 
@@ -650,14 +652,52 @@ test("a page hidden in the middle of a fade finishes it at once", async () => {
   if (document.visibilityState === "hidden") skip("this engine's window is hidden, so nothing fades");
   await show.next();
   assertEqual(figures(show).length, 2, "fading");
-  // The event as the browser sends it; the page's own state cannot be set.
-  const real = Object.getOwnPropertyDescriptor(Document.prototype, "visibilityState")!;
+  // The event as the browser sends it, with the state it reports: an own
+  // property hiding the prototype's getter, deleted afterwards.
   Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
   try {
     document.dispatchEvent(new Event("visibilitychange"));
   } finally {
     delete (document as unknown as Record<string, unknown>)["visibilityState"];
-    void real;
   }
   assertEqual(figures(show).length, 1, "finished at once");
+});
+
+test("the markup is read as the show connects: goTo works at once", async () => {
+  const inert = document.implementation.createHTMLDocument("");
+  const early = inert.createElement(tagName);
+  early.append(figure({ id: "a" }), figure({ id: "b" }));
+  const show = document.adoptNode(early) as ClackShow;
+  show.style.setProperty("--clack-transition-duration", "40ms");
+  fixture().append(show);
+  assertEqual(show.count, 2, "count, at once");
+  assert(await show.goTo("b"), "goTo by id, at once");
+});
+
+test("markup changed while the show is out of the page is read when it is back", () => {
+  const show = makeShow([{}]);
+  const parent = show.parentElement!;
+  show.remove();
+  show.append(figure({}), figure({}));
+  parent.append(show);
+  assertEqual(show.count, 3, "the figures added while it was out");
+});
+
+test("a markup warning is given once, however often the markup is read", async () => {
+  const warned: string[] = [];
+  const quiet = console.warn;
+  console.warn = (m: unknown) => warned.push(String(m));
+  try {
+    const show = makeShow([{}]);
+    show.querySelector("img")!.removeAttribute("alt");
+    await waitFor(() => warned.length > 0, "the warning");
+    show.append(figure({}));
+    const parent = show.parentElement!;
+    show.remove();
+    parent.append(show);
+    await waitFor(() => show.count === 2, "the markup read again");
+    assertEqual(warned.filter((w) => w.includes("no alt text")).length, 1, "warnings");
+  } finally {
+    console.warn = quiet;
+  }
 });

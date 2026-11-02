@@ -1,70 +1,555 @@
 {
-  "$comment": "Cases for both manifest checkers -- the reference in Go (tools/internal/formats) and Clack's own in the browser (src/manifest.ts) -- so the two cannot drift apart. Each applies its edits to schema/examples/manifest.json (a JSON Pointer to the value to set; null removes it; \"\" replaces the whole document) and says where the error must be, or null for a manifest that must be accepted. A refused case must have an error there and nowhere else.",
+  "$comment": "Cases for both manifest checkers -- the reference in Go (tools/internal/formats) and Clack's own in the browser (src/manifest.ts) -- so the two cannot drift apart. Each of \"cases\" applies its edits to schema/examples/manifest.json (a JSON Pointer to the value to set; null removes it; \"\" replaces the whole document) and says where the errors must be: one place, a list of places, or null for a manifest that must be accepted. A refused case must have an error at each place and nowhere else. Each of \"raw\" is a whole file, as base64 bytes, for what only shows in the bytes, and says only whether it is accepted.",
   "cases": [
-    { "name": "the example as it is", "set": {}, "error": null },
-    { "name": "an extension on the manifest", "set": { "/x-site": { "album": 7 } }, "error": null },
-    { "name": "an extension on a slide", "set": { "/slides/1/x-note": "kept" }, "error": null },
-    { "name": "no slides at all", "set": { "/slides": [] }, "error": null },
-    { "name": "an empty alt", "set": { "/slides/0/alt": "" }, "error": null },
-    { "name": "a year alone", "set": { "/slides/0/time/taken": "1999" }, "error": null },
-    { "name": "a URL with a query and a fragment", "set": { "/slides/0/page": "../low-tide?from=coast#top" }, "error": null },
-    { "name": "a percent-encoded name", "set": { "/slides/0/sources/0/url": "photos/%C3%B8-640.avif" }, "error": null },
-    { "name": "a whole number written with a point", "set": { "/slides/1/width": 3635.0 }, "error": null },
-
-    { "name": "not an object", "set": { "": ["slides"] }, "error": "" },
-    { "name": "no format", "set": { "/format": null }, "error": "" },
-    { "name": "the next format", "set": { "/format": "clack-manifest/2" }, "error": "/format" },
-    { "name": "no slides", "set": { "/slides": null }, "error": "" },
-    { "name": "slides not a list", "set": { "/slides": { "0": {} } }, "error": "/slides" },
-    { "name": "presentation in content", "set": { "/autoplay": true }, "error": "/autoplay" },
-    { "name": "a title too long", "set": { "/title": "Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines" }, "error": "/title" },
-    { "name": "a language that is not a tag", "set": { "/lang": "English" }, "error": "/lang" },
-
-    { "name": "a javascript: URL", "set": { "/slides/0/page": "javascript:alert(1)" }, "error": "/slides/0/page" },
-    { "name": "an upper-case scheme", "set": { "/slides/0/page": "JavaScript:alert(1)" }, "error": "/slides/0/page" },
-    { "name": "a data: URL", "set": { "/slides/0/sources/0/url": "data:image/png;base64,AAAA" }, "error": "/slides/0/sources/0/url" },
-    { "name": "a blob: URL", "set": { "/slides/0/full/url": "blob:https://example.com/1" }, "error": "/slides/0/full/url" },
-    { "name": "a URL with a space", "set": { "/slides/0/sources/0/url": "a b.jpg" }, "error": "/slides/0/sources/0/url" },
-    { "name": "a URL with a no-break space", "set": { "/slides/0/sources/0/url": "a b.jpg" }, "error": "/slides/0/sources/0/url" },
-    { "name": "a URL with a letter beyond ASCII", "set": { "/slides/0/sources/0/url": "ø.jpg" }, "error": "/slides/0/sources/0/url" },
-    { "name": "a scheme-less colon", "set": { "/slides/0/sources/0/url": "x:y.jpg" }, "error": "/slides/0/sources/0/url" },
-    { "name": "a URL that is not a string", "set": { "/slides/0/page": 7 }, "error": "/slides/0/page" },
-
-    { "name": "a slide that is not an object", "set": { "/slides/1": "old-car" }, "error": "/slides/1" },
-    { "name": "no alt", "set": { "/slides/0/alt": null }, "error": "/slides/0" },
-    { "name": "no id", "set": { "/slides/0/id": null }, "error": "/slides/0" },
-    { "name": "an id with a slash", "set": { "/slides/0/id": "a/b" }, "error": "/slides/0/id" },
-    { "name": "a repeated id", "set": { "/slides/1/id": "low-tide" }, "error": "/slides/1/id" },
-    { "name": "no size", "set": { "/slides/1/width": null }, "error": "/slides/1" },
-    { "name": "a zero width", "set": { "/slides/1/width": 0 }, "error": "/slides/1/width" },
-    { "name": "a fractional height", "set": { "/slides/1/height": 5301.5 }, "error": "/slides/1/height" },
-    { "name": "a width as a string", "set": { "/slides/1/width": "3635" }, "error": "/slides/1/width" },
-    { "name": "no sources", "set": { "/slides/0/sources": [] }, "error": "/slides/0/sources" },
-    { "name": "a source without a width", "set": { "/slides/0/sources/0/width": null }, "error": "/slides/0/sources/0" },
-    { "name": "a repeated source", "set": { "/slides/0/sources/1/width": 640 }, "error": "/slides/0/sources/1" },
-    { "name": "a markup type", "set": { "/slides/0/sources/0/type": "image/svg+xml" }, "error": "/slides/0/sources/0/type" },
-    { "name": "an unknown slide type", "set": { "/slides/0/type": "html" }, "error": "/slides/0/type" },
-    { "name": "a thumbhash that is not base64", "set": { "/slides/0/placeholder/thumbhash": "not base64!" }, "error": "/slides/0/placeholder/thumbhash" },
-    { "name": "a placeholder colour by name", "set": { "/slides/0/placeholder/color": "grey" }, "error": "/slides/0/placeholder/color" },
-    { "name": "a focus off the photo", "set": { "/slides/0/focus/x": 1.5 }, "error": "/slides/0/focus/x" },
-    { "name": "a focus with one half", "set": { "/slides/0/focus": { "x": 0.5 } }, "error": "/slides/0/focus" },
-    { "name": "no duration", "set": { "/slides/0/duration": 0 }, "error": "/slides/0/duration" },
-
-    { "name": "metadata in no class", "set": { "/slides/0/gps": "51.5,-0.1" }, "error": "/slides/0/gps" },
-    { "name": "an unknown camera field", "set": { "/slides/0/camera/serial": "123" }, "error": "/slides/0/camera/serial" },
-    { "name": "an ISO with a fraction", "set": { "/slides/0/camera/iso": 160.5 }, "error": "/slides/0/camera/iso" },
-    { "name": "flash as a word", "set": { "/slides/0/camera/flash": "no" }, "error": "/slides/0/camera/flash" },
-    { "name": "a thirteenth month", "set": { "/slides/0/time/taken": "2014-13-01" }, "error": "/slides/0/time/taken" },
-    { "name": "a free-form date", "set": { "/slides/0/time/taken": "June 2014" }, "error": "/slides/0/time/taken" },
-    { "name": "a latitude alone", "set": { "/slides/0/location": { "latitude": 51.5 } }, "error": "/slides/0/location" },
-    { "name": "a latitude off the globe", "set": { "/slides/0/location/latitude": 91 }, "error": "/slides/0/location/latitude" },
-    { "name": "a full circle", "set": { "/slides/0/location/direction": 360 }, "error": "/slides/0/location/direction" },
-    { "name": "a precision that is neither", "set": { "/slides/0/location/precision": "rough" }, "error": "/slides/0/location/precision" },
-    { "name": "an unknown part of a place", "set": { "/slides/0/location/place/street": "Bankside" }, "error": "/slides/0/location/place/street" },
-    { "name": "a negative file size", "set": { "/slides/0/technical/fileSize": -1 }, "error": "/slides/0/technical/fileSize" },
-    { "name": "an empty keyword", "set": { "/slides/0/description/keywords/0": "" }, "error": "/slides/0/description/keywords/0" },
-    { "name": "an extra without a label", "set": { "/slides/0/extra/0/label": null }, "error": "/slides/0/extra/0" },
-    { "name": "an unknown key with a slash", "set": { "/slides/0/a~1b": 1 }, "error": "/slides/0/a~1b" },
-    { "name": "a prototype for a key", "set": { "/slides/0/__proto__": { "alt": "x" } }, "error": "/slides/0/__proto__" }
+    {
+      "name": "the example as it is",
+      "set": {},
+      "error": null
+    },
+    {
+      "name": "an extension on the manifest",
+      "set": {
+        "/x-site": {
+          "album": 7
+        }
+      },
+      "error": null
+    },
+    {
+      "name": "an extension on a slide",
+      "set": {
+        "/slides/1/x-note": "kept"
+      },
+      "error": null
+    },
+    {
+      "name": "no slides at all",
+      "set": {
+        "/slides": []
+      },
+      "error": null
+    },
+    {
+      "name": "an empty alt",
+      "set": {
+        "/slides/0/alt": ""
+      },
+      "error": null
+    },
+    {
+      "name": "a year alone",
+      "set": {
+        "/slides/0/time/taken": "1999"
+      },
+      "error": null
+    },
+    {
+      "name": "a URL with a query and a fragment",
+      "set": {
+        "/slides/0/page": "../low-tide?from=coast#top"
+      },
+      "error": null
+    },
+    {
+      "name": "a percent-encoded name",
+      "set": {
+        "/slides/0/sources/0/url": "photos/%C3%B8-640.avif"
+      },
+      "error": null
+    },
+    {
+      "name": "a whole number written with a point",
+      "set": {
+        "/slides/1/width": 3635.0
+      },
+      "error": null
+    },
+    {
+      "name": "not an object",
+      "set": {
+        "": [
+          "slides"
+        ]
+      },
+      "error": ""
+    },
+    {
+      "name": "no format",
+      "set": {
+        "/format": null
+      },
+      "error": ""
+    },
+    {
+      "name": "the next format",
+      "set": {
+        "/format": "clack-manifest/2"
+      },
+      "error": "/format"
+    },
+    {
+      "name": "no slides",
+      "set": {
+        "/slides": null
+      },
+      "error": ""
+    },
+    {
+      "name": "slides not a list",
+      "set": {
+        "/slides": {
+          "0": {}
+        }
+      },
+      "error": "/slides"
+    },
+    {
+      "name": "presentation in content",
+      "set": {
+        "/autoplay": true
+      },
+      "error": "/autoplay"
+    },
+    {
+      "name": "a title too long",
+      "set": {
+        "/title": "Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines Coastlines"
+      },
+      "error": "/title"
+    },
+    {
+      "name": "a language that is not a tag",
+      "set": {
+        "/lang": "English"
+      },
+      "error": "/lang"
+    },
+    {
+      "name": "a javascript: URL",
+      "set": {
+        "/slides/0/page": "javascript:alert(1)"
+      },
+      "error": "/slides/0/page"
+    },
+    {
+      "name": "an upper-case scheme",
+      "set": {
+        "/slides/0/page": "JavaScript:alert(1)"
+      },
+      "error": "/slides/0/page"
+    },
+    {
+      "name": "a data: URL",
+      "set": {
+        "/slides/0/sources/0/url": "data:image/png;base64,AAAA"
+      },
+      "error": "/slides/0/sources/0/url"
+    },
+    {
+      "name": "a blob: URL",
+      "set": {
+        "/slides/0/full/url": "blob:https://example.com/1"
+      },
+      "error": "/slides/0/full/url"
+    },
+    {
+      "name": "a URL with a space",
+      "set": {
+        "/slides/0/sources/0/url": "a b.jpg"
+      },
+      "error": "/slides/0/sources/0/url"
+    },
+    {
+      "name": "a URL with a no-break space",
+      "set": {
+        "/slides/0/sources/0/url": "a b.jpg"
+      },
+      "error": "/slides/0/sources/0/url"
+    },
+    {
+      "name": "a URL with a letter beyond ASCII",
+      "set": {
+        "/slides/0/sources/0/url": "ø.jpg"
+      },
+      "error": "/slides/0/sources/0/url"
+    },
+    {
+      "name": "a scheme-less colon",
+      "set": {
+        "/slides/0/sources/0/url": "x:y.jpg"
+      },
+      "error": "/slides/0/sources/0/url"
+    },
+    {
+      "name": "a URL that is not a string",
+      "set": {
+        "/slides/0/page": 7
+      },
+      "error": "/slides/0/page"
+    },
+    {
+      "name": "a slide that is not an object",
+      "set": {
+        "/slides/1": "old-car"
+      },
+      "error": "/slides/1"
+    },
+    {
+      "name": "no alt",
+      "set": {
+        "/slides/0/alt": null
+      },
+      "error": "/slides/0"
+    },
+    {
+      "name": "no id",
+      "set": {
+        "/slides/0/id": null
+      },
+      "error": "/slides/0"
+    },
+    {
+      "name": "an id with a slash",
+      "set": {
+        "/slides/0/id": "a/b"
+      },
+      "error": "/slides/0/id"
+    },
+    {
+      "name": "a repeated id",
+      "set": {
+        "/slides/1/id": "low-tide"
+      },
+      "error": "/slides/1/id"
+    },
+    {
+      "name": "no size",
+      "set": {
+        "/slides/1/width": null
+      },
+      "error": "/slides/1"
+    },
+    {
+      "name": "a zero width",
+      "set": {
+        "/slides/1/width": 0
+      },
+      "error": "/slides/1/width"
+    },
+    {
+      "name": "a fractional height",
+      "set": {
+        "/slides/1/height": 5301.5
+      },
+      "error": "/slides/1/height"
+    },
+    {
+      "name": "a width as a string",
+      "set": {
+        "/slides/1/width": "3635"
+      },
+      "error": "/slides/1/width"
+    },
+    {
+      "name": "no sources",
+      "set": {
+        "/slides/0/sources": []
+      },
+      "error": "/slides/0/sources"
+    },
+    {
+      "name": "a source without a width",
+      "set": {
+        "/slides/0/sources/0/width": null
+      },
+      "error": "/slides/0/sources/0"
+    },
+    {
+      "name": "a repeated source",
+      "set": {
+        "/slides/0/sources/1/width": 640
+      },
+      "error": "/slides/0/sources/1"
+    },
+    {
+      "name": "a markup type",
+      "set": {
+        "/slides/0/sources/0/type": "image/svg+xml"
+      },
+      "error": "/slides/0/sources/0/type"
+    },
+    {
+      "name": "an unknown slide type",
+      "set": {
+        "/slides/0/type": "html"
+      },
+      "error": "/slides/0/type"
+    },
+    {
+      "name": "a thumbhash that is not base64",
+      "set": {
+        "/slides/0/placeholder/thumbhash": "not base64!"
+      },
+      "error": "/slides/0/placeholder/thumbhash"
+    },
+    {
+      "name": "a placeholder colour by name",
+      "set": {
+        "/slides/0/placeholder/color": "grey"
+      },
+      "error": "/slides/0/placeholder/color"
+    },
+    {
+      "name": "a focus off the photo",
+      "set": {
+        "/slides/0/focus/x": 1.5
+      },
+      "error": "/slides/0/focus/x"
+    },
+    {
+      "name": "a focus with one half",
+      "set": {
+        "/slides/0/focus": {
+          "x": 0.5
+        }
+      },
+      "error": "/slides/0/focus"
+    },
+    {
+      "name": "no duration",
+      "set": {
+        "/slides/0/duration": 0
+      },
+      "error": "/slides/0/duration"
+    },
+    {
+      "name": "metadata in no class",
+      "set": {
+        "/slides/0/gps": "51.5,-0.1"
+      },
+      "error": "/slides/0/gps"
+    },
+    {
+      "name": "an unknown camera field",
+      "set": {
+        "/slides/0/camera/serial": "123"
+      },
+      "error": "/slides/0/camera/serial"
+    },
+    {
+      "name": "an ISO with a fraction",
+      "set": {
+        "/slides/0/camera/iso": 160.5
+      },
+      "error": "/slides/0/camera/iso"
+    },
+    {
+      "name": "flash as a word",
+      "set": {
+        "/slides/0/camera/flash": "no"
+      },
+      "error": "/slides/0/camera/flash"
+    },
+    {
+      "name": "a thirteenth month",
+      "set": {
+        "/slides/0/time/taken": "2014-13-01"
+      },
+      "error": "/slides/0/time/taken"
+    },
+    {
+      "name": "a free-form date",
+      "set": {
+        "/slides/0/time/taken": "June 2014"
+      },
+      "error": "/slides/0/time/taken"
+    },
+    {
+      "name": "a latitude alone",
+      "set": {
+        "/slides/0/location": {
+          "latitude": 51.5
+        }
+      },
+      "error": "/slides/0/location"
+    },
+    {
+      "name": "a latitude off the globe",
+      "set": {
+        "/slides/0/location/latitude": 91
+      },
+      "error": "/slides/0/location/latitude"
+    },
+    {
+      "name": "a full circle",
+      "set": {
+        "/slides/0/location/direction": 360
+      },
+      "error": "/slides/0/location/direction"
+    },
+    {
+      "name": "a precision that is neither",
+      "set": {
+        "/slides/0/location/precision": "rough"
+      },
+      "error": "/slides/0/location/precision"
+    },
+    {
+      "name": "an unknown part of a place",
+      "set": {
+        "/slides/0/location/place/street": "Bankside"
+      },
+      "error": "/slides/0/location/place/street"
+    },
+    {
+      "name": "a negative file size",
+      "set": {
+        "/slides/0/technical/fileSize": -1
+      },
+      "error": "/slides/0/technical/fileSize"
+    },
+    {
+      "name": "an empty keyword",
+      "set": {
+        "/slides/0/description/keywords/0": ""
+      },
+      "error": "/slides/0/description/keywords/0"
+    },
+    {
+      "name": "an extra without a label",
+      "set": {
+        "/slides/0/extra/0/label": null
+      },
+      "error": "/slides/0/extra/0"
+    },
+    {
+      "name": "an unknown key with a slash",
+      "set": {
+        "/slides/0/a~1b": 1
+      },
+      "error": "/slides/0/a~1b"
+    },
+    {
+      "name": "a prototype for a key",
+      "set": {
+        "/slides/0/__proto__": {
+          "alt": "x"
+        }
+      },
+      "error": "/slides/0/__proto__"
+    },
+    {
+      "name": "two slides without usable ids",
+      "set": {
+        "/slides/0/id": "",
+        "/slides/1/id": null
+      },
+      "error": [
+        "/slides/0/id",
+        "/slides/1"
+      ]
+    },
+    {
+      "name": "widths written as strings",
+      "set": {
+        "/slides/0/sources/0/width": "640",
+        "/slides/0/sources/1/width": "640"
+      },
+      "error": [
+        "/slides/0/sources/0/width",
+        "/slides/0/sources/1/width"
+      ]
+    },
+    {
+      "name": "a type that is not a string beside an untyped source of the same width",
+      "set": {
+        "/slides/0/sources/0/type": null,
+        "/slides/0/sources/2/type": 5
+      },
+      "error": "/slides/0/sources/2/type"
+    },
+    {
+      "name": "widths of zero and minus zero",
+      "set": {
+        "/slides/0/sources/0/width": 0,
+        "/slides/0/sources/1/width": -0.0
+      },
+      "error": [
+        "/slides/0/sources/0/width",
+        "/slides/0/sources/1/width"
+      ]
+    }
+  ],
+  "raw": [
+    {
+      "name": "a minimal manifest",
+      "bytes": "eyJmb3JtYXQiOiJjbGFjay1tYW5pZmVzdC8xIiwic2xpZGVzIjpbXX0=",
+      "accepted": true
+    },
+    {
+      "name": "with spaces around it",
+      "bytes": "CiAgeyJmb3JtYXQiOiJjbGFjay1tYW5pZmVzdC8xIiwic2xpZGVzIjpbXX0KCSA=",
+      "accepted": true
+    },
+    {
+      "name": "nested as deep as allowed",
+      "bytes": "eyJmb3JtYXQiOiJjbGFjay1tYW5pZmVzdC8xIiwic2xpZGVzIjpbXSwieC1hIjpbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tdXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV19",
+      "accepted": true
+    },
+    {
+      "name": "nested one deeper",
+      "bytes": "eyJmb3JtYXQiOiJjbGFjay1tYW5pZmVzdC8xIiwic2xpZGVzIjpbXSwieC1hIjpbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXX0=",
+      "accepted": false
+    },
+    {
+      "name": "a comment",
+      "bytes": "Ly8gYWxidW0gNwp7ImZvcm1hdCI6ImNsYWNrLW1hbmlmZXN0LzEiLCJzbGlkZXMiOltdfQ==",
+      "accepted": false
+    },
+    {
+      "name": "a block comment",
+      "bytes": "LyogYWxidW0gKi97ImZvcm1hdCI6ImNsYWNrLW1hbmlmZXN0LzEiLCJzbGlkZXMiOltdfQ==",
+      "accepted": false
+    },
+    {
+      "name": "a byte-order mark",
+      "bytes": "77u/eyJmb3JtYXQiOiJjbGFjay1tYW5pZmVzdC8xIiwic2xpZGVzIjpbXX0=",
+      "accepted": false
+    },
+    {
+      "name": "Latin-1 in a string",
+      "bytes": "eyJmb3JtYXQiOiJjbGFjay1tYW5pZmVzdC8xIiwidGl0bGUiOiJL+GJlbmhhdm4iLCJzbGlkZXMiOltdfQ==",
+      "accepted": false
+    },
+    {
+      "name": "UTF-8 in a string",
+      "bytes": "eyJmb3JtYXQiOiJjbGFjay1tYW5pZmVzdC8xIiwidGl0bGUiOiJLw7hiZW5oYXZuIiwic2xpZGVzIjpbXX0=",
+      "accepted": true
+    },
+    {
+      "name": "a number too large to hold",
+      "bytes": "eyJmb3JtYXQiOiJjbGFjay1tYW5pZmVzdC8xIiwic2xpZGVzIjpbXSwieC1hIjoxZTQwMH0=",
+      "accepted": false
+    },
+    {
+      "name": "a large number that fits",
+      "bytes": "eyJmb3JtYXQiOiJjbGFjay1tYW5pZmVzdC8xIiwic2xpZGVzIjpbXSwieC1hIjoxZTMwMH0=",
+      "accepted": true
+    },
+    {
+      "name": "something after it",
+      "bytes": "eyJmb3JtYXQiOiJjbGFjay1tYW5pZmVzdC8xIiwic2xpZGVzIjpbXX0ge30=",
+      "accepted": false
+    },
+    {
+      "name": "a trailing comma",
+      "bytes": "eyJmb3JtYXQiOiJjbGFjay1tYW5pZmVzdC8xIiwic2xpZGVzIjpbXSx9",
+      "accepted": false
+    },
+    {
+      "name": "nothing",
+      "bytes": "",
+      "accepted": false
+    }
   ]
 }

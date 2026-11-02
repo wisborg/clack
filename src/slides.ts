@@ -40,7 +40,16 @@ export interface Slide {
  */
 export interface Keyed extends Slide {
   key: string;
+  /**
+   * The language of the slide's own text (its caption, its description),
+   * or "" for the page's: a manifest's, for its slides; the markup's, for
+   * those read from the page. Text on screen is marked with the language
+   * of the slide it belongs to, whichever show it came from.
+   */
+  lang: string;
 }
+
+const langPattern = /^[a-zA-Z]{2,3}(?:-[a-zA-Z0-9]{1,8}){0,4}$/;
 
 /** A slide as given from script: the slide format of a manifest. */
 export interface SlideInput {
@@ -156,6 +165,7 @@ export function readMarkup(host: Element, warn: (message: string) => void): Keye
 
     slides.push({
       key,
+      lang: (figure ?? img).closest("[lang]")?.getAttribute("lang") ?? "",
       id,
       alt: alt ?? "",
       width,
@@ -211,6 +221,9 @@ export function fromInput(input: readonly (SlideInput | Slide)[]): Keyed[] {
     if (ids.has(s.id)) fail(`the id "${s.id}" is already used`);
     ids.add(s.id);
     if (typeof s.alt !== "string") fail("alt must be a string");
+    const text = (v: unknown, what: string): void => {
+      if (v !== undefined && typeof v !== "string") fail(`${what} must be a string`);
+    };
     for (const [name, v] of [["width", s.width], ["height", s.height]] as const) {
       if (!Number.isInteger(v) || v < 1) fail(`${name} must be a positive integer`);
     }
@@ -218,47 +231,59 @@ export function fromInput(input: readonly (SlideInput | Slide)[]): Keyed[] {
       return unique(checkSlide(s, fail));
     }
     if (!Array.isArray(s.sources) || s.sources.length === 0) fail("sources must have at least one source");
-
-    // Sources are grouped by type, in the order each type first appears.
-    // The untyped group makes the <img>; each typed group makes a <source>.
-    // With no untyped group, the last typed one -- conventionally the most
-    // widely supported -- makes the <img> instead.
-    const groups = new Map<string, { url: string; width: number }[]>();
     for (const [k, src] of s.sources.entries()) {
       if (typeof src?.url !== "string" || !usableURL(src.url)) fail(`source ${k + 1}: the URL must be http, https or relative`);
       if (!Number.isInteger(src.width) || src.width < 1) fail(`source ${k + 1}: width must be a positive integer`);
-      const type = src.type ?? "";
-      groups.set(type, [...(groups.get(type) ?? []), src]);
+      text(src.type, `source ${k + 1}: type`);
     }
-    const imgType = groups.has("") ? "" : [...groups.keys()].pop()!;
-    const imgSources = groups.get(imgType)!;
-    groups.delete(imgType);
-    const srcset = (list: { url: string; width: number }[]): string =>
-      list.map((src) => `${srcsetURL(src.url)} ${src.width}w`).join(", ");
-    const largest = imgSources.reduce((a, b) => (b.width > a.width ? b : a));
-
-    const full = s.full?.url ?? "";
-    if (full && !usableURL(full)) fail("the full-size URL must be http, https or relative");
-    const page = s.page ?? "";
-    if (page && !usableURL(page)) fail("the page URL must be http, https or relative");
-    const color = s.placeholder?.color ?? "";
-
-    return unique({
-      key: `id:${s.id}`,
-      id: s.id,
-      alt: s.alt,
-      width: s.width,
-      height: s.height,
-      src: largest.url,
-      srcset: srcset(imgSources),
-      alternatives: [...groups].map(([type, list]) => ({ type, srcset: srcset(list), media: "" })),
-      full,
-      page,
-      color: /^#[0-9a-fA-F]{6}$/.test(color) ? color : "",
-      title: collapse(s.description?.title),
-      credit: collapse(s.description?.credit),
-    });
+    if (s.full && (typeof s.full.url !== "string" || !usableURL(s.full.url))) fail("the full-size URL must be http, https or relative");
+    text(s.page, "the page URL");
+    if (s.page && !usableURL(s.page)) fail("the page URL must be http, https or relative");
+    text(s.description?.title, "the title");
+    text(s.description?.credit, "the credit");
+    text(s.placeholder?.color, "the placeholder colour");
+    return unique(convert(s, ""));
   });
+}
+
+/**
+ * Turns a slide in the manifest's shape into Clack's, without checking it:
+ * the caller has (fromInput, or the manifest loader, which checks the whole
+ * manifest against its schema first).
+ */
+export function convert(s: SlideInput, lang: string): Keyed {
+  // Sources are grouped by type, in the order each type first appears.
+  // The untyped group makes the <img>; each typed group makes a <source>.
+  // With no untyped group, the last typed one -- conventionally the most
+  // widely supported -- makes the <img> instead.
+  const groups = new Map<string, { url: string; width: number }[]>();
+  for (const src of s.sources) {
+    const type = src.type ?? "";
+    groups.set(type, [...(groups.get(type) ?? []), src]);
+  }
+  const imgType = groups.has("") ? "" : [...groups.keys()].pop()!;
+  const imgSources = groups.get(imgType)!;
+  groups.delete(imgType);
+  const srcset = (list: { url: string; width: number }[]): string =>
+    list.map((src) => `${srcsetURL(src.url)} ${src.width}w`).join(", ");
+  const largest = imgSources.reduce((a, b) => (b.width > a.width ? b : a));
+  const color = s.placeholder?.color ?? "";
+  return {
+    key: `id:${s.id}`,
+    lang,
+    id: s.id,
+    alt: s.alt,
+    width: s.width,
+    height: s.height,
+    src: largest.url,
+    srcset: srcset(imgSources),
+    alternatives: [...groups].map(([type, list]) => ({ type, srcset: srcset(list), media: "" })),
+    full: s.full?.url ?? "",
+    page: s.page ?? "",
+    color: /^#[0-9a-fA-F]{6}$/.test(color) ? color : "",
+    title: collapse(s.description?.title),
+    credit: collapse(s.description?.credit),
+  };
 }
 
 /**
@@ -297,9 +322,10 @@ function checkSlide(s: Slide, fail: (why: string) => never): Keyed {
   const color = str(s.color ?? "", "color");
   // A slide read from the show and given back keeps its identity, so its
   // photo is not fetched again; the caller makes sure keys are unique.
-  const key = (s as Partial<Keyed>).key;
+  const { key, lang } = s as Partial<Keyed>;
   return {
     key: typeof key === "string" && key ? key : `id:${s.id}`,
+    lang: typeof lang === "string" && langPattern.test(lang) ? lang : "",
     id: s.id,
     alt: s.alt,
     width: s.width,

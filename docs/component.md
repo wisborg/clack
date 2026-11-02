@@ -57,10 +57,12 @@ instead. A slide still on its way when the slides change arrives where it now is
 ```
 
 `src` names a manifest ([`manifest.md`](manifest.md)). Until the first arrives, the
-markup's slides are shown, as they are without script; when `src` changes, the slides shown
-stay until the new manifest arrives. Its slides then take their place; its title names the
-show if `label` does not, and its language is set on the show's text. A show moved in the
-page does not fetch its manifest again.
+markup's slides are shown, as they are without script, and followed as the markup changes;
+when `src` changes, or slides from script are withdrawn, the slides shown stay until the new
+manifest arrives. Its slides then take their place; its title names the show if `label`
+does not, and its language is set on its own text — captions, the photos' descriptions,
+titles in announcements — while Clack's own words stay in the page's. A show moved in the
+page, even while its manifest is on its way, does not fetch it again.
 
 A manifest that cannot be had — a failed request, the wrong type, too large, not JSON, or
 not a valid manifest — brings back the markup's slides (never a previous manifest's), shows

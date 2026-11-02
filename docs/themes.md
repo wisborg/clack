@@ -185,7 +185,8 @@ added as further values. A theme can never name a font to fetch.
 
 ## How a theme is checked
 
-1. Comments are removed, and the file is parsed as JSON.
+1. Comments are removed, and the file is parsed as JSON. Its values may nest at most 64
+   deep, and no number may be too large to hold — the same limits as a manifest's.
 2. It is checked against the schema: every property known, every value of its type.
 3. It is merged onto the theme it extends, down to `base`.
 4. The result's contrasts are checked in each scheme it is shown in.

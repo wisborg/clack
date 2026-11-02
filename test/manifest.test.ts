@@ -1,6 +1,6 @@
 import type { ClackShow } from "../src/clack";
 import { tagName } from "../src/clack";
-import { check, load, ManifestError, maxBytes, parse } from "../src/manifest";
+import { check, decode, load, ManifestError, maxBytes, parse } from "../src/manifest";
 import example from "../schema/examples/manifest.json";
 import fixture from "./fixtures/manifests.json";
 import { assert, assertEqual, fixture as fixtureEl, test } from "./harness";
@@ -40,16 +40,31 @@ test("the shared manifest cases get the verdicts the Go reference gives", () => 
     for (const [pointer, value] of Object.entries(c.set)) {
       doc = setPointer(doc, pointer, value);
     }
+    // error is null, one place, or a list of places.
+    const want: string[] | null = c.error === null ? null : Array.isArray(c.error) ? c.error : [c.error];
     // Through JSON text, as from the network: a "__proto__" key stays a key.
     const problems = check(JSON.parse(JSON.stringify(doc)));
-    const where = problems.map((p) => p.path);
-    if (c.error === null && problems.length > 0) {
+    const got = new Set(problems.map((p) => p.path));
+    if (want === null && problems.length > 0) {
       failures.push(`${c.name}: refused: ${problems.map((p) => `${p.path}: ${p.message}`).join("; ")}`);
-    } else if (c.error !== null && problems.length === 0) {
+    } else if (want !== null && problems.length === 0) {
       failures.push(`${c.name}: accepted`);
-    } else if (c.error !== null && where.some((p) => p !== c.error)) {
-      failures.push(`${c.name}: errors at ${where.join(", ")}, want only ${JSON.stringify(c.error)}`);
+    } else if (want !== null && ([...got].some((p) => !want.includes(p)) || want.some((p) => !got.has(p)))) {
+      failures.push(`${c.name}: errors at ${[...got].join(", ")}, want ${want.join(", ")}`);
     }
+  }
+  // Whole files, as bytes: decoded and parsed as load() does.
+  for (const r of fixture.raw) {
+    const bytes = Uint8Array.from(atob(r.bytes), (ch) => ch.charCodeAt(0));
+    let accepted = true;
+    let why = "";
+    try {
+      parse(decode(bytes), "https://example.com/m.json");
+    } catch (e) {
+      accepted = false;
+      why = String(e);
+    }
+    if (accepted !== r.accepted) failures.push(`raw ${r.name}: accepted ${accepted}, want ${r.accepted} ${why}`);
   }
   assert(failures.length === 0, failures.join("\n"));
 });
@@ -189,7 +204,7 @@ test("load accepts JSON only, of a size that makes sense, from where it says", a
   assert((await refusal(echo("{}", { status: 404 }))).includes("404"), "a 404 is refused");
   assert((await refusal(`/big?bytes=${maxBytes + 1}&declare=1`)).includes("larger"), "a declared size too large is refused");
   assert((await refusal(`/big?bytes=${maxBytes + 1}`)).includes("larger"), "an undeclared size too large is refused, as it comes");
-  assert((await refusal(echo("%FF", {}).replace("body=%25FF", "body=%FF"))).includes("TypeError"), "bytes that are not UTF-8 are refused");
+  assert((await refusal(echo("%FF", {}).replace("body=%25FF", "body=%FF"))).includes("not UTF-8"), "bytes that are not UTF-8 are refused");
   // After a redirect, relative URLs are relative to where it ended.
   const body = JSON.stringify({ format: "clack-manifest/1", slides: [{ id: "r", alt: "", width: 1, height: 1, sources: [{ url: "r.png", width: 1 }] }] });
   const at = echo(body, { path: "albums/coast/manifest.json" });
@@ -212,8 +227,12 @@ test("a show with src shows its manifest's slides, named and in its language", a
   await waitFor(() => s.count === 3, "the manifest's slides");
   await settledOn(s, "1 of 3");
   assertEqual(s.slides[0]!.alt, "manifest photo 1", "its photo");
-  assertEqual(s.shadowRoot!.querySelector(".show")!.getAttribute("lang"), "da", "its language, on its text");
-  assertEqual(s.shadowRoot!.querySelector(".title")!.textContent, "M1", "its caption");
+  const root = s.shadowRoot!;
+  assertEqual(root.querySelector(".caption")!.getAttribute("lang"), "da", "its language, on its caption");
+  assertEqual(root.querySelector(".slide img")!.getAttribute("lang"), "da", "and on the photo's description");
+  assertEqual(root.querySelector(".show")!.hasAttribute("lang"), false, "not on Clack's own words");
+  assertEqual(root.querySelector("button.next")!.closest("[lang]"), null, "the buttons are in the page's language");
+  assertEqual(root.querySelector(".title")!.textContent, "M1", "its caption");
 });
 
 test("while the manifest loads, the markup is shown; then the manifest's slides", async () => {
@@ -346,7 +365,7 @@ test("after a manifest fails, the notice goes once the page moves on", async () 
     const notice = s.shadowRoot!.querySelector<HTMLElement>(".notice")!;
     await waitFor(() => !notice.hidden, "the notice");
     s.removeAttribute("src");
-    assertEqual(notice.hidden, true, "gone, back to the markup");
+    await waitFor(() => notice.hidden === true, "the notice to go, back to the markup");
     s.setAttribute("src", echo("{}", { status: 500 }));
     await waitFor(() => !notice.hidden, "the notice again");
     s.slides = [{ id: "s", alt: "", width: 300, height: 200, sources: [{ url: img(300, 200), width: 300 }] }];
@@ -364,8 +383,156 @@ test("a src that fails after another loaded leaves the markup, not the old manif
     await waitFor(() => s.count === 3, "the first manifest");
     s.setAttribute("src", echo("{}", { status: 404 }));
     await waitFor(() => s.count === 1, "the markup's one slide");
-    assertEqual(s.shadowRoot!.querySelector(".show")!.hasAttribute("lang"), false, "nor the old manifest's language");
+    assert(s.shadowRoot!.querySelector(".caption")!.getAttribute("lang") !== "da", "nor the old manifest's language");
   } finally {
     console.error = quiet;
   }
+});
+
+test("slides withdrawn before Clack loads start one fetch, not two", async () => {
+  await resetImageLog();
+  const inert = document.implementation.createHTMLDocument("");
+  const early = inert.createElement(tagName) as unknown as Record<string, unknown>;
+  (early as unknown as Element).setAttribute("src", echo(manifestOf(2)));
+  early["slides"] = null;
+  const s = document.adoptNode(early as unknown as ClackShow);
+  fixtureEl().append(s);
+  await waitFor(() => s.count === 2, "the manifest");
+  assertEqual(await manifestFetches(), 1, "fetches");
+});
+
+test("a show moved while its manifest loads does not start it again", async () => {
+  await resetImageLog();
+  const s = show({ src: echo(manifestOf(2), { delay: 500 }) });
+  await new Promise((r) => setTimeout(r, 100));
+  fixtureEl().append(s); // moved while the manifest is on its way
+  await waitFor(() => s.count === 2, "the manifest");
+  assertEqual(await manifestFetches(), 1, "fetches");
+});
+
+test("a show whose manifest failed, once moved, does not fail again", async () => {
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    let errors = 0;
+    const s = document.createElement(tagName);
+    s.addEventListener("error", () => errors++);
+    s.setAttribute("src", echo("{}", { status: 500 }));
+    fixtureEl().append(s);
+    await waitFor(() => errors === 1, "the error");
+    fixtureEl().append(s);
+    await new Promise((r) => setTimeout(r, 300));
+    assertEqual(errors, 1, "error events");
+  } finally {
+    console.error = quiet;
+  }
+});
+
+test("after a manifest with no slides, changing src does not bring in the markup", async () => {
+  const s = show({ src: echo(JSON.stringify({ format: "clack-manifest/1", slides: [] }), { delay: 300 }) }, 2);
+  await waitFor(() => s.count === 2, "the markup, while the first manifest loads");
+  await waitFor(() => s.count === 0, "the empty manifest");
+  s.setAttribute("src", echo(manifestOf(1), { delay: 300 }));
+  await new Promise((r) => setTimeout(r, 100));
+  assertEqual(s.count, 0, "still the empty manifest, while the next loads -- not the markup");
+  await waitFor(() => s.count === 1, "the next manifest");
+});
+
+test("markup added while the first manifest loads is shown until it arrives", async () => {
+  const s = show({ src: echo(manifestOf(2), { delay: 700 }) });
+  await new Promise((r) => setTimeout(r, 50));
+  s.append(figure({}), figure({}), figure({}));
+  await waitFor(() => s.count === 3, "the markup added after connecting");
+  await waitFor(() => s.count === 2, "then the manifest");
+});
+
+test("a refused manifest is logged with its URL and every problem, by place", async () => {
+  const logged: string[] = [];
+  const quiet = console.error;
+  console.error = (...args: unknown[]) => logged.push(args.map(String).join(" "));
+  try {
+    const slides = Array.from({ length: 12 }, (_, i) => ({ id: `s${i}` }));
+    const url = echo(JSON.stringify({ format: "clack-manifest/1", slides }));
+    const s = document.createElement(tagName);
+    let failed = false;
+    s.addEventListener("error", () => (failed = true));
+    s.setAttribute("src", url);
+    fixtureEl().append(s);
+    await waitFor(() => failed, "the error");
+  } finally {
+    console.error = quiet;
+  }
+  const message = logged.join("\n");
+  assert(message.includes("/echo/manifest.json"), "names the manifest");
+  assert(message.includes("48 problems"), `counts every problem: ${message.slice(0, 200)}`);
+  assert(message.includes("/slides/11:"), "and lists the last");
+});
+
+test("a src that is not a URL fails once, and the notice goes with it", async () => {
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    let errors = 0;
+    const s = document.createElement(tagName);
+    s.addEventListener("error", () => errors++);
+    s.setAttribute("src", "http://a:99999/m.json");
+    s.append(figure({}));
+    fixtureEl().append(s);
+    await waitFor(() => errors === 1, "the error");
+    fixtureEl().append(s); // moved
+    await new Promise((r) => setTimeout(r, 100));
+    assertEqual(errors, 1, "not again for a move");
+    const notice = s.shadowRoot!.querySelector<HTMLElement>(".notice")!;
+    s.removeAttribute("src");
+    await waitFor(() => notice.hidden === true, "the notice to go");
+  } finally {
+    console.error = quiet;
+  }
+});
+
+test("setting src again after a failure retries it", async () => {
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    await resetImageLog();
+    let errors = 0;
+    const url = echo("{}", { status: 503 });
+    const s = document.createElement(tagName);
+    s.addEventListener("error", () => errors++);
+    s.setAttribute("src", url);
+    fixtureEl().append(s);
+    await waitFor(() => errors === 1, "the first failure");
+    s.setAttribute("src", url); // the same, as a page retrying would
+    await waitFor(() => errors === 2, "the retry's failure");
+    assertEqual(await manifestFetches(), 2, "fetched twice");
+  } finally {
+    console.error = quiet;
+  }
+});
+
+test("a show moved with an await between does not fetch its manifest again", async () => {
+  await resetImageLog();
+  const s = show({ src: echo(manifestOf(2), { delay: 400 }) });
+  await new Promise((r) => setTimeout(r, 50));
+  const parent = s.parentElement!;
+  s.remove();
+  await Promise.resolve();
+  await Promise.resolve();
+  parent.append(s);
+  await waitFor(() => s.count === 2, "the manifest");
+  assertEqual(await manifestFetches(), 1, "fetches");
+});
+
+test("text on screen keeps the language of the slide it belongs to", async () => {
+  // The markup's slide is in the page's language; the manifest's slides,
+  // whose photos are slow, in Danish.
+  const body = JSON.parse(manifestOf(1)) as { slides: { sources: { url: string }[] }[] };
+  body.slides[0]!.sources[0]!.url = img(300, 200, "557799", 900);
+  const s = show({ src: echo(JSON.stringify(body)) }, 0);
+  s.append(figure({ title: "English caption" }));
+  await waitFor(() => s.count === 1 && s.slides[0]!.alt === "manifest photo 1", "the manifest's slide, its photo still coming");
+  const caption = s.shadowRoot!.querySelector(".caption")!;
+  assert(caption.getAttribute("lang") !== "da", `the markup's caption, still on screen, is not marked Danish (${caption.getAttribute("lang")})`);
+  await waitFor(() => s.shadowRoot!.querySelector(".title")!.textContent === "M1", "the manifest's caption");
+  assertEqual(caption.getAttribute("lang"), "da", "now Danish");
 });

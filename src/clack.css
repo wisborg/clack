@@ -331,7 +331,3 @@
   color: var(--clack-muted);
   font-size: 13px;
 }
-
-.notice[hidden] {
-  display: none;
-}

@@ -116,7 +116,9 @@ accepts it only if:
 - the response is a success (2xx), served as `application/json` (or another `+json` type);
 - it is at most 16 MB — refused as soon as it is known to be larger, whether the server said
   so or not;
-- it is UTF-8, and JSON;
+- it is UTF-8, strictly (no byte-order mark, no bytes that are not UTF-8), and JSON — plain
+  JSON: unlike a theme, a manifest is written by programs, so it has no comments;
+- its values nest at most 64 deep, and no number is too large to hold;
 - it is a valid `clack-manifest/1`, with nothing it does not know (but `x-` properties).
 
 Relative URLs in it are resolved against the URL it was finally fetched from, after any

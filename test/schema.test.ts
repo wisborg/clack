@@ -1,7 +1,7 @@
 // The browser's JSON Schema validator (src/schema.ts) against what the Go
 // one (tools/internal/jsonschema) is tested with: the same rules, the same
 // places for errors.
-import { Schema } from "../src/schema";
+import { byCodePoint, Schema } from "../src/schema";
 import themeSchema from "../schema/theme-1.schema.json";
 import base from "../themes/base.json";
 import contactSheet from "../themes/contact-sheet.json";
@@ -63,4 +63,19 @@ test("the validator keeps a document's keys away from prototypes", () => {
   const paths = s.validate(doc).map((p) => p.path).join(" ");
   assertEqual(paths, "/__proto__ /constructor /toString", "each is just an unknown key");
   assertEqual(({} as { a?: unknown }).a, undefined, "and nothing reached Object.prototype");
+});
+
+test("byCodePoint orders strings as Go does: by code point", () => {
+  const strings = ["", "a", "b", "ab", "！", "\u{1F600}", "", "퟿", "z\u{10000}", "z￿", "z"];
+  const byPoints = (a: string, b: string): number => {
+    const x = [...a].map((c) => c.codePointAt(0)!);
+    const y = [...b].map((c) => c.codePointAt(0)!);
+    for (let i = 0; i < Math.min(x.length, y.length); i++) if (x[i] !== y[i]) return x[i]! - y[i]!;
+    return x.length - y.length;
+  };
+  for (const a of strings) {
+    for (const b of strings) {
+      assertEqual(Math.sign(byCodePoint(a, b)), Math.sign(byPoints(a, b)), `${JSON.stringify(a)} against ${JSON.stringify(b)}`);
+    }
+  }
 });

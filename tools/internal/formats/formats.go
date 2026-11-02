@@ -16,8 +16,10 @@ import (
 	"os"
 	"regexp"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/wisborg/clack/tools/internal/jsonc"
 	"github.com/wisborg/clack/tools/internal/jsonschema"
@@ -40,8 +42,9 @@ func LoadSchema(path string) (*jsonschema.Schema, error) {
 	return s, nil
 }
 
-// Load reads a theme or manifest file -- comments allowed -- and validates
-// it against schema, returning the document and every way it fails.
+// Load reads a theme file -- comments allowed -- and validates it against
+// schema, returning the document and every way it fails. Manifests, which
+// allow no comments, have LoadManifest.
 func Load(schema *jsonschema.Schema, path string) (map[string]any, []error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -50,22 +53,113 @@ func Load(schema *jsonschema.Schema, path string) (map[string]any, []error) {
 	return Parse(schema, data)
 }
 
-// Parse is Load for a document already in memory.
+// Parse is Load for a theme already in memory: comments are allowed in a
+// theme, which people write by hand.
 func Parse(schema *jsonschema.Schema, data []byte) (map[string]any, []error) {
 	stripped, err := jsonc.Strip(data)
 	if err != nil {
 		return nil, []error{err}
 	}
-	v, err := jsonschema.Decode(stripped)
+	return parse(schema, stripped)
+}
+
+// LoadManifest reads a manifest file and checks it, as Clack does in the
+// browser (src/manifest.ts): UTF-8 only, no byte-order mark, no comments,
+// then CheckJSON and the schema. CheckManifest adds the rules beyond the
+// schema.
+func LoadManifest(schema *jsonschema.Schema, path string) (map[string]any, []error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, []error{err}
+	}
+	return ParseManifest(schema, data)
+}
+
+// ParseManifest is LoadManifest for a manifest already in memory.
+func ParseManifest(schema *jsonschema.Schema, data []byte) (map[string]any, []error) {
+	// encoding/json would quietly turn bytes that are not UTF-8 into
+	// U+FFFD; the browser refuses them, and so do we.
+	if !utf8.Valid(data) {
+		return nil, []error{jsonschema.Error{Path: "", Message: "is not UTF-8"}}
+	}
+	return parse(schema, data)
+}
+
+func parse(schema *jsonschema.Schema, data []byte) (map[string]any, []error) {
+	v, err := jsonschema.Decode(data)
 	if err != nil {
 		return nil, []error{err}
 	}
 	var errs []error
+	if shape := CheckJSON(v); len(shape) > 0 {
+		for _, e := range shape {
+			errs = append(errs, e)
+		}
+		return nil, errs
+	}
 	for _, e := range schema.Validate(v) {
 		errs = append(errs, e)
 	}
 	doc, _ := v.(map[string]any)
 	return doc, errs
+}
+
+// MaxDepth is how deeply a document's values may nest: far beyond any real
+// theme or manifest. Clack in the browser has the same limit
+// (src/manifest.ts maxDepth), and encoding/json's own, 10,000, is never
+// reached first.
+const MaxDepth = 64
+
+// CheckJSON returns what is wrong with a decoded document before any schema
+// is consulted, as the browser checks it (src/manifest.ts checkJSON):
+// values nested more than MaxDepth deep, and numbers too large to hold,
+// which a browser's JSON.parse turns into Infinity. Sorted by place.
+func CheckJSON(doc any) []jsonschema.Error {
+	// Each value remembers its parent and its key; its path is spelt out
+	// only for a value with a problem.
+	type item struct {
+		v      any
+		parent *item
+		key    string
+		depth  int
+	}
+	var pathOf func(it *item) string
+	pathOf = func(it *item) string {
+		if it.parent == nil {
+			return ""
+		}
+		return pathOf(it.parent) + "/" + jsonschema.EscapePointer(it.key)
+	}
+	var errs []jsonschema.Error
+	stack := []*item{{v: doc, depth: 1}}
+	for len(stack) > 0 {
+		it := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		switch x := it.v.(type) {
+		case json.Number:
+			if f, err := x.Float64(); err != nil || math.IsInf(f, 0) {
+				errs = append(errs, jsonschema.Error{Path: pathOf(it), Message: "is a number too large to hold"})
+			}
+		case map[string]any:
+			if it.depth > MaxDepth {
+				errs = append(errs, jsonschema.Error{Path: pathOf(it), Message: fmt.Sprintf("nests more than %d deep", MaxDepth)})
+				continue
+			}
+			for k, sub := range x {
+				stack = append(stack, &item{sub, it, k, it.depth + 1})
+			}
+		case []any:
+			if it.depth > MaxDepth {
+				errs = append(errs, jsonschema.Error{Path: pathOf(it), Message: fmt.Sprintf("nests more than %d deep", MaxDepth)})
+				continue
+			}
+			for i, sub := range x {
+				stack = append(stack, &item{sub, it, strconv.Itoa(i), it.depth + 1})
+			}
+		}
+	}
+	sort.Slice(errs, func(i, j int) bool { return errs[i].Path < errs[j].Path })
+	return errs
 }
 
 // own lists the properties that belong to one theme file and are never
@@ -354,11 +448,15 @@ func CheckManifest(doc map[string]any) []error {
 	seen := map[string]int{}
 	for i, s := range slides {
 		slide, _ := s.(map[string]any)
-		id, _ := slide["id"].(string)
-		if j, ok := seen[id]; ok {
-			errs = append(errs, fmt.Errorf("/slides/%d/id: %q is also the id of slide %d", i, id, j))
-		} else {
-			seen[id] = i
+		// An id that is not a string, or a width that is not a number, is
+		// the schema's to report, and is skipped here -- as the browser
+		// skips it (src/manifest.ts check), so both report the same places.
+		if id, ok := slide["id"].(string); ok {
+			if j, ok := seen[id]; ok {
+				errs = append(errs, fmt.Errorf("/slides/%d/id: %q is also the id of slide %d", i, id, j))
+			} else {
+				seen[id] = i
+			}
 		}
 		sources, _ := slide["sources"].([]any)
 		widths := map[string]bool{}
@@ -367,9 +465,21 @@ func CheckManifest(doc map[string]any) []error {
 			// Widths compare as numbers (640 and 640.0 are one width). A
 			// source without a type is the fallback for browsers that take
 			// none of the typed ones, so it may share a width with them.
-			w, _ := m["width"].(json.Number)
-			width, _ := w.Float64()
-			key := fmt.Sprint(width, " ", m["type"])
+			// Only what the schema accepts, as the browser does: a whole
+			// width from 1 to 100,000, and a type absent or a string.
+			w, ok := m["width"].(json.Number)
+			if !ok {
+				continue
+			}
+			width, err := w.Float64()
+			if err != nil || width != math.Trunc(width) || width < 1 || width > 100000 {
+				continue
+			}
+			typ, isString := m["type"].(string)
+			if _, present := m["type"]; present && !isString {
+				continue
+			}
+			key := fmt.Sprintf("%d %s", int(width), typ)
 			if widths[key] {
 				errs = append(errs, fmt.Errorf("/slides/%d/sources/%d: another source has the same width and type", i, k))
 			}

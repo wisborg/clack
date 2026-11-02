@@ -135,6 +135,9 @@ test("fromInput refuses what cannot be shown", () => {
     ["a repeated id", [ok, ok]],
     ["no alt", [{ ...ok, alt: undefined }]],
     ["not an array", { length: 1 }],
+    ["a title that is not text", [{ ...ok, description: { title: 5 } }]],
+    ["a page that is not text", [{ ...ok, page: 5 }]],
+    ["a source type that is not text", [{ ...ok, sources: [{ url: "a.jpg", width: 1, type: 5 }] }]],
   ];
   for (const [what, input] of cases) {
     assertThrows(() => fromInput(input as SlideInput[]), TypeError, what);

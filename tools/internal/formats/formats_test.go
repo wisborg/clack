@@ -208,7 +208,7 @@ func TestResolve(t *testing.T) {
 func TestExamples(t *testing.T) {
 	themeSchema, manifestSchema := schemas(t)
 	for _, name := range []string{"manifest.json", "manifest-minimal.json"} {
-		doc, errs := Load(manifestSchema, filepath.Join(root, "schema/examples", name))
+		doc, errs := LoadManifest(manifestSchema, filepath.Join(root, "schema/examples", name))
 		errs = append(errs, CheckManifest(doc)...)
 		for _, e := range errs {
 			t.Errorf("%s: %v", name, e)
@@ -334,7 +334,7 @@ func TestManifestRefusals(t *testing.T) {
 		"the next format":          {"/format", map[string]any{"/format": "clack-manifest/2"}},
 	} {
 		data := edit(t, "schema/examples/manifest.json", c.set)
-		_, errs := Parse(manifestSchema, data)
+		_, errs := ParseManifest(manifestSchema, data)
 		wantError(t, name, c.path, errs)
 	}
 }
@@ -363,7 +363,7 @@ func wantError(t *testing.T, name, path string, errs []error) {
 func TestCheckManifest(t *testing.T) {
 	_, manifestSchema := schemas(t)
 	data := edit(t, "schema/examples/manifest.json", map[string]any{"/slides/1/id": "low-tide"})
-	doc, errs := Parse(manifestSchema, data)
+	doc, errs := ParseManifest(manifestSchema, data)
 	if len(errs) > 0 {
 		t.Fatal(errs)
 	}
@@ -371,7 +371,7 @@ func TestCheckManifest(t *testing.T) {
 		t.Errorf("repeated id: got %v", got)
 	}
 	data = edit(t, "schema/examples/manifest.json", map[string]any{"/slides/0/sources/1/width": 640})
-	doc, _ = Parse(manifestSchema, data)
+	doc, _ = ParseManifest(manifestSchema, data)
 	if got := CheckManifest(doc); len(got) != 1 || !strings.Contains(got[0].Error(), "/slides/0/sources/1") {
 		t.Errorf("repeated source: got %v", got)
 	}
@@ -633,7 +633,7 @@ func TestCheckManifestComparesWidthsAsNumbers(t *testing.T) {
 	data := edit(t, "schema/examples/manifest.json", map[string]any{
 		"/slides/0/sources/1/width": json.Number("640.0"),
 	})
-	doc, errs := Parse(manifestSchema, data)
+	doc, errs := ParseManifest(manifestSchema, data)
 	if len(errs) > 0 {
 		t.Fatal(errs)
 	}
@@ -698,8 +698,13 @@ func TestSharedManifestCases(t *testing.T) {
 		Cases []struct {
 			Name  string                     `json:"name"`
 			Set   map[string]json.RawMessage `json:"set"`
-			Error *string                    `json:"error"`
+			Error json.RawMessage            `json:"error"`
 		} `json:"cases"`
+		Raw []struct {
+			Name     string `json:"name"`
+			Bytes    []byte `json:"bytes"` // base64, as encoding/json reads []byte
+			Accepted bool   `json:"accepted"`
+		} `json:"raw"`
 	}
 	if err := json.Unmarshal(raw, &fixture); err != nil {
 		t.Fatal(err)
@@ -709,6 +714,16 @@ func TestSharedManifestCases(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range fixture.Cases {
+		// error is null, one place, or a list of places.
+		var want []string
+		if string(c.Error) != "null" {
+			var one string
+			if json.Unmarshal(c.Error, &one) == nil {
+				want = []string{one}
+			} else if err := json.Unmarshal(c.Error, &want); err != nil {
+				t.Fatalf("%s: error is %s", c.Name, c.Error)
+			}
+		}
 		doc, err := jsonschema.Decode(base)
 		if err != nil {
 			t.Fatal(err)
@@ -721,29 +736,43 @@ func TestSharedManifestCases(t *testing.T) {
 			doc = setPointer(t, doc, pointer, v)
 		}
 		data, _ := json.Marshal(doc)
-		parsed, errs := Parse(manifestSchema, data)
+		parsed, errs := ParseManifest(manifestSchema, data)
 		if parsed != nil {
 			errs = append(errs, CheckManifest(parsed)...)
 		}
-		var paths []string
+		got := map[string]bool{}
 		for _, e := range errs {
 			path, _, _ := strings.Cut(e.Error(), ": ")
 			if path == "(document)" {
 				path = ""
 			}
-			paths = append(paths, path)
+			got[path] = true
 		}
 		switch {
-		case c.Error == nil && len(errs) > 0:
+		case want == nil && len(errs) > 0:
 			t.Errorf("%s: refused: %v", c.Name, errs)
-		case c.Error != nil && len(errs) == 0:
+		case want != nil && len(errs) == 0:
 			t.Errorf("%s: accepted", c.Name)
-		case c.Error != nil:
-			for i, p := range paths {
-				if p != *c.Error {
-					t.Errorf("%s: an error at %q, not %q: %v", c.Name, p, *c.Error, errs[i])
+		case want != nil:
+			for p := range got {
+				if !slices.Contains(want, p) {
+					t.Errorf("%s: an error at %q, want only %q: %v", c.Name, p, want, errs)
 				}
 			}
+			for _, p := range want {
+				if !got[p] {
+					t.Errorf("%s: no error at %q: %v", c.Name, p, errs)
+				}
+			}
+		}
+	}
+	for _, c := range fixture.Raw {
+		doc, errs := ParseManifest(manifestSchema, c.Bytes)
+		if doc != nil {
+			errs = append(errs, CheckManifest(doc)...)
+		}
+		if accepted := len(errs) == 0; accepted != c.Accepted {
+			t.Errorf("raw %s: accepted %v, want %v: %v", c.Name, accepted, c.Accepted, errs)
 		}
 	}
 }

@@ -124,11 +124,14 @@ export class Schema {
     this.#root = compile(root as Json);
   }
 
-  /** Every way doc fails the schema, sorted by place; none means it is valid. Never throws. */
-  validate(doc: unknown): Problem[] {
+  /**
+   * Every way doc fails the schema, sorted by place unless the caller will
+   * sort them with more of its own; none means it is valid. Never throws.
+   */
+  validate(doc: unknown, sorted = true): Problem[] {
     const out: Problem[] = [];
     validate(this.#root, doc as Json, "", out);
-    return out.sort((a, b) => byCodePoint(a.path, b.path));
+    return sorted ? out.sort((a, b) => byCodePoint(a.path, b.path)) : out;
   }
 }
 
@@ -188,19 +191,22 @@ const show = (v: Json): string => {
 
 /**
  * Orders strings by code point, which is the order of their UTF-8 bytes --
- * as Go sorts them -- not of their UTF-16 units, as < does.
+ * as Go sorts them -- not of their UTF-16 units, as < does. The two differ
+ * only where a surrogate meets a unit from U+E000 to U+FFFF: surrogates
+ * (U+D800-DFFF, the halves of code points above U+FFFF) are moved above
+ * those, and those down into the gap the surrogates leave.
  */
 export function byCodePoint(a: string, b: string): number {
-  const x = a[Symbol.iterator]();
-  const y = b[Symbol.iterator]();
-  for (;;) {
-    const p = x.next();
-    const q = y.next();
-    if (p.done || q.done) return p.done && q.done ? 0 : p.done ? -1 : 1;
-    const d = p.value.codePointAt(0)! - q.value.codePointAt(0)!;
-    if (d !== 0) return d;
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) {
+    const x = a.charCodeAt(i);
+    const y = b.charCodeAt(i);
+    if (x !== y) return fix(x) - fix(y);
   }
+  return a.length - b.length;
 }
+
+const fix = (u: number): number => (u < 0xd800 ? u : u < 0xe000 ? u + 0x2000 : u - 0x800);
 
 /** Whether v is something JSON can hold: what a parser gives, and nothing else. */
 function isJson(v: unknown): v is Json {
@@ -223,7 +229,8 @@ function chars(s: string): number {
   return n;
 }
 
-const escape = (k: string): string => k.replaceAll("~", "~0").replaceAll("/", "~1");
+/** A property name as one step of a JSON Pointer (RFC 6901). */
+export const escape = (k: string): string => (/[~/]/.test(k) ? k.replaceAll("~", "~0").replaceAll("/", "~1") : k);
 
 function check(n: Node, v: Json, path: string): Problem[] {
   const out: Problem[] = [];
