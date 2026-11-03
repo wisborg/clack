@@ -17,6 +17,11 @@ export interface Problem {
   message: string;
 }
 
+/** Problems as lines for a person to read: each indented, by its place in the file. */
+export function describeProblems(problems: readonly Problem[]): string[] {
+  return problems.map((p) => `  ${p.path || "(the whole file)"}: ${p.message}`);
+}
+
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
 interface Node {
@@ -126,11 +131,13 @@ export class Schema {
 
   /**
    * Every way doc fails the schema, sorted by place unless the caller will
-   * sort them with more of its own; none means it is valid. Never throws.
+   * sort them with more of its own; none means it is valid. at is where doc
+   * sits in a larger document, for checking it a part at a time. Never
+   * throws.
    */
-  validate(doc: unknown, sorted = true): Problem[] {
+  validate(doc: unknown, sorted = true, at = ""): Problem[] {
     const out: Problem[] = [];
-    validate(this.#root, doc as Json, "", out);
+    validate(this.#root, doc as Json, at, out);
     return sorted ? out.sort((a, b) => byCodePoint(a.path, b.path)) : out;
   }
 }

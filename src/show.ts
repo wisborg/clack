@@ -36,19 +36,24 @@ const text = {
 /** What has become of the manifest src names (see ClackShow.#manifest). */
 type ManifestState =
   | { state: "none" }
-  | { state: "loading"; url: string; abort: AbortController }
-  | { state: "loaded"; url: string; manifest: Manifest }
-  | { state: "failed"; url: string };
+  | { state: "loading"; abort: AbortController }
+  | { state: "loaded"; manifest: Manifest }
+  | { state: "failed" };
 
-/** src resolved against the page, "" for none, or "invalid:<src>" for one that is not a URL. */
-function resolveSrc(src: string | null): string {
-  if (!src) return "";
+/** What src names: none, a URL resolved against the page, or text that is not a URL (to fail, once, like any other). */
+type Src = { url: string } | { bad: string } | null;
+
+function resolveSrc(src: string | null): Src {
+  if (!src) return null;
   try {
-    return new URL(src, document.baseURI).href;
+    return { url: new URL(src, document.baseURI).href };
   } catch {
-    return `invalid:${src}`;
+    return { bad: src };
   }
 }
+
+const sameSrc = (a: Src, b: Src): boolean =>
+  a === b || (a !== null && b !== null && ("url" in a ? "url" in b && a.url === b.url : "bad" in b && a.bad === b.bad));
 
 /** What `slidechange` says. */
 export interface SlideChangeDetail {
@@ -121,11 +126,17 @@ export class ClackShow extends HTMLElement {
   #warnings = new Set<string>();
   /**
    * The manifest src names, resolved when src is set -- so a relative src
-   * keeps meaning what it meant then, whatever the page's address becomes
-   * -- or "" with no src. A src that is not a URL is kept as
-   * "invalid:<src>", so it fails once, like any other.
+   * keeps meaning what it meant then, whatever the page's address becomes.
    */
-  #src = "";
+  #src: Src = null;
+  /**
+   * Set from connectedCallback, once what the page set before Clack loaded
+   * has been taken up, until disconnectedCallback. When Clack loads after
+   * the page, the src attribute's callback comes first, already connected:
+   * the show must not fetch or draw anything before it knows whether the
+   * page gave slides of its own.
+   */
+  #ready = false;
   /**
    * What has become of the manifest #src names. One state, with the URL
    * it is for: a src set again, or changed, starts it afresh; nothing else
@@ -257,10 +268,12 @@ export class ClackShow extends HTMLElement {
     // The markup is read again on a reconnect, in case it changed while
     // the show was out of the page and not watching it.
     if (this.#showing === "markup") this.#showing = "none";
+    this.#ready = true;
     this.#render();
   }
 
   disconnectedCallback(): void {
+    this.#ready = false;
     document.removeEventListener("visibilitychange", this.#onVisibility);
     // A manifest on its way is not dropped: there is no telling a move --
     // however long it takes -- from a removal, and a show that is moved must
@@ -283,7 +296,7 @@ export class ClackShow extends HTMLElement {
         const src = resolveSrc(value);
         // The same src again does nothing -- unless what it names failed:
         // setting src again is how a page retries.
-        if (src === this.#src && this.#manifest.state !== "failed") break;
+        if (sameSrc(src, this.#src) && this.#manifest.state !== "failed") break;
         this.#src = src;
         this.#dropManifest();
         this.#render();
@@ -399,9 +412,9 @@ export class ClackShow extends HTMLElement {
    * itself, so a page that answers by giving slides of its own keeps them.
    */
   #render(): void {
-    if (!this.isConnected) return;
+    if (!this.#ready) return;
     if (!this.#scripted) {
-      if (this.#src && this.#manifest.state === "none") this.#startLoad();
+      if (this.#src && this.#manifest.state === "none") this.#startLoad(this.#src);
       const m = this.#manifest;
       switch (m.state) {
         case "loaded":
@@ -414,7 +427,9 @@ export class ClackShow extends HTMLElement {
           break;
         case "loading":
           this.#notice.hidden = true;
-          if (this.#showing === "none") this.#markup();
+          // What is shown stays -- unless it is slides from script, just
+          // withdrawn: then the markup, until the manifest arrives.
+          if (this.#showing === "none" || this.#showing === "script") this.#markup();
           break;
         case "none":
           this.#notice.hidden = true;
@@ -428,24 +443,27 @@ export class ClackShow extends HTMLElement {
     }
   }
 
-  /** Starts fetching the manifest #src names. */
-  #startLoad(): void {
-    const url = this.#src;
-    if (url.startsWith("invalid:")) {
-      this.#failed(url.slice("invalid:".length), new Error("Clack: src is not a URL"));
-      return;
-    }
+  /**
+   * Starts fetching the manifest src names. A src that is not a URL fails
+   * the same way a fetch does -- a moment later, not within the call that
+   * set it -- so a page can listen for error after setting it, and a page
+   * that retries from its handler does not call itself without end.
+   */
+  #startLoad(src: NonNullable<Src>): void {
     const abort = new AbortController();
-    this.#manifest = { state: "loading", url, abort };
-    load(url, abort.signal).then(
+    this.#manifest = { state: "loading", abort };
+    const loading =
+      "url" in src ? load(src.url, abort.signal) : Promise.reject(new Error(`Clack: src is not a URL`));
+    const name = "url" in src ? src.url : src.bad;
+    loading.then(
       (manifest) => {
         if (abort.signal.aborted) return;
-        this.#manifest = { state: "loaded", url, manifest };
+        this.#manifest = { state: "loaded", manifest };
         this.#render();
       },
       (e: unknown) => {
         if (abort.signal.aborted) return;
-        this.#failed(url, e);
+        this.#failed(name, e);
         this.#render();
       },
     );
@@ -463,7 +481,7 @@ export class ClackShow extends HTMLElement {
     } else {
       console.error(`Clack: the manifest ${url} could not be loaded:`, e);
     }
-    this.#manifest = { state: "failed", url };
+    this.#manifest = { state: "failed" };
     this.#owedError = true;
   }
 
@@ -471,6 +489,8 @@ export class ClackShow extends HTMLElement {
   #dropManifest(): void {
     if (this.#manifest.state === "loading") this.#manifest.abort.abort();
     this.#manifest = { state: "none" };
+    // An error owed for a manifest dropped is not owed any more.
+    this.#owedError = false;
   }
 
   #showManifest(m: Manifest): void {
@@ -498,10 +518,14 @@ export class ClackShow extends HTMLElement {
    */
   #noticeOn(): void {
     if (!this.#notice.hidden) return;
+    // Unseen (but read) while it is empty, so no blank box shows.
     this.#notice.textContent = "";
+    this.#notice.classList.add("empty");
     this.#notice.hidden = false;
     setTimeout(() => {
-      if (!this.#notice.hidden) this.#notice.textContent = text.noManifest;
+      if (this.#notice.hidden) return;
+      this.#notice.textContent = text.noManifest;
+      this.#notice.classList.remove("empty");
     }, 100);
   }
 
@@ -862,6 +886,9 @@ export class ClackShow extends HTMLElement {
     this.#title.textContent = slide?.title ?? "";
     this.#credit.textContent = slide?.credit ?? "";
     this.#credit.hidden = !slide?.credit;
+    // The credit may be in a language of its own, within the caption's.
+    if (slide && slide.creditLang !== slide.captionLang) applyLang(this.#credit, slide.creditLang);
+    else this.#credit.removeAttribute("lang");
   }
 
   #updateControls(): void {

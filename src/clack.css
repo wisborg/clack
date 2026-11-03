@@ -319,6 +319,12 @@
   }
 }
 
+/* When the manifest could not be had. Unseen while still empty (it is a
+   status, and is filled a moment after it appears), so no blank box shows. */
+.notice.empty {
+  opacity: 0;
+}
+
 /* When the manifest could not be had. */
 .notice {
   grid-area: 1 / 1;

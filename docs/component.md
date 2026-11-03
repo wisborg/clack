@@ -23,8 +23,8 @@ other formats — is a slide, and so is each child `<img>`. Anything else is lef
 
 - A `lang` attribute marks a slide's text as in that language: on the `<img>` (or around it,
   inside the show) for its description, on the `<figcaption>` (or around it) for its
-  caption. Without one, they are in the page's language. `lang=""` says the language is
-  unknown, and is kept so.
+  caption, on the `<small>` for its credit. Without one, they are in the page's language.
+  `lang=""` says the language is unknown, and is kept so.
 - `alt` is the photo's description. Without it Clack warns in the console; `alt=""` says the
   caption already describes it.
 - `width` and `height` are required: they keep the photo's space before it loads, so the
@@ -93,12 +93,16 @@ show.slides = [
 ];
 ```
 
-The shape is a manifest's slide (see [`manifest.md`](manifest.md)), or Clack's own, as the
-`slides` getter returns it — so `show.slides = show.slides.filter(…)` works, and the photos
-of the slides kept are not fetched again. Sources are grouped by type into a `<picture>`;
-the untyped ones make the `<img>`. Every URL is checked, those in a `srcset` included. A slide that cannot be shown
-throws a `TypeError` that names it and says why — a URL that is not http, https or relative,
-a missing size, a repeated id — and the show keeps the slides it had. While slides come from
+The shape is a manifest's slide (see [`manifest.md`](manifest.md)), checked by the same
+rules as in a manifest — the manifest schema's own — so whatever a manifest may hold, a
+script may give, and nothing else: URLs in printable ASCII (a space is `%20`), at most
+sixteen sources, the image types listed, no property the format does not know (but `x-`
+ones). A `null` field is taken as absent. Relative URLs are relative to the page. Or the
+shape is Clack's own, as the `slides` getter returns it — so `show.slides =
+show.slides.filter(…)` works, the photos of the slides kept are not fetched again, and each
+slide keeps its languages (`lang`, `captionLang`, `creditLang`). Sources are grouped by
+type into a `<picture>`; the untyped ones make the `<img>`. A slide that cannot be shown
+throws a `TypeError` that names it and says why, and the show keeps the slides it had. While slides come from
 script neither the markup nor a manifest is read; `show.slides = null` goes back to them.
 
 ## Attributes

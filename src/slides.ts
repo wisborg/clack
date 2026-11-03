@@ -2,6 +2,8 @@
  * Slides: what Clack shows, read from the host page's markup or given from
  * script, in one shape whatever the source.
  */
+import { rules } from "./rules";
+import { describeProblems } from "./schema";
 
 /** One `<source>` of a `<picture>`: the same photo in another format. */
 export interface Alternative {
@@ -30,6 +32,18 @@ export interface Slide {
   color: string;
   title: string;
   credit: string;
+  /**
+   * The language of the photo's description, as an HTML lang attribute
+   * gives it ("" meaning unknown), or null to inherit the page's: a
+   * manifest's, for its slides; for markup, a lang on the <img> or on
+   * anything between it and the show. Text on screen is marked with the
+   * language of the slide it belongs to, whichever source it came from.
+   */
+  lang: string | null;
+  /** The language of the caption's title, likewise: a lang on the <figcaption> or around it. */
+  captionLang: string | null;
+  /** The language of the credit, likewise: a lang on its <small>, or the caption's. */
+  creditLang: string | null;
 }
 
 /**
@@ -40,16 +54,6 @@ export interface Slide {
  */
 export interface Keyed extends Slide {
   key: string;
-  /**
-   * The language of the photo's description, as an HTML lang attribute
-   * gives it ("" meaning unknown), or null to inherit the page's: a
-   * manifest's, for its slides; for markup, a lang on the <img> or on
-   * anything between it and the show. Text on screen is marked with the
-   * language of the slide it belongs to, whichever source it came from.
-   */
-  lang: string | null;
-  /** The language of the caption, likewise: a lang on the <figcaption> or around it. */
-  captionLang: string | null;
 }
 
 /** Marks e as in lang (see Keyed.lang): set, even to "" (unknown), or removed to inherit. */
@@ -151,8 +155,8 @@ export function readMarkup(host: Element, warn: (message: string) => void): Keye
     const caption = figure?.querySelector(":scope > figcaption");
     let title = "";
     let credit = "";
+    const small = caption?.querySelector("small") ?? null;
     if (caption) {
-      const small = caption.querySelector("small");
       credit = collapse(small?.textContent);
       title = collapse(
         Array.from(caption.childNodes)
@@ -174,6 +178,7 @@ export function readMarkup(host: Element, warn: (message: string) => void): Keye
       key,
       lang: markupLang(img, host),
       captionLang: caption ? markupLang(caption, host) : markupLang(figure ?? img, host),
+      creditLang: small ? markupLang(small, host) : caption ? markupLang(caption, host) : markupLang(figure ?? img, host),
       id,
       alt: alt ?? "",
       width,
@@ -239,34 +244,53 @@ export function fromInput(input: readonly (SlideInput | Slide)[]): Keyed[] {
       throw new TypeError(`Clack: slide ${i + 1}: ${why}`);
     };
     if (typeof s !== "object" || s === null) fail("not an object");
-    if (typeof s.id !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(s.id)) fail("id must be 1 to 64 letters, digits, - or _");
-    if (ids.has(s.id)) fail(`the id "${s.id}" is already used`);
-    ids.add(s.id);
-    if (typeof s.alt !== "string") fail("alt must be a string");
-    // Absent, null (as many serialisers write an empty field) or a string.
-    const text = (v: unknown, what: string): void => {
-      if (v !== undefined && v !== null && typeof v !== "string") fail(`${what} must be a string`);
-    };
-    for (const [name, v] of [["width", s.width], ["height", s.height]] as const) {
-      if (!Number.isInteger(v) || v < 1) fail(`${name} must be a positive integer`);
-    }
+    const id = (s as { id?: unknown }).id;
+    if (typeof id === "string" && ids.has(id)) fail(`the id "${id}" is already used`);
     if (isSlide(s)) {
+      // Clack's own shape, as the getter gives it: checked here, as it is
+      // not the manifest's.
+      if (typeof s.id !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(s.id)) fail("id must be 1 to 64 letters, digits, - or _");
+      if (typeof s.alt !== "string") fail("alt must be a string");
+      for (const [name, v] of [["width", s.width], ["height", s.height]] as const) {
+        if (!Number.isInteger(v) || v < 1) fail(`${name} must be a positive integer`);
+      }
+      ids.add(s.id);
       return unique(checkSlide(s, fail));
     }
-    if (!Array.isArray(s.sources) || s.sources.length === 0) fail("sources must have at least one source");
-    for (const [k, src] of s.sources.entries()) {
-      if (typeof src?.url !== "string" || !usableURL(src.url)) fail(`source ${k + 1}: the URL must be http, https or relative`);
-      if (!Number.isInteger(src.width) || src.width < 1) fail(`source ${k + 1}: width must be a positive integer`);
-      text(src.type, `source ${k + 1}: type`);
+    // The manifest's shape: checked by the manifest's own rules for a slide,
+    // the same as in a manifest. A null field is taken as absent, as many
+    // serialisers write one.
+    const slide = withoutNulls(s, fail) as SlideInput;
+    const problems = rules().slide.validate(slide);
+    if (problems.length > 0) {
+      fail(describeProblems(problems.slice(0, 3)).map((l) => l.trim().replace(/^\(the whole file\)/, "the slide")).join("; "));
     }
-    if (s.full && (typeof s.full.url !== "string" || !usableURL(s.full.url))) fail("the full-size URL must be http, https or relative");
-    text(s.page, "the page URL");
-    if (s.page && !usableURL(s.page)) fail("the page URL must be http, https or relative");
-    text(s.description?.title, "the title");
-    text(s.description?.credit, "the credit");
-    text(s.placeholder?.color, "the placeholder colour");
-    return unique(convert(s, null));
+    // Relative URLs are relative to the page: each must come out http(s).
+    const urls = [...slide.sources.map((src) => src.url), slide.full?.url, slide.page];
+    for (const url of urls) {
+      if (url !== undefined && !usableURL(url)) fail(`${url} does not resolve to an http or https URL`);
+    }
+    ids.add(slide.id);
+    return unique(convert(slide, null));
   });
+}
+
+/**
+ * A copy of v without the properties that are null, as a script may give
+ * for an absent field. Refuses a value that refers to itself, or nests too
+ * deep to be a slide.
+ */
+function withoutNulls(v: unknown, fail: (why: string) => never, depth = 0, seen = new WeakSet<object>()): unknown {
+  if (typeof v !== "object" || v === null) return v;
+  if (depth > 64) fail("it nests too deep");
+  if (seen.has(v)) fail("it refers to itself");
+  seen.add(v);
+  if (Array.isArray(v)) return v.map((x) => withoutNulls(x, fail, depth + 1, seen));
+  const out: Record<string, unknown> = {};
+  for (const [k, x] of Object.entries(v)) {
+    if (x !== null) out[k] = withoutNulls(x, fail, depth + 1, seen);
+  }
+  return out;
 }
 
 /**
@@ -295,6 +319,7 @@ export function convert(s: SlideInput, lang: string | null): Keyed {
     key: `id:${s.id}`,
     lang,
     captionLang: lang,
+    creditLang: lang,
     id: s.id,
     alt: s.alt,
     width: s.width,
@@ -346,13 +371,19 @@ function checkSlide(s: Slide, fail: (why: string) => never): Keyed {
   const color = str(s.color ?? "", "color");
   // A slide read from the show and given back keeps its identity, so its
   // photo is not fetched again; the caller makes sure keys are unique.
-  const { key, lang, captionLang } = s as Partial<Keyed>;
+  const { key, lang, captionLang, creditLang } = s as Partial<Keyed>;
+  // Each kept as given -- any string an HTML lang attribute takes, or null
+  // to inherit -- so a slide read from the show and given back keeps its
+  // languages; one not given at all follows the one before it.
+  const given = (v: unknown, otherwise: string | null): string | null =>
+    typeof v === "string" ? v : v === null ? null : otherwise;
+  const photoLang = given(lang, null);
+  const titleLang = given(captionLang, photoLang);
   return {
     key: typeof key === "string" && key ? key : `id:${s.id}`,
-    // Kept as given, any string an HTML lang attribute takes, so a slide
-    // read from the show and given back keeps its language.
-    lang: typeof lang === "string" ? lang : null,
-    captionLang: typeof captionLang === "string" ? captionLang : typeof lang === "string" ? lang : null,
+    lang: photoLang,
+    captionLang: titleLang,
+    creditLang: given(creditLang, titleLang),
     id: s.id,
     alt: s.alt,
     width: s.width,

@@ -105,15 +105,15 @@ const ok: SlideInput = {
     { url: "a-640.avif", width: 640, type: "image/avif" },
     { url: "a-640.jpg", width: 640 },
     { url: "a-1280.avif", width: 1280, type: "image/avif" },
-    { url: "a 1280,x.jpg", width: 1280 },
+    { url: "a-1280,x.jpg", width: 1280 },
   ],
   description: { title: " The  title ", credit: "Me" },
 };
 
 test("fromInput groups sources by type", () => {
   const [s] = fromInput([ok]);
-  assertEqual(s!.srcset, "a-640.jpg 640w, a%201280%2Cx.jpg 1280w", "the <img>'s, with space and comma encoded");
-  assertEqual(s!.src, "a 1280,x.jpg", "src is the largest");
+  assertEqual(s!.srcset, "a-640.jpg 640w, a-1280%2Cx.jpg 1280w", "the <img>'s, the comma encoded so it cannot end the URL");
+  assertEqual(s!.src, "a-1280,x.jpg", "src is the largest");
   assertEqual(s!.alternatives.length, 1, "one <source>");
   assertEqual(s!.alternatives[0]!.srcset, "a-640.avif 640w, a-1280.avif 1280w", "the avif sources");
   assertEqual(s!.title, "The title", "the title, collapsed");
@@ -135,6 +135,10 @@ test("fromInput refuses what cannot be shown", () => {
     ["a repeated id", [ok, ok]],
     ["no alt", [{ ...ok, alt: undefined }]],
     ["not an array", { length: 1 }],
+    ["a URL with a space, which a manifest would refuse too", [{ ...ok, sources: [{ url: "a b.jpg", width: 1 }] }]],
+    ["seventeen sources, one more than a manifest allows", [{ ...ok, sources: Array.from({ length: 17 }, (_, k) => ({ url: `a${k}.jpg`, width: k + 1 })) }]],
+    ["a type a manifest would refuse", [{ ...ok, sources: [{ url: "a.gif", width: 1, type: "image/gif" }] }]],
+    ["a property a manifest would refuse", [{ ...ok, colour: "red" }]],
     ["a title that is not text", [{ ...ok, description: { title: 5 } }]],
     ["a page that is not text", [{ ...ok, page: 5 }]],
     ["a source type that is not text", [{ ...ok, sources: [{ url: "a.jpg", width: 1, type: 5 }] }]],
@@ -168,6 +172,23 @@ test("a markup slide's languages are those set inside the show", () => {
   assertEqual(c!.lang, "de", "the photo's own, for its description");
   assertEqual(c!.captionLang, "fr", "the caption's own, for the caption");
   assertEqual(d!.lang, "", "unknown, kept as unknown");
+});
+
+test("a credit can have a language of its own; a round trip keeps each", () => {
+  const host = markup(["figure>img[src=a.jpg][width=3][height=2][alt=A][lang=de]"]);
+  const cap = document.createElement("figcaption");
+  cap.append("Low tide ");
+  const small = document.createElement("small");
+  small.lang = "da";
+  small.textContent = "Foto: Jens Hansen";
+  cap.append(small);
+  host.firstElementChild!.append(cap);
+  const [slide] = readMarkup(host, () => {});
+  assertEqual(slide!.captionLang, null, "the caption: the page's");
+  assertEqual(slide!.creditLang, "da", "the credit: its own");
+  const [back] = fromInput([slide!]);
+  assertEqual(back!.captionLang, null, "the caption's null kept, not the photo's language put in its place");
+  assertEqual(back!.creditLang, "da", "the credit's kept");
 });
 
 test("a slide's language survives being read and given back", () => {

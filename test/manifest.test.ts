@@ -784,3 +784,89 @@ test("a manifest failing while the show is out of the page fires error once it i
     console.error = quiet;
   }
 });
+
+test("an error owed for a manifest since dropped is never fired", async () => {
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    let errors = 0;
+    const s = show({ src: echo("{}", { status: 500, delay: 200 }) });
+    s.addEventListener("error", () => errors++);
+    const parent = s.parentElement!;
+    s.remove();
+    await new Promise((r) => setTimeout(r, 500)); // fails while out of the page
+    s.setAttribute("src", echo(manifestOf(2)));
+    parent.append(s);
+    await waitFor(() => s.count === 2, "the new manifest");
+    assertEqual(errors, 0, "no error for the manifest dropped");
+  } finally {
+    console.error = quiet;
+  }
+});
+
+test("slides withdrawn while a manifest is fetched again give way to the markup at once", async () => {
+  const s = show({ src: echo(manifestOf(3), { delay: 1000 }) }, 2);
+  await waitFor(() => s.count === 2, "the markup, while the manifest loads");
+  s.slides = [{ id: "s", alt: "script", width: 300, height: 200, sources: [{ url: img(300, 200), width: 300 }] }];
+  s.slides = null;
+  assertEqual(s.slides[0]?.alt, "photo 1", "the markup's, not the withdrawn script's");
+  await waitFor(() => s.count === 3, "then the manifest");
+});
+
+test("Clack loading late fetches nothing for a src the page has given slides in place of", async () => {
+  await resetImageLog();
+  const inert = document.implementation.createHTMLDocument("");
+  const early = inert.createElement(tagName);
+  early.setAttribute("src", echo(manifestOf(2)));
+  early.append(figure({}));
+  (early as unknown as Record<string, unknown>)["slides"] = [{ id: "s", alt: "", width: 300, height: 200, sources: [{ url: img(300, 200), width: 300 }] }];
+  const s = document.adoptNode(early) as ClackShow;
+  fixtureEl().append(s);
+  await settledOn(s, "1 of 1");
+  const log = await imageLog();
+  assertEqual(log.filter((e) => e.startsWith("manifest ")).length, 0, `no manifest fetched: ${log.join(" ")}`);
+  assertEqual(log.filter((e) => e.startsWith("/img/")).length, 1, `only the script's photo: ${log.join(" ")}`);
+});
+
+test("a src that is not a URL fails a moment later, so a page can listen for it, and can retry", async () => {
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    const s = document.createElement(tagName);
+    s.setAttribute("src", "http://a:99999/m.json");
+    fixtureEl().append(s);
+    let errors = 0;
+    s.addEventListener("error", () => {
+      errors++;
+      if (errors < 3) s.setAttribute("src", s.getAttribute("src")!); // retry, as a page might
+    });
+    await waitFor(() => errors === 3, "each failure, retried");
+    await new Promise((r) => setTimeout(r, 100));
+    assertEqual(errors, 3, "no more than asked for");
+  } finally {
+    console.error = quiet;
+  }
+});
+
+test("a large manifest is checked in batches, each problem at its place", () => {
+  const slides = Array.from({ length: 1234 }, (_, i) => ({ id: `s${i}`, alt: "", width: 1, height: 1, sources: [{ url: "a.jpg", width: 1 }] }));
+  (slides[1100] as Record<string, unknown>)["bad"] = 1;
+  slides[1200]!.id = "s3";
+  const paths = check({ format: "clack-manifest/1", slides }).map((p) => p.path);
+  assertEqual(paths.join(" "), "/slides/1100/bad /slides/1200/id", "found, and placed");
+});
+
+test("the failure notice is unseen until its words are in it", async () => {
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    const s = show({ src: echo("{}", { status: 500 }) });
+    const notice = s.shadowRoot!.querySelector<HTMLElement>(".notice")!;
+    await waitFor(() => !notice.hidden, "the notice");
+    if (notice.textContent === "") assertEqual(getComputedStyle(notice).opacity, "0", "unseen while empty");
+    await waitFor(() => notice.textContent !== "", "its words");
+    assertEqual(getComputedStyle(notice).opacity, "1", "seen once it has them");
+  } finally {
+    console.error = quiet;
+  }
+});
