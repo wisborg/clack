@@ -17,9 +17,14 @@ export interface Problem {
   message: string;
 }
 
-/** Problems as lines for a person to read: each indented, by its place in the file. */
-export function describeProblems(problems: readonly Problem[]): string[] {
-  return problems.map((p) => `  ${p.path || "(the whole file)"}: ${p.message}`);
+/**
+ * Problems as lines for a person to read: each indented, by its place in
+ * the file -- at most limit of them, and then how many more there are.
+ */
+export function describeProblems(problems: readonly Problem[], limit = Infinity): string[] {
+  const lines = problems.slice(0, limit).map((p) => `  ${p.path || "(the whole file)"}: ${p.message}`);
+  if (problems.length > limit) lines.push(`  and ${problems.length - limit} more`);
+  return lines;
 }
 
 type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
@@ -135,10 +140,11 @@ export class Schema {
    * sits in a larger document, for checking it a part at a time. Never
    * throws.
    */
-  validate(doc: unknown, sorted = true, at = ""): Problem[] {
-    const out: Problem[] = [];
-    validate(this.#root, doc as Json, at, out);
-    return sorted ? out.sort((a, b) => byCodePoint(a.path, b.path)) : out;
+  validate(doc: unknown, sorted = true, at = "", into: Problem[] = []): Problem[] {
+    // Into the caller's list when given one: a list of millions is never
+    // spread into a call, which engines limit.
+    validate(this.#root, doc as Json, at, into);
+    return sorted ? into.sort((a, b) => byCodePoint(a.path, b.path)) : into;
   }
 }
 
@@ -315,7 +321,9 @@ function validate(n: Node, v: Json, path: string, out: Problem[]): void {
   } else if (Array.isArray(v)) {
     if (n.minItems !== undefined && v.length < n.minItems) push(out, path, `must have at least ${n.minItems} items`);
     if (n.maxItems !== undefined && v.length > n.maxItems) push(out, path, `must have at most ${n.maxItems} items`);
-    if (n.items) v.forEach((item, i) => validate(n.items!, item, `${path}/${i}`, out));
+    // Every index, holes in a sparse array included (each is undefined,
+    // and refused as not JSON), which forEach would skip.
+    if (n.items) for (let i = 0; i < v.length; i++) validate(n.items, v[i]!, `${path}/${i}`, out);
   } else if (typeof v === "string") {
     // Characters are code points, one or two UTF-16 units each, so a
     // string's length in units bounds its count both ways: they are only

@@ -242,7 +242,7 @@ test("a show with src shows its manifest's slides, named and in its language", a
   await settledOn(s, "1 of 3");
   assertEqual(s.slides[0]!.alt, "manifest photo 1", "its photo");
   const root = s.shadowRoot!;
-  assertEqual(root.querySelector(".caption")!.getAttribute("lang"), "da", "its language, on its caption");
+  assertEqual(root.querySelector(".title")!.getAttribute("lang"), "da", "its language, on its caption");
   assertEqual(root.querySelector(".slide img")!.getAttribute("lang"), "da", "and on the photo's description");
   assertEqual(root.querySelector(".show")!.hasAttribute("lang"), false, "not on Clack's own words");
   assertEqual(root.querySelector("button.next")!.closest("[lang]"), null, "the buttons are in the page's language");
@@ -397,7 +397,7 @@ test("a src that fails after another loaded leaves the markup, not the old manif
     await waitFor(() => s.count === 3, "the first manifest");
     s.setAttribute("src", echo("{}", { status: 404 }));
     await waitFor(() => s.count === 1, "the markup's one slide");
-    assert(s.shadowRoot!.querySelector(".caption")!.getAttribute("lang") !== "da", "nor the old manifest's language");
+    assert(s.shadowRoot!.querySelector(".title")!.getAttribute("lang") !== "da", "nor the old manifest's language");
   } finally {
     console.error = quiet;
   }
@@ -545,7 +545,7 @@ test("text on screen keeps the language of the slide it belongs to", async () =>
   const s = show({ src: echo(JSON.stringify(body)) }, 0);
   s.append(figure({ title: "English caption" }));
   await waitFor(() => s.count === 1 && s.slides[0]!.alt === "manifest photo 1", "the manifest's slide, its photo still coming");
-  const caption = s.shadowRoot!.querySelector(".caption")!;
+  const caption = s.shadowRoot!.querySelector(".title")!;
   assert(caption.getAttribute("lang") !== "da", `the markup's caption, still on screen, is not marked Danish (${caption.getAttribute("lang")})`);
   await waitFor(() => s.shadowRoot!.querySelector(".title")!.textContent === "M1", "the manifest's caption");
   assertEqual(caption.getAttribute("lang"), "da", "now Danish");
@@ -703,7 +703,7 @@ test("a new manifest's captions show at once, even while a photo is still coming
   void s.next(); // slide 2's photo is slow: a request is in flight
   s.setAttribute("src", echo(manifest("da", "Lavvande", true)));
   await waitFor(() => s.shadowRoot!.querySelector(".title")!.textContent === "Lavvande", "the caption of the slide on screen, at once");
-  assertEqual(s.shadowRoot!.querySelector(".caption")!.getAttribute("lang"), "da", "in its language");
+  assertEqual(s.shadowRoot!.querySelector(".title")!.getAttribute("lang"), "da", "in its language");
 });
 
 test("a page that answers a failed manifest with slides of its own keeps them", async () => {
@@ -815,17 +815,24 @@ test("slides withdrawn while a manifest is fetched again give way to the markup 
 
 test("Clack loading late fetches nothing for a src the page has given slides in place of", async () => {
   await resetImageLog();
+  const manifestURL = echo(manifestOf(2));
+  const scriptPhoto = img(300, 200, "aa3366");
   const inert = document.implementation.createHTMLDocument("");
   const early = inert.createElement(tagName);
-  early.setAttribute("src", echo(manifestOf(2)));
-  early.append(figure({}));
-  (early as unknown as Record<string, unknown>)["slides"] = [{ id: "s", alt: "", width: 300, height: 200, sources: [{ url: img(300, 200), width: 300 }] }];
+  early.setAttribute("src", manifestURL);
+  const fig = figure({});
+  early.append(fig);
+  const markupPhoto = fig.querySelector("img")!.getAttribute("src")!;
+  (early as unknown as Record<string, unknown>)["slides"] = [{ id: "s", alt: "", width: 300, height: 200, sources: [{ url: scriptPhoto, width: 300 }] }];
   const s = document.adoptNode(early) as ClackShow;
   fixtureEl().append(s);
   await settledOn(s, "1 of 1");
+  // Only this test's own URLs are looked for: an earlier test's photos may
+  // still be arriving.
   const log = await imageLog();
-  assertEqual(log.filter((e) => e.startsWith("manifest ")).length, 0, `no manifest fetched: ${log.join(" ")}`);
-  assertEqual(log.filter((e) => e.startsWith("/img/")).length, 1, `only the script's photo: ${log.join(" ")}`);
+  assert(!log.includes(`manifest ${manifestURL}`), `no manifest fetched: ${log.join(" ")}`);
+  assert(log.includes(scriptPhoto), `the script's photo fetched: ${log.join(" ")}`);
+  assert(!log.includes(markupPhoto), `the markup's photo not fetched: ${log.join(" ")}`);
 });
 
 test("a src that is not a URL fails a moment later, so a page can listen for it, and can retry", async () => {
@@ -862,11 +869,42 @@ test("the failure notice is unseen until its words are in it", async () => {
   try {
     const s = show({ src: echo("{}", { status: 500 }) });
     const notice = s.shadowRoot!.querySelector<HTMLElement>(".notice")!;
-    await waitFor(() => !notice.hidden, "the notice");
-    if (notice.textContent === "") assertEqual(getComputedStyle(notice).opacity, "0", "unseen while empty");
+    // Looked at the moment it appears, not whenever a poll comes round.
+    let whenShown: { text: string; opacity: string } | null = null;
+    const watch = new MutationObserver(() => {
+      if (!notice.hidden && whenShown === null) whenShown = { text: notice.textContent ?? "", opacity: getComputedStyle(notice).opacity };
+    });
+    watch.observe(notice, { attributes: true, attributeFilter: ["hidden"] });
+    await waitFor(() => whenShown !== null, "the notice");
+    watch.disconnect();
+    assertEqual(whenShown!.text, "", "empty as it appears");
+    assertEqual(whenShown!.opacity, "0", "and unseen while empty");
     await waitFor(() => notice.textContent !== "", "its words");
     assertEqual(getComputedStyle(notice).opacity, "1", "seen once it has them");
   } finally {
     console.error = quiet;
   }
+});
+
+test("a slide with a million problems is checked without throwing, and its problems capped", () => {
+  const extra = Array.from({ length: 300000 }, () => ({}));
+  const problems = check({ format: "clack-manifest/1", slides: [{ id: "a", alt: "", width: 1, height: 1, sources: [{ url: "a.jpg", width: 1 }], extra }] });
+  assert(problems.length > 0 && problems.length <= 1000, `capped: ${problems.length}`);
+});
+
+test("more slides than a manifest may hold are refused for their number, not checked one by one", () => {
+  const t0 = performance.now();
+  const problems = check({ format: "clack-manifest/1", slides: Array.from({ length: 25000 }, () => ({})) });
+  assertEqual(problems.map((p) => p.path).join(" "), "/slides", "the one problem");
+  assert(performance.now() - t0 < 500, "quickly");
+});
+
+test("a credit with no language of its own is in the page's, not the caption's", async () => {
+  const s = show({});
+  s.slides = [{ id: "a", alt: "", width: 300, height: 200, sources: [{ url: img(300, 200), width: 300 }], description: { title: "Marée basse", credit: "Photo: Jane" } }];
+  s.slides = [{ ...s.slides[0]!, captionLang: "fr", creditLang: null }];
+  await settledOn(s, "1 of 1");
+  const root = s.shadowRoot!;
+  assertEqual(root.querySelector(".title")!.getAttribute("lang"), "fr", "the title in French");
+  assertEqual(root.querySelector(".credit")!.closest("[lang]"), null, "the credit inheriting the page's");
 });

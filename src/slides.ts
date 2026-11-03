@@ -2,8 +2,8 @@
  * Slides: what Clack shows, read from the host page's markup or given from
  * script, in one shape whatever the source.
  */
-import { rules } from "./rules";
-import { describeProblems } from "./schema";
+import { checkSources, maxDepth, rules } from "./rules";
+import { byCodePoint, describeProblems } from "./schema";
 
 /** One `<source>` of a `<picture>`: the same photo in another format. */
 export interface Alternative {
@@ -38,12 +38,13 @@ export interface Slide {
    * manifest's, for its slides; for markup, a lang on the <img> or on
    * anything between it and the show. Text on screen is marked with the
    * language of the slide it belongs to, whichever source it came from.
+   * Always there in what the show gives; optional in what it is given.
    */
-  lang: string | null;
+  lang?: string | null;
   /** The language of the caption's title, likewise: a lang on the <figcaption> or around it. */
-  captionLang: string | null;
+  captionLang?: string | null;
   /** The language of the credit, likewise: a lang on its <small>, or the caption's. */
-  creditLang: string | null;
+  creditLang?: string | null;
 }
 
 /**
@@ -54,6 +55,9 @@ export interface Slide {
  */
 export interface Keyed extends Slide {
   key: string;
+  lang: string | null;
+  captionLang: string | null;
+  creditLang: string | null;
 }
 
 /** Marks e as in lang (see Keyed.lang): set, even to "" (unknown), or removed to inherit. */
@@ -63,16 +67,44 @@ export function applyLang(e: HTMLElement, lang: string | null): void {
 }
 
 /** A slide as given from script: the slide format of a manifest. */
+/** The image types a manifest may name for a source (schema: $defs/image). */
+export type ImageType = "image/jpeg" | "image/png" | "image/webp" | "image/avif" | "image/jxl";
+
+/** One file of a photo, in a manifest (schema: $defs/image). */
+export interface ImageInput {
+  url: string;
+  width: number;
+  height?: number | null | undefined;
+  type?: ImageType | null | undefined;
+}
+
+/**
+ * A slide as given from script: the slide format of a manifest (schema:
+ * $defs/slide), held to the same rules. The fields Clack uses are typed
+ * here; the metadata classes, focus, duration and x- extensions are
+ * allowed and checked by the schema as in a manifest.
+ */
 export interface SlideInput {
   id: string;
   alt: string;
   width: number;
   height: number;
-  sources: { url: string; width: number; type?: string }[];
-  full?: { url: string };
-  page?: string;
-  placeholder?: { color?: string };
-  description?: { title?: string; credit?: string };
+  sources: ImageInput[];
+  // An absent field may also be given as null or undefined, as serialisers
+  // and spreads write one; either is taken as absent.
+  full?: ImageInput | null | undefined;
+  page?: string | null | undefined;
+  placeholder?: { thumbhash?: string | null | undefined; color?: string | null | undefined } | null | undefined;
+  description?:
+    | {
+        title?: string | null | undefined;
+        caption?: string | null | undefined;
+        credit?: string | null | undefined;
+        keywords?: string[] | null | undefined;
+      }
+    | null
+    | undefined;
+  [field: string]: unknown;
 }
 
 const collapse = (s: string | null | undefined): string => (s ?? "").replace(/\s+/g, " ").trim();
@@ -166,6 +198,7 @@ export function readMarkup(host: Element, warn: (message: string) => void): Keye
       );
     }
 
+    const captionLang = markupLang(caption ?? figure ?? img, host);
     const src = img.getAttribute("src") ?? "";
     const srcset = img.getAttribute("srcset") ?? "";
     let key = given ? `id:${id}` : `photo:${src} ${srcset}`;
@@ -177,8 +210,8 @@ export function readMarkup(host: Element, warn: (message: string) => void): Keye
     slides.push({
       key,
       lang: markupLang(img, host),
-      captionLang: caption ? markupLang(caption, host) : markupLang(figure ?? img, host),
-      creditLang: small ? markupLang(small, host) : caption ? markupLang(caption, host) : markupLang(figure ?? img, host),
+      captionLang,
+      creditLang: small ? markupLang(small, host) : captionLang,
       id,
       alt: alt ?? "",
       width,
@@ -225,8 +258,10 @@ export function usableURL(url: string): boolean {
 
 /**
  * Turns slides given from script into Clack's own, refusing what cannot be
- * shown with a TypeError that says which slide and why. The full manifest
- * format is checked by the manifest loader; this checks what a slide needs.
+ * shown with a TypeError that says which slide and why: a slide in the
+ * manifest's shape is held to the manifest's own rules for a slide (the
+ * schema, and the rule beyond it); one in Clack's own shape, as the getter
+ * gives it, to what Clack needs of it.
  */
 export function fromInput(input: readonly (SlideInput | Slide)[]): Keyed[] {
   if (!Array.isArray(input)) {
@@ -234,9 +269,14 @@ export function fromInput(input: readonly (SlideInput | Slide)[]): Keyed[] {
   }
   const ids = new Set<string>();
   const keys = new Set<string>();
+  // A key taken already -- a renamed slide given back keeps its old one --
+  // gets a number, as readMarkup gives one, until it is free.
   const unique = (slide: Keyed): Keyed => {
-    if (keys.has(slide.key)) slide.key = `id:${slide.id}`;
-    keys.add(slide.key);
+    const base = keys.has(slide.key) ? `id:${slide.id}` : slide.key;
+    let key = base;
+    for (let k = 2; keys.has(key); k++) key = `${base}#${k}`;
+    slide.key = key;
+    keys.add(key);
     return slide;
   };
   return input.map((s, i): Keyed => {
@@ -261,14 +301,16 @@ export function fromInput(input: readonly (SlideInput | Slide)[]): Keyed[] {
     // the same as in a manifest. A null field is taken as absent, as many
     // serialisers write one.
     const slide = withoutNulls(s, fail) as SlideInput;
-    const problems = rules().slide.validate(slide);
+    const problems = rules().slide.validate(slide, false);
+    checkSources(slide, "", problems);
     if (problems.length > 0) {
-      fail(describeProblems(problems.slice(0, 3)).map((l) => l.trim().replace(/^\(the whole file\)/, "the slide")).join("; "));
+      problems.sort((a, b) => byCodePoint(a.path, b.path));
+      fail(describeProblems(problems, 3).map((l) => l.trim().replace(/^\(the whole file\)/, "the slide")).join("; "));
     }
     // Relative URLs are relative to the page: each must come out http(s).
     const urls = [...slide.sources.map((src) => src.url), slide.full?.url, slide.page];
     for (const url of urls) {
-      if (url !== undefined && !usableURL(url)) fail(`${url} does not resolve to an http or https URL`);
+      if (typeof url === "string" && !usableURL(url)) fail(`${url} does not resolve to an http or https URL`);
     }
     ids.add(slide.id);
     return unique(convert(slide, null));
@@ -276,20 +318,35 @@ export function fromInput(input: readonly (SlideInput | Slide)[]): Keyed[] {
 }
 
 /**
- * A copy of v without the properties that are null, as a script may give
- * for an absent field. Refuses a value that refers to itself, or nests too
- * deep to be a slide.
+ * A copy of v without the properties that are null or undefined, as a
+ * script may give for an absent field. Arrays keep their length: a hole, or
+ * a null, stays in its place, for the schema to refuse there. An object
+ * may be used more than once (as full may be one of the sources); one that
+ * contains itself, or nests deeper than a manifest may, is refused. Only an
+ * object's own fields are read, as JSON gives them.
  */
-function withoutNulls(v: unknown, fail: (why: string) => never, depth = 0, seen = new WeakSet<object>()): unknown {
+function withoutNulls(v: unknown, fail: (why: string) => never, depth = 1, within = new Set<object>()): unknown {
   if (typeof v !== "object" || v === null) return v;
-  if (depth > 64) fail("it nests too deep");
-  if (seen.has(v)) fail("it refers to itself");
-  seen.add(v);
-  if (Array.isArray(v)) return v.map((x) => withoutNulls(x, fail, depth + 1, seen));
-  const out: Record<string, unknown> = {};
-  for (const [k, x] of Object.entries(v)) {
-    if (x !== null) out[k] = withoutNulls(x, fail, depth + 1, seen);
+  if (depth > maxDepth) fail("it nests too deep");
+  if (within.has(v)) fail("it contains itself");
+  within.add(v);
+  let out: unknown;
+  if (Array.isArray(v)) {
+    out = Array.from(v, (x: unknown) => withoutNulls(x, fail, depth + 1, within));
+  } else {
+    const o: Record<string, unknown> = {};
+    for (const [k, x] of Object.entries(v)) {
+      // A field named __proto__ is copied as a field, not set as a
+      // prototype, so the schema sees -- and refuses -- it, as in a manifest.
+      if (x !== null && x !== undefined) {
+        Object.defineProperty(o, k, { value: withoutNulls(x, fail, depth + 1, within), enumerable: true, writable: true, configurable: true });
+      }
+    }
+    out = o;
   }
+  // Only the ancestors of a value count: the same object met again beside
+  // itself is shared, not circular.
+  within.delete(v);
   return out;
 }
 

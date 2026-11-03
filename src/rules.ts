@@ -1,24 +1,70 @@
 /**
- * The published manifest schema (schema/manifest-1.schema.json), as the
- * build ships it -- its rules without its explanations -- compiled two ways:
- * the document around its slides, and one slide. A large manifest is then
- * checked a slide at a time, with the page free in between, and slides
- * given from script are checked by the same rules as a manifest's.
+ * The rules a manifest's slides follow, wherever the slides come from: the
+ * published manifest schema (schema/manifest-1.schema.json), as the build
+ * ships it -- its rules without its explanations -- compiled two ways, the
+ * document around its slides and one slide; and the rules beyond the schema
+ * that concern a single slide. A large manifest is checked a slide at a
+ * time, with the page free in between, and slides given from script are
+ * held to exactly the same rules as a manifest's.
  */
 import manifestSchema from "../schema/manifest-1.schema.json";
-import { Schema } from "./schema";
+import { Schema, type Problem } from "./schema";
 
-let compiled: { top: Schema; slide: Schema } | undefined;
+/**
+ * How deeply a manifest's values may nest -- far beyond any real manifest,
+ * whose slides go five deep. The tools apply the same limit
+ * (formats.CheckJSON), so the two agree on every file.
+ */
+export const maxDepth = 64;
+
+/**
+ * The most problems collected from one manifest. Its verdict is settled by
+ * the first; a list of millions would only use up memory, and the console
+ * could not show it anyway.
+ */
+export const maxProblems = 1000;
+
+let compiled: { top: Schema; slide: Schema; maxSlides: number } | undefined;
 
 /** The manifest without its slides' contents (their number is still checked), and a slide. */
-export function rules(): { top: Schema; slide: Schema } {
+export function rules(): { top: Schema; slide: Schema; maxSlides: number } {
   if (!compiled) {
-    const top = structuredClone(manifestSchema) as unknown as { properties: { slides: Record<string, unknown> } };
-    delete top.properties.slides["items"];
+    const slides = manifestSchema.properties.slides;
+    // The top: the published schema with the slides' items left out, by
+    // shallow copies of the parts on the way to them.
+    const top = {
+      ...manifestSchema,
+      properties: { ...manifestSchema.properties, slides: { type: slides.type, maxItems: slides.maxItems } },
+    };
     compiled = {
       top: new Schema(top),
       slide: new Schema({ $defs: manifestSchema.$defs, $ref: "#/$defs/slide" }),
+      maxSlides: slides.maxItems,
     };
   }
   return compiled;
+}
+
+/**
+ * The rule beyond the schema for one slide: it offers each width of each
+ * type once (tools/internal/formats.CheckManifest). Only what the schema
+ * accepts is considered -- a width that is a whole number from 1 to
+ * 100,000; a type that is absent or a string -- and the rest is left to
+ * the schema's own errors, so the tools and the browser report the same
+ * places whatever the values (Go and JavaScript spell -0 or 1e20
+ * differently).
+ */
+export function checkSources(slide: unknown, path: string, out: Problem[]): void {
+  const sources = (slide as { sources?: unknown } | null)?.sources;
+  if (!Array.isArray(sources)) return;
+  const seen = new Set<string>();
+  for (let k = 0; k < sources.length; k++) {
+    const o = sources[k] as { width?: unknown; type?: unknown } | null;
+    const w = o?.width;
+    if (typeof w !== "number" || !Number.isInteger(w) || w < 1 || w > 100000) continue;
+    if (o!.type !== undefined && typeof o!.type !== "string") continue;
+    const key = `${w} ${o!.type ?? ""}`;
+    if (seen.has(key)) out.push({ path: `${path}/sources/${k}`, message: "another source has the same width and type" });
+    seen.add(key);
+  }
 }

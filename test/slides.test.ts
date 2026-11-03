@@ -148,6 +148,40 @@ test("fromInput refuses what cannot be shown", () => {
   }
 });
 
+test("fromInput takes an object used twice, and undefined for an absent field", () => {
+  const sources = [
+    { url: "a-640.jpg", width: 640 },
+    { url: "a-4000.jpg", width: 4000 },
+  ];
+  const [s] = fromInput([{ id: "a", alt: "", width: 4000, height: 3000, sources, full: sources[1]!, page: undefined, description: { title: "T", credit: undefined } }]);
+  assertEqual(s!.full, "a-4000.jpg", "the shared object, accepted");
+  assertEqual(s!.title, "T", "undefined, taken as absent");
+});
+
+test("fromInput holds script slides to a manifest's rules beyond the schema too", () => {
+  const twice = [{ ...ok, sources: [{ url: "a.jpg", width: 640 }, { url: "b.jpg", width: 640 }] }];
+  assertThrows(() => fromInput(twice), TypeError, "two sources of one width and type");
+  const sparse: unknown[] = [];
+  sparse[1] = { url: "a.jpg", width: 10 };
+  let message = "";
+  try {
+    fromInput([{ ...ok, sources: sparse as SlideInput["sources"] }]);
+  } catch (e) {
+    message = String(e);
+  }
+  assert(message.includes("Clack: slide 1: /sources/0"), `a hole, named by its place: ${message}`);
+  const proto = JSON.parse(`{"id":"a","alt":"","width":1,"height":1,"sources":[{"url":"a.jpg","width":1}],"__proto__":1}`) as SlideInput;
+  assertThrows(() => fromInput([proto]), TypeError, "a __proto__ field, refused as a manifest refuses it");
+});
+
+test("a renamed slide given back does not share its key with another", () => {
+  const host = markup(["figure#b>img[src=b.jpg][width=3][height=2][alt=B]"]);
+  const [b] = readMarkup(host, () => {});
+  const renamed = { ...b!, id: "x" };
+  const out = fromInput([renamed, { id: "b", alt: "", width: 1, height: 1, sources: [{ url: "n.jpg", width: 1 }] }]);
+  assert(out[0]!.key !== out[1]!.key, `keys ${out[0]!.key} and ${out[1]!.key}`);
+});
+
 test("fromInput takes null for an absent field, as serialisers write it", () => {
   const [s] = fromInput([{ ...ok, page: null, description: { title: null, credit: null }, placeholder: { color: null } } as unknown as SlideInput]);
   assertEqual(s!.page, "", "page");

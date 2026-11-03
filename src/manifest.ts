@@ -9,7 +9,7 @@
  * schema in Go (tools/internal/formats), and both are held to the same
  * cases (test/fixtures/manifests.json).
  */
-import { rules } from "./rules";
+import { checkSources, maxDepth, maxProblems, rules } from "./rules";
 import { byCodePoint, describeProblems, escape, type Problem } from "./schema";
 import { convert, type Keyed, type SlideInput } from "./slides";
 
@@ -38,15 +38,7 @@ export class ManifestError extends Error {
   }
 }
 
-/**
- * How deeply a manifest's values may nest -- far beyond any real manifest,
- * whose slides go five deep. The tools apply the same limit
- * (formats.CheckJSON), so the two agree on every file.
- */
-export const maxDepth = 64;
-
-/** How many slides are checked, or built, between letting the page draw. */
-const batch = 500;
+export { maxDepth };
 
 type Obj = Record<string, unknown>;
 const isObject = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -54,12 +46,12 @@ const isObject = (v: unknown): v is Obj => typeof v === "object" && v !== null &
 /**
  * What is wrong with a parsed value before any schema is consulted: values
  * nested more than maxDepth deep, and numbers too large to be held
- * (JSON.parse makes them Infinity). v sits at path, depth deep in its
- * document; the contents of skip, if v holds it, are left for a later
- * call. Walks with a stack of its own, so no document can exhaust the call
- * stack.
+ * (JSON.parse makes them Infinity), added to out. v sits at path, depth
+ * deep in its document; the contents of skip, if v holds it, are left for
+ * a later call. Walks with a stack of its own, so no document can exhaust
+ * the call stack, and stops once out holds maxProblems.
  */
-function checkJSON(v: unknown, path: string, depth: number, skip?: unknown): Problem[] {
+function checkJSON(v: unknown, path: string, depth: number, out: Problem[], skip?: unknown): void {
   // Each value remembers its parent and its key; its path is spelt out
   // only for a value with a problem, not for each of a large manifest's
   // million values.
@@ -70,16 +62,15 @@ function checkJSON(v: unknown, path: string, depth: number, skip?: unknown): Pro
     depth: number;
   }
   const pathOf = (it: Item): string => (it.parent ? `${pathOf(it.parent)}/${escape(it.key)}` : path);
-  const problems: Problem[] = [];
   const stack: Item[] = [{ v, parent: null, key: "", depth }];
-  while (stack.length > 0) {
+  while (stack.length > 0 && out.length < maxProblems) {
     const it = stack.pop()!;
     const x = it.v;
     if (typeof x === "number" && !Number.isFinite(x)) {
-      problems.push({ path: pathOf(it), message: "is a number too large to hold" });
+      out.push({ path: pathOf(it), message: "is a number too large to hold" });
     } else if (typeof x === "object" && x !== null) {
       if (it.depth > maxDepth) {
-        problems.push({ path: pathOf(it), message: `nests more than ${maxDepth} deep` });
+        out.push({ path: pathOf(it), message: `nests more than ${maxDepth} deep` });
         continue;
       }
       if (x === skip) continue;
@@ -88,73 +79,59 @@ function checkJSON(v: unknown, path: string, depth: number, skip?: unknown): Pro
       }
     }
   }
-  return problems;
 }
 
 /**
- * Checks a parsed manifest against the format, returning every problem,
- * in order of place; none means it is valid. It never throws, whatever it
- * is given.
+ * Checks a parsed manifest against the format, returning its problems, in
+ * order of place -- at most maxProblems of them; none means it is valid.
+ * It never throws, whatever it is given.
  */
 export function check(doc: unknown): Problem[] {
   return runToEnd(checking(doc));
 }
 
 /**
- * The checks, in steps: the document around its slides, then the slides a
- * batch at a time -- first for their shape (nesting, numbers), then
- * against the schema -- then the rules beyond the schema.
+ * The checks, in steps of a slide: the document around its slides, then
+ * the slides -- first for their shape (nesting, numbers), then against the
+ * schema and the rules beyond it. Slides past the most a manifest may hold
+ * are not looked at: the manifest is refused for their number already.
+ * Checking stops once maxProblems are found; the verdict is settled.
  */
 function* checking(doc: unknown): Generator<void, Problem[]> {
-  const slides = isObject(doc) && Array.isArray(doc["slides"]) ? (doc["slides"] as unknown[]) : null;
+  const all = isObject(doc) && Array.isArray(doc["slides"]) ? (doc["slides"] as unknown[]) : null;
+  const { top, slide, maxSlides } = rules();
+  const slides = all && all.length <= maxSlides ? all : null;
   const sorted = (problems: Problem[]): Problem[] => problems.sort((a, b) => byCodePoint(a.path, b.path));
+  const full = (problems: Problem[]): boolean => problems.length >= maxProblems;
 
   // Shape first: a value too deep or too large is all that is reported.
-  const shape = checkJSON(doc, "", 1, slides ?? undefined);
-  for (let i = 0; slides && i < slides.length; i++) {
-    shape.push(...checkJSON(slides[i], `/slides/${i}`, 3));
-    if (i % batch === batch - 1) yield;
+  const shape: Problem[] = [];
+  checkJSON(doc, "", 1, shape, all ?? undefined);
+  for (let i = 0; slides && i < slides.length && !full(shape); i++) {
+    checkJSON(slides[i], `/slides/${i}`, 3, shape);
+    yield;
   }
   if (shape.length > 0) return sorted(shape);
-  yield;
 
-  const { top, slide } = rules();
   const problems = top.validate(doc, false);
-  for (let i = 0; slides && i < slides.length; i++) {
-    problems.push(...slide.validate(slides[i], false, `/slides/${i}`));
-    if (i % batch === batch - 1) yield;
-  }
-
-  // Beyond the schema: ids are unique, and a slide offers each size of each
-  // type once (tools/internal/formats.CheckManifest). Both consider only
-  // what the schema accepts -- an id that is a string; a width that is a
-  // whole number from 1 to 100,000; a type that is absent or a string --
-  // and leave the rest to the schema's own errors, so the two report the
-  // same places whatever the values (Go and JavaScript spell -0 or 1e20
-  // differently).
   const ids = new Map<string, number>();
-  slides?.forEach((slide: unknown, i) => {
-    const s = slide as { id?: unknown; sources?: unknown } | null;
-    if (typeof s?.id === "string") {
-      const first = ids.get(s.id);
-      if (first !== undefined) problems.push({ path: `/slides/${i}/id`, message: `"${s.id}" is also the id of slide ${first}` });
-      else ids.set(s.id, i);
+  for (let i = 0; slides && i < slides.length && !full(problems); i++) {
+    const s = slides[i];
+    const path = `/slides/${i}`;
+    slide.validate(s, false, path, problems);
+    // Beyond the schema: ids are unique in the manifest, and a slide
+    // offers each width of each type once.
+    const id = (s as { id?: unknown } | null)?.id;
+    if (typeof id === "string") {
+      const first = ids.get(id);
+      if (first !== undefined) problems.push({ path: `${path}/id`, message: `"${id}" is also the id of slide ${first}` });
+      else ids.set(id, i);
     }
-    if (Array.isArray(s?.sources)) {
-      const seen = new Set<string>();
-      s.sources.forEach((src: unknown, k) => {
-        const o = src as { width?: unknown; type?: unknown } | null;
-        const w = o?.width;
-        if (typeof w !== "number" || !Number.isInteger(w) || w < 1 || w > 100000) return;
-        if (o!.type !== undefined && typeof o!.type !== "string") return;
-        const key = `${w} ${o!.type ?? ""}`;
-        if (seen.has(key)) problems.push({ path: `/slides/${i}/sources/${k}`, message: "another source has the same width and type" });
-        seen.add(key);
-      });
-    }
-  });
+    checkSources(s, path, problems);
+    yield;
+  }
   // In order of place, as the tools list them.
-  return sorted(problems);
+  return sorted(problems).slice(0, maxProblems);
 }
 
 /** Runs steps to their end, without pausing. */
@@ -175,9 +152,10 @@ export function parse(text: string, base: string): Manifest {
 }
 
 /**
- * The one way a manifest's text becomes a Manifest, in steps: parse() runs
- * them straight through; load() lets the page draw and answer input
- * between them, so no task grows with the size of the manifest.
+ * The one way a manifest's text becomes a Manifest, in steps of about a
+ * slide: parse() runs them straight through; load() lets the page draw and
+ * answer input every few milliseconds of them. (JSON.parse itself is one
+ * step, the size of the file: no engine offers it in parts.)
  */
 function* reading(text: string, base: string): Generator<void, Manifest> {
   const doc = parseJSON(text);
@@ -201,7 +179,7 @@ function parseJSON(text: string): unknown {
   }
 }
 
-/** A checked manifest, its URLs resolved against base and its slides converted, a batch at a time. */
+/** A checked manifest, its URLs resolved against base and its slides converted, a slide at a time. */
 function* building(doc: unknown, base: string): Generator<void, Manifest> {
   const m = doc as { title?: string; description?: string; lang?: string; slides: SlideInput[] };
   // Every URL becomes absolute, resolved against the manifest's, and must
@@ -229,7 +207,7 @@ function* building(doc: unknown, base: string): Generator<void, Manifest> {
     if (s.page) out.page = resolve(s.page, `/slides/${i}/page`);
     // Checked whole already, against the schema: converted, not checked again.
     slides.push(convert(out, m.lang ?? null));
-    if (i % batch === batch - 1) yield;
+    yield;
   }
   if (unresolved.length > 0) {
     throw new ManifestError(unresolved.sort((a, b) => byCodePoint(a.path, b.path)));
@@ -327,21 +305,34 @@ export async function load(url: string, signal: AbortSignal): Promise<Manifest> 
   const text = decode(bytes);
   await yieldToPage();
   const steps = reading(text, response.url || url);
+  let since = performance.now();
   for (;;) {
-    signal.throwIfAborted();
     const step = steps.next();
     if (step.done) return step.value;
-    // A manifest dropped while it is being read is not read on.
-    await yieldToPage();
+    // The page gets a turn every few milliseconds of work, not after
+    // every step; and a manifest dropped meanwhile is not read on.
+    if (performance.now() - since > 8) {
+      await yieldToPage();
+      signal.throwIfAborted();
+      since = performance.now();
+    }
   }
 }
 
 /**
  * Lets the page draw and answer input before going on -- unless it is
- * hidden: then nobody is waiting, and a timer there may be held back for a
- * second or more.
+ * hidden, when nobody is waiting. A message to itself rather than a timer:
+ * browsers hold chained timers back to 4 ms or more each, and much longer
+ * in a page out of view.
  */
 function yieldToPage(): Promise<void> {
   if (document.visibilityState === "hidden") return Promise.resolve();
-  return new Promise((resolve) => setTimeout(resolve, 0));
+  return new Promise((resolve) => {
+    const channel = new MessageChannel();
+    channel.port1.onmessage = () => {
+      channel.port1.close();
+      resolve();
+    };
+    channel.port2.postMessage(null);
+  });
 }

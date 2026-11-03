@@ -12,6 +12,7 @@ import { icon } from "./icons";
 import { photoKey, Photos, type Photo } from "./images";
 import { canStep, drawnWidth, preloadOrder, step } from "./nav";
 import { describeProblems, load, ManifestError, type Manifest } from "./manifest";
+import { maxProblems } from "./rules";
 import { applyLang, fromInput, readMarkup, type Keyed, type Slide, type SlideInput } from "./slides";
 import { listen } from "./swipe";
 
@@ -103,7 +104,6 @@ export class ClackShow extends HTMLElement {
   static readonly observedAttributes = ["loop", "fit", "label", "src"];
 
   readonly #internals: ElementInternals;
-  readonly #captionBox: HTMLParagraphElement;
   /** The manifest's title, hidden, in its language: what names the show when it does (see #name). */
   readonly #nameBox: HTMLSpanElement;
   readonly #stage: HTMLDivElement;
@@ -138,9 +138,9 @@ export class ClackShow extends HTMLElement {
    */
   #ready = false;
   /**
-   * What has become of the manifest #src names. One state, with the URL
-   * it is for: a src set again, or changed, starts it afresh; nothing else
-   * does -- not a move, not slides from script withdrawn.
+   * What has become of the manifest #src names, in one state: a src set
+   * again, or changed, starts it afresh (#dropManifest); nothing else does
+   * -- not a move, not slides from script withdrawn.
    */
   #manifest: ManifestState = { state: "none" };
   /** Where the slides on screen came from. */
@@ -195,7 +195,6 @@ export class ClackShow extends HTMLElement {
 
     const below = el("div", "below", "below");
     const caption = el("p", "caption", "caption");
-    this.#captionBox = caption;
     this.#title = el("span", "title");
     this.#credit = el("span", "credit");
     caption.append(this.#title, this.#credit);
@@ -405,9 +404,9 @@ export class ClackShow extends HTMLElement {
    * one decision, and at most one fetch for a src. Out of the page, nothing
    * is done until the show is back.
    *
-   * While a manifest loads, what is shown stays: at first the markup's
-   * slides, followed as the markup changes; after that, a previous
-   * manifest's or script's. A manifest that cannot be had brings back the
+   * While a manifest loads, what is shown stays -- a previous manifest's
+   * slides -- or else the markup's are shown, followed as the markup
+   * changes: at first, and when slides from script are withdrawn. A manifest that cannot be had brings back the
    * markup's slides, says so, and fires error -- after the show has drawn
    * itself, so a page that answers by giving slides of its own keeps them.
    */
@@ -476,8 +475,9 @@ export class ClackShow extends HTMLElement {
    */
   #failed(url: string, e: unknown): void {
     if (e instanceof ManifestError) {
-      const lines = describeProblems(e.problems);
-      console.error(`Clack: the manifest ${url} was refused, for ${lines.length} problem${lines.length === 1 ? "" : "s"}:\n${lines.join("\n")}`);
+      const n = e.problems.length;
+      const many = n >= maxProblems ? `${n} or more problems (checking stops there)` : `${n} problem${n === 1 ? "" : "s"}`;
+      console.error(`Clack: the manifest ${url} was refused, for ${many}:\n${describeProblems(e.problems, 100).join("\n")}`);
     } else {
       console.error(`Clack: the manifest ${url} could not be loaded:`, e);
     }
@@ -882,13 +882,13 @@ export class ClackShow extends HTMLElement {
   }
 
   #caption(slide: Keyed | null): void {
-    applyLang(this.#captionBox, slide ? slide.captionLang : null);
+    // Each part in its own language, the box around them in none, so a
+    // part whose language is null inherits the page's, not the other's.
+    applyLang(this.#title, slide ? slide.captionLang : null);
+    applyLang(this.#credit, slide ? slide.creditLang : null);
     this.#title.textContent = slide?.title ?? "";
     this.#credit.textContent = slide?.credit ?? "";
     this.#credit.hidden = !slide?.credit;
-    // The credit may be in a language of its own, within the caption's.
-    if (slide && slide.creditLang !== slide.captionLang) applyLang(this.#credit, slide.creditLang);
-    else this.#credit.removeAttribute("lang");
   }
 
   #updateControls(): void {
