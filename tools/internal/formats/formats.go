@@ -87,17 +87,76 @@ func ParseManifest(schema *jsonschema.Schema, data []byte) (map[string]any, []er
 	if !utf8.Valid(data) {
 		return nil, []error{jsonschema.Error{Path: "", Message: "is not UTF-8"}}
 	}
+	// encoding/json turns an escaped lone surrogate (\ud800 alone) into
+	// U+FFFD, so two different keys could become one; the browser keeps
+	// them apart. Every string must be well-formed Unicode, here as there.
+	if at := loneSurrogate(data); at >= 0 {
+		return nil, []error{jsonschema.Error{Path: "", Message: fmt.Sprintf("has a lone surrogate escape at byte %d: not well-formed Unicode", at)}}
+	}
+	v, err := jsonschema.Decode(data)
+	if err != nil {
+		return nil, []error{err}
+	}
 	// More slides than a manifest may hold settle the verdict at once, and
 	// the browser looks no further (src/manifest.ts checking): nor do we,
-	// so the two report the same place.
-	if v, err := jsonschema.Decode(data); err == nil {
-		if m, ok := v.(map[string]any); ok {
-			if slides, ok := m["slides"].([]any); ok && len(slides) > MaxSlides {
-				return nil, []error{jsonschema.Error{Path: "/slides", Message: fmt.Sprintf("must have at most %d items", MaxSlides)}}
+	// so the two report the same one place.
+	if m, ok := v.(map[string]any); ok {
+		if slides, ok := m["slides"].([]any); ok && len(slides) > MaxSlides {
+			return nil, []error{jsonschema.Error{Path: "/slides", Message: fmt.Sprintf("must have at most %d items", MaxSlides)}}
+		}
+	}
+	return check(schema, v)
+}
+
+// loneSurrogate returns the offset of the first \u escape in a JSON
+// string that is half of a surrogate pair without its other half, or -1.
+// Valid UTF-8 cannot hold a surrogate itself, so escapes are all there is
+// to look at.
+func loneSurrogate(data []byte) int {
+	hex := func(b []byte) (int, bool) {
+		if len(b) < 4 {
+			return 0, false
+		}
+		n, err := strconv.ParseUint(string(b[:4]), 16, 32)
+		return int(n), err == nil
+	}
+	inString := false
+	for i := 0; i < len(data); i++ {
+		c := data[i]
+		switch {
+		case !inString:
+			if c == '"' {
+				inString = true
+			}
+		case c == '"':
+			inString = false
+		case c == '\\' && i+1 < len(data):
+			if data[i+1] != 'u' {
+				i++ // a two-character escape
+				continue
+			}
+			u, ok := hex(data[i+2:])
+			if !ok {
+				return -1 // not JSON: the decoder will say so
+			}
+			switch {
+			case u >= 0xDC00 && u <= 0xDFFF:
+				return i // a low half with no high half before it
+			case u >= 0xD800 && u <= 0xDBFF:
+				low, ok := -1, false
+				if i+11 < len(data) && data[i+6] == '\\' && data[i+7] == 'u' {
+					low, ok = hex(data[i+8:])
+				}
+				if !ok || low < 0xDC00 || low > 0xDFFF {
+					return i // a high half with no low half after it
+				}
+				i += 11
+			default:
+				i += 5
 			}
 		}
 	}
-	return parse(schema, data)
+	return -1
 }
 
 // MaxBytes is the most a manifest may weigh, in the browser as in the
@@ -113,6 +172,11 @@ func parse(schema *jsonschema.Schema, data []byte) (map[string]any, []error) {
 	if err != nil {
 		return nil, []error{err}
 	}
+	return check(schema, v)
+}
+
+// check is parse for a document already decoded.
+func check(schema *jsonschema.Schema, v any) (map[string]any, []error) {
 	var errs []error
 	if shape := CheckJSON(v); len(shape) > 0 {
 		for _, e := range shape {
@@ -128,9 +192,10 @@ func parse(schema *jsonschema.Schema, data []byte) (map[string]any, []error) {
 }
 
 // MaxDepth is how deeply a document's values may nest: far beyond any real
-// theme or manifest. Clack in the browser has the same limit
-// (src/manifest.ts maxDepth), and encoding/json's own, 10,000, is never
-// reached first.
+// theme or manifest. Clack in the browser has the same limit (src/rules.ts
+// maxDepth). A document nested beyond encoding/json's own limit, 10,000,
+// fails to decode here before this is checked, with no path, where the
+// browser finds it too deep at a path: both refuse it.
 const MaxDepth = 64
 
 // CheckJSON returns what is wrong with a decoded document before any schema

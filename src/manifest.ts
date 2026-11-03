@@ -10,7 +10,7 @@
  * cases (test/fixtures/manifests.json).
  */
 import { checkSources, maxDepth, maxProblems, rules } from "./rules";
-import { byCodePoint, describeProblems, escape, type Problem } from "./schema";
+import { describeProblems, escape, sortProblems, type Problem } from "./schema";
 import { convert, resolveHTTP, type Keyed, type SlideInput } from "./slides";
 
 export type { Problem };
@@ -44,45 +44,71 @@ type Obj = Record<string, unknown>;
 const isObject = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /**
- * What is wrong with a parsed value before any schema is consulted: values
- * nested more than maxDepth deep, and numbers too large to be held
- * (JSON.parse makes them Infinity), added to out. v sits at path, depth
- * deep in its document; the contents of skip, if v holds it, are left for
- * a later call. Walks with a stack of its own, so no document can exhaust
- * the call stack, and stops once out holds maxProblems.
+ * What is wrong with a parsed value before any schema is consulted, added
+ * to out: values nested more than maxDepth deep; numbers too large to be
+ * held (JSON.parse makes them Infinity); and strings, keys included, that
+ * are not well-formed Unicode -- a lone surrogate, which the tools' decoder
+ * would turn into U+FFFD, merging keys that are different here
+ * (formats.ParseManifest refuses the same). v sits at path, depth deep in
+ * its document; the contents of skip, if v holds it, are left for a later
+ * call. Walks with a stack of its own, so no document can exhaust the call
+ * stack; only containers are put on it, and a path is spelt out only for a
+ * value with a problem. Stops once out holds maxProblems.
  */
 function checkJSON(v: unknown, path: string, depth: number, out: Problem[], skip?: unknown): void {
-  // Each value remembers its parent and its key; its path is spelt out
-  // only for a value with a problem, not for each of a large manifest's
-  // million values.
   interface Item {
-    v: unknown;
+    v: object;
     parent: Item | null;
-    key: string;
+    key: string | number;
     depth: number;
   }
-  const pathOf = (it: Item): string => (it.parent ? `${pathOf(it.parent)}/${escape(it.key)}` : path);
+  const step = (key: string | number): string => (typeof key === "number" ? String(key) : escape(key));
+  const pathOf = (it: Item): string => (it.parent ? `${pathOf(it.parent)}/${step(it.key)}` : path);
+  // A problem, while there is room for one.
+  const report = (at: () => string, message: string): void => {
+    if (out.length < maxProblems) out.push({ path: at(), message });
+  };
+  // Looks at one value; true if it is a container, to be looked into.
+  const look = (x: unknown, at: () => string): x is object => {
+    if (typeof x === "number") {
+      if (!Number.isFinite(x)) report(at, "is a number too large to hold");
+      return false;
+    }
+    if (typeof x === "string") {
+      if (loneSurrogate.test(x)) report(at, "is not well-formed Unicode (a lone surrogate)");
+      return false;
+    }
+    return typeof x === "object" && x !== null;
+  };
+  if (!look(v, () => path)) return;
   const stack: Item[] = [{ v, parent: null, key: "", depth }];
   while (stack.length > 0 && out.length < maxProblems) {
     const it = stack.pop()!;
-    const x = it.v;
-    if (typeof x === "number" && !Number.isFinite(x)) {
-      out.push({ path: pathOf(it), message: "is a number too large to hold" });
-    } else if (typeof x === "object" && x !== null) {
-      if (it.depth > maxDepth) {
-        out.push({ path: pathOf(it), message: `nests more than ${maxDepth} deep` });
-        continue;
-      }
-      if (x === skip) continue;
-      // Pushed last to first, so they come off the stack in the order the
-      // document has them: the problems kept are the earliest.
-      const keys = Object.keys(x);
-      for (let k = keys.length - 1; k >= 0; k--) {
-        stack.push({ v: (x as Obj)[keys[k]!], parent: it, key: keys[k]!, depth: it.depth + 1 });
+    if (it.depth > maxDepth) {
+      report(() => pathOf(it), `nests more than ${maxDepth} deep`);
+      continue;
+    }
+    if (it.v === skip) continue;
+    // Looked at in the document's order; the containers among them are
+    // then put on the stack last to first, so they come off in that order
+    // too, and the problems kept are the earliest.
+    const inner: Item[] = [];
+    if (Array.isArray(it.v)) {
+      it.v.forEach((x: unknown, k) => {
+        if (look(x, () => `${pathOf(it)}/${k}`)) inner.push({ v: x, parent: it, key: k, depth: it.depth + 1 });
+      });
+    } else {
+      for (const [k, x] of Object.entries(it.v)) {
+        if (loneSurrogate.test(k)) report(() => `${pathOf(it)}/${escape(k)}`, "has a name that is not well-formed Unicode (a lone surrogate)");
+        if (look(x, () => `${pathOf(it)}/${escape(k)}`)) inner.push({ v: x, parent: it, key: k, depth: it.depth + 1 });
       }
     }
+    for (let i = inner.length - 1; i >= 0; i--) stack.push(inner[i]!);
   }
 }
+
+/** A surrogate standing alone: in Unicode mode, a pair is one code point and does not match. */
+const loneSurrogate = /\p{Cs}/u;
 
 /**
  * Checks a parsed manifest against the format, returning its problems, in
@@ -103,8 +129,11 @@ export function check(doc: unknown): Problem[] {
 function* checking(doc: unknown): Generator<void, Problem[]> {
   const all = isObject(doc) && Array.isArray(doc["slides"]) ? (doc["slides"] as unknown[]) : null;
   const { top, slide, maxSlides } = rules();
-  const slides = all && all.length <= maxSlides ? all : null;
-  const sorted = (problems: Problem[]): Problem[] => problems.sort((a, b) => byCodePoint(a.path, b.path));
+  // More slides than a manifest may hold settle the verdict, alone and at
+  // once, as in the tools (formats.ParseManifest): nothing else is looked
+  // at, so the two report the one same place.
+  if (all && all.length > maxSlides) return [{ path: "/slides", message: `must have at most ${maxSlides} items` }];
+  const slides = all;
   const full = (problems: Problem[]): boolean => problems.length >= maxProblems;
 
   // Shape first: a value too deep or too large is all that is reported.
@@ -114,7 +143,7 @@ function* checking(doc: unknown): Generator<void, Problem[]> {
     checkJSON(slides[i], `/slides/${i}`, 3, shape);
     yield;
   }
-  if (shape.length > 0) return sorted(shape);
+  if (shape.length > 0) return sortProblems(shape);
 
   const problems = top.validate(doc, false);
   const ids = new Map<string, number>();
@@ -134,7 +163,7 @@ function* checking(doc: unknown): Generator<void, Problem[]> {
     yield;
   }
   // In order of place, as the tools list them.
-  return sorted(problems).slice(0, maxProblems);
+  return sortProblems(problems).slice(0, maxProblems);
 }
 
 /** Runs steps to their end, without pausing. */
@@ -206,7 +235,7 @@ function* building(doc: unknown, base: string): Generator<void, Manifest> {
     yield;
   }
   if (unresolved.length > 0) {
-    throw new ManifestError(unresolved.sort((a, b) => byCodePoint(a.path, b.path)));
+    throw new ManifestError(sortProblems(unresolved));
   }
   return {
     title: m.title ?? "",

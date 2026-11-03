@@ -50,9 +50,10 @@ Clack follows changes to the markup as they happen, keeping its place by slide i
 caption fixed or a slide added changes only the words and the count: the photo on screen,
 and every photo whose slide is unchanged, stays as it is.
 
-A property set on the element before Clack has loaded (`slides`, `loop`) is taken up when it
-loads; slides it refuses are reported as an error (`reportError`), and the markup is read
-instead. A slide still on its way when the slides change arrives where it now is.
+A property set on the element before Clack has loaded (`src`, `slides`, `loop`) is taken up
+when it loads, before anything is fetched; slides it refuses are reported as an error
+(`reportError`), and the show goes on with its manifest or its markup, as if none had been
+set. A slide still on its way when the slides change arrives where it now is.
 
 ## Slides from a manifest
 
@@ -125,6 +126,7 @@ The element is 3:2 unless the page gives it a height.
 | `index` | the slide asked for — it may still be loading |
 | `count` | how many slides |
 | `loop` | the `loop` attribute, as a boolean |
+| `src` | the `src` attribute, as a property: setting it is setting the attribute |
 | `slides` | the slides, as Clack reads them; set to give them from script |
 | `next()`, `previous()` | move one slide; the promise says whether it was shown (`false` if another was asked for first) |
 | `goTo(index or id)` | go to a slide; rejects with a `RangeError` if there is none |

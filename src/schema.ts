@@ -17,6 +17,11 @@ export interface Problem {
   message: string;
 }
 
+/** Sorts problems by place, as the tools sort them (by code point), in place, and returns them. */
+export function sortProblems(problems: Problem[]): Problem[] {
+  return problems.sort((a, b) => byCodePoint(a.path, b.path));
+}
+
 /**
  * Problems as lines for a person to read: each indented, by its place in
  * the file -- at most limit of them, and then how many more there are.
@@ -144,7 +149,7 @@ export class Schema {
     // Into the caller's list when given one: a list of millions is never
     // spread into a call, which engines limit.
     validate(this.#root, doc as Json, at, into);
-    return sorted ? into.sort((a, b) => byCodePoint(a.path, b.path)) : into;
+    return sorted ? sortProblems(into) : into;
   }
 }
 
@@ -356,7 +361,7 @@ function validate(n: Node, v: Json, path: string, out: Problem[]): void {
         failures.push(e);
       }
     }
-    if (matches === 0) out.push(...closest(failures, path));
+    if (matches === 0) for (const p of closest(failures, path)) out.push(p);
     else if (one && matches > 1) push(out, path, "matches more than one of the allowed forms");
   }
   if (n.not && check(n.not, v, path).length === 0) push(out, path, "has a form that is not allowed here");

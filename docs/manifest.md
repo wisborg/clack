@@ -130,7 +130,9 @@ accepts it only if:
   whether the server said so or not (the tools refuse it too);
 - it is UTF-8, strictly (no byte-order mark, no bytes that are not UTF-8), and JSON — plain
   JSON: unlike a theme, a manifest is written by programs, so it has no comments;
-- its values nest at most 64 deep, and no number is too large to hold;
+- its values nest at most 64 deep, no number is too large to hold, and every string, names
+  included, is well-formed Unicode (no `\ud800` standing alone, which some decoders turn
+  into U+FFFD and so merge names that differ);
 - it is a valid `clack-manifest/1`, with nothing it does not know (but `x-` properties).
 
 Relative URLs in it are resolved against the URL it was finally fetched from, after any

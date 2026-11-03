@@ -1,6 +1,9 @@
 import { fromInput, readMarkup, srcsetURLs, usableURL, type SlideInput } from "../src/slides";
 import { assert, assertEqual, assertThrows, fixture, test } from "./harness";
 
+/** A URL as Clack keeps it: made absolute against the page when read or given. */
+const abs = (url: string): string => new URL(url, document.baseURI).href;
+
 function markup(html: string[]): HTMLElement {
   // Built from parts with DOM calls: the page's policy forbids parsing
   // markup from strings, and so would Trusted Types.
@@ -49,8 +52,8 @@ test("readMarkup reads figures, pictures and bare images", () => {
   assertEqual(a!.id, "dawn", "the figure's id");
   assertEqual(a!.alt, "Low tide", "alt");
   assertEqual(a!.width, 3000, "width");
-  assertEqual(a!.srcset, "a-640.jpg 640w, a-1280.jpg 1280w", "srcset, as written");
-  assertEqual(a!.full, "a-full.jpg", "the full-size file");
+  assertEqual(a!.srcset, `${abs("a-640.jpg")} 640w, ${abs("a-1280.jpg")} 1280w`, "srcset, its URLs made absolute");
+  assertEqual(a!.full, abs("a-full.jpg"), "the full-size file");
   assertEqual(a!.color, "#8a8d8c", "the placeholder colour");
   assertEqual(a!.title, "Low tide at dawn", "the title, its spaces collapsed");
   assertEqual(a!.credit, "Public domain", "the credit, from <small>");
@@ -65,7 +68,7 @@ test("readMarkup takes the figure's photo, not an image in its caption", () => {
   const host = markup(["figure>figcaption>img[src=icon.png][width=16][height=16][alt=icon]"]);
   host.firstElementChild!.append(build("img[src=photo.jpg][width=3][height=2][alt=Photo]"));
   const [slide] = readMarkup(host, () => {});
-  assertEqual(slide!.src, "photo.jpg", "the photo");
+  assertEqual(slide!.src, abs("photo.jpg"), "the photo");
 });
 
 test("readMarkup never gives two slides one id", () => {
@@ -112,14 +115,14 @@ const ok: SlideInput = {
 
 test("fromInput groups sources by type", () => {
   const [s] = fromInput([ok]);
-  assertEqual(s!.srcset, "a-640.jpg 640w, a-1280%2Cx.jpg 1280w", "the <img>'s, the comma encoded so it cannot end the URL");
-  assertEqual(s!.src, "a-1280,x.jpg", "src is the largest");
+  assertEqual(s!.srcset, `${abs("a-640.jpg")} 640w, ${abs("a-1280,x.jpg").replace(",", "%2C")} 1280w`, "the <img>'s, the comma encoded so it cannot end the URL");
+  assertEqual(s!.src, abs("a-1280,x.jpg"), "src is the largest");
   assertEqual(s!.alternatives.length, 1, "one <source>");
-  assertEqual(s!.alternatives[0]!.srcset, "a-640.avif 640w, a-1280.avif 1280w", "the avif sources");
+  assertEqual(s!.alternatives[0]!.srcset, `${abs("a-640.avif")} 640w, ${abs("a-1280.avif")} 1280w`, "the avif sources");
   assertEqual(s!.title, "The title", "the title, collapsed");
   // With only typed sources, the last type makes the <img>.
   const [t] = fromInput([{ ...ok, sources: [{ url: "x.webp", width: 10, type: "image/webp" }, { url: "x.jpg", width: 10, type: "image/jpeg" }] }]);
-  assertEqual(t!.srcset, "x.jpg 10w", "the <img> takes the last type");
+  assertEqual(t!.srcset, `${abs("x.jpg")} 10w`, "the <img> takes the last type");
   assertEqual(t!.alternatives.map((a) => a.type).join(), "image/webp", "the other makes a <source>");
 });
 
@@ -154,7 +157,7 @@ test("fromInput takes an object used twice, and undefined for an absent field", 
     { url: "a-4000.jpg", width: 4000 },
   ];
   const [s] = fromInput([{ id: "a", alt: "", width: 4000, height: 3000, sources, full: sources[1]!, page: undefined, description: { title: "T", credit: undefined } }]);
-  assertEqual(s!.full, "a-4000.jpg", "the shared object, accepted");
+  assertEqual(s!.full, abs("a-4000.jpg"), "the shared object, accepted");
   assertEqual(s!.title, "T", "undefined, taken as absent");
 });
 

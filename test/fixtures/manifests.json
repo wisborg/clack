@@ -606,6 +606,31 @@
       "name": "nothing",
       "bytes": "",
       "accepted": false
+    },
+    {
+      "name": "a lone high surrogate in a key",
+      "bytes": "eyJmb3JtYXQiOiJjbGFjay1tYW5pZmVzdC8xIiwic2xpZGVzIjpbXSwieC1cdWQ4MDAiOjF9",
+      "accepted": false
+    },
+    {
+      "name": "a lone low surrogate in a value",
+      "bytes": "eyJmb3JtYXQiOiJjbGFjay1tYW5pZmVzdC8xIiwidGl0bGUiOiJcdWRjMDAiLCJzbGlkZXMiOltdfQ==",
+      "accepted": false
+    },
+    {
+      "name": "two keys Go would merge",
+      "bytes": "eyJmb3JtYXQiOiJjbGFjay1tYW5pZmVzdC8xIiwic2xpZGVzIjpbXSwieC1cdWQ4MDAiOjFlOTk5LCJ4LVx1ZGMwMCI6MH0=",
+      "accepted": false
+    },
+    {
+      "name": "a surrogate pair, as it should be",
+      "bytes": "eyJmb3JtYXQiOiJjbGFjay1tYW5pZmVzdC8xIiwidGl0bGUiOiJcdWQ4M2RcdWRlMDAiLCJzbGlkZXMiOltdfQ==",
+      "accepted": true
+    },
+    {
+      "name": "an escaped backslash before u",
+      "bytes": "eyJmb3JtYXQiOiJjbGFjay1tYW5pZmVzdC8xIiwidGl0bGUiOiJhXFx1ZDgwMCIsInNsaWRlcyI6W119",
+      "accepted": true
     }
   ]
 }

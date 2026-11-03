@@ -973,3 +973,62 @@ test("a later failure's notice is given its words a moment after it shows, not a
     console.error = quiet;
   }
 });
+
+test("a page retrying a src that fetch refuses at once stays responsive", async () => {
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    const s = document.createElement(tagName);
+    s.setAttribute("src", `${location.origin.replace("//", "//user:pw@")}/m.json`); // fetch refuses credentials in a URL
+    let errors = 0;
+    let timerRan = false;
+    let timerRanBy = -1;
+    s.addEventListener("error", () => {
+      errors++;
+      if (errors === 1) setTimeout(() => (timerRan = true), 0);
+      if (errors === 10 && timerRanBy < 0) timerRanBy = timerRan ? 10 : 0;
+      if (errors < 10) s.setAttribute("src", s.getAttribute("src")!);
+    });
+    fixtureEl().append(s);
+    await waitFor(() => errors === 10, "ten failures");
+    assertEqual(timerRanBy, 10, "the page's own timer ran between retries");
+  } finally {
+    console.error = quiet;
+  }
+});
+
+test("too many slides are refused for their number alone, whatever else is wrong", () => {
+  const slides = Array.from({ length: 20001 }, () => ({}));
+  assertEqual(check({ slides, "x-n": Infinity }).map((p) => p.path).join(" "), "/slides", "the one place, as in the tools");
+});
+
+test("relative URLs in script slides keep the meaning they had when given", async () => {
+  const before = location.href;
+  const s = show({});
+  const name = img(300, 200).slice(1); // relative to the page: "img/..."
+  s.slides = [
+    { id: "a", alt: "", width: 300, height: 200, sources: [{ url: img(300, 200), width: 300 }] },
+    { id: "b", alt: "", width: 300, height: 200, sources: [{ url: name, width: 300 }] },
+  ];
+  try {
+    history.pushState(null, "", "/somewhere/else/");
+    assertEqual(s.slides[1]!.src, new URL(name, before).href, "resolved against the page when given");
+    await s.goTo("b");
+    await settledOn(s, "2 of 2");
+    const photo = s.shadowRoot!.querySelector<HTMLImageElement>(".slide img")!;
+    assert(photo.complete && photo.naturalWidth > 0, "and fetched from there");
+  } finally {
+    history.replaceState(null, "", before);
+  }
+});
+
+test("an object shared at every level is copied once, not once per way to reach it", () => {
+  let a: unknown = [];
+  for (let i = 0; i < 50; i++) a = [a, a];
+  const t0 = performance.now();
+  const slide = { id: "a", alt: "", width: 1, height: 1, sources: [{ url: "a.jpg", width: 1 }], "x-a": a };
+  const s = document.createElement(tagName);
+  s.slides = [slide];
+  assert(performance.now() - t0 < 500, "quickly");
+  assertEqual(s.count, 1, "and taken");
+});

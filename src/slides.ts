@@ -3,7 +3,7 @@
  * script, in one shape whatever the source.
  */
 import { checkSources, maxDepth, rules } from "./rules";
-import { byCodePoint, describeProblems } from "./schema";
+import { describeProblems, sortProblems } from "./schema";
 
 /** One `<source>` of a `<picture>`: the same photo in another format. */
 export interface Alternative {
@@ -178,7 +178,7 @@ export function readMarkup(host: Element, warn: (message: string) => void): Keye
       if (srcset) {
         alternatives.push({
           type: source.getAttribute("type") ?? "",
-          srcset,
+          srcset: absoluteSrcset(srcset, document.baseURI),
           media: source.getAttribute("media") ?? "",
         });
       }
@@ -191,6 +191,7 @@ export function readMarkup(host: Element, warn: (message: string) => void): Keye
       warn(`slide ${n}: data-full must be an http, https or relative URL; it is ignored`);
       full = "";
     }
+    if (full) full = absolute(full, document.baseURI);
 
     const caption = figure?.querySelector(":scope > figcaption");
     let title = "";
@@ -207,8 +208,10 @@ export function readMarkup(host: Element, warn: (message: string) => void): Keye
     }
 
     const captionLang = markupLang(caption ?? figure ?? img, host);
-    const src = img.getAttribute("src") ?? "";
-    const srcset = img.getAttribute("srcset") ?? "";
+    // As absolute URLs, read against the page as it is now.
+    const base = document.baseURI;
+    const src = absolute(img.getAttribute("src") ?? "", base);
+    const srcset = absoluteSrcset(img.getAttribute("srcset") ?? "", base);
     let key = given ? `id:${id}` : `photo:${src} ${srcset}`;
     for (let k = 2; keys.has(key); k++) {
       key = `${given ? `id:${id}` : `photo:${src} ${srcset}`}#${k}`;
@@ -229,7 +232,7 @@ export function readMarkup(host: Element, warn: (message: string) => void): Keye
       alternatives,
       full,
       page: "",
-      color: /^#[0-9a-fA-F]{6}$/.test(img.dataset["color"] ?? "") ? img.dataset["color"]! : "",
+      color: hexColor(img.dataset["color"]),
       title,
       credit,
     });
@@ -322,14 +325,19 @@ export function fromInput(input: readonly (SlideInput | Slide)[]): Keyed[] {
     const problems = rules().slide.validate(slide, false);
     checkSources(slide, "", problems);
     if (problems.length > 0) {
-      problems.sort((a, b) => byCodePoint(a.path, b.path));
+      sortProblems(problems);
       fail(describeProblems(problems, 3).map((l) => l.trim().replace(/^\(the whole file\)/, "the slide")).join("; "));
     }
-    // Relative URLs are relative to the page: each must come out http(s).
-    const urls = [...slide.sources.map((src) => src.url), slide.full?.url, slide.page];
-    for (const url of urls) {
-      if (typeof url === "string" && !usableURL(url)) fail(`${url} does not resolve to an http or https URL`);
-    }
+    // Relative URLs are relative to the page as it is now: each must come
+    // out http(s), and is kept absolute, so it means the same later.
+    const base = document.baseURI;
+    const resolved = (url: string): string => {
+      const r = resolveHTTP(url, base);
+      return typeof r === "string" ? r : fail(`${url} ${r.problem}`);
+    };
+    slide.sources = slide.sources.map((src) => ({ ...src, url: resolved(src.url) }));
+    if (slide.full) slide.full = { ...slide.full, url: resolved(slide.full.url) };
+    if (typeof slide.page === "string") slide.page = resolved(slide.page);
     ids.add(slide.id);
     return unique(convert(slide, null));
   });
@@ -345,21 +353,31 @@ export function fromInput(input: readonly (SlideInput | Slide)[]): Keyed[] {
  */
 // A slide starts three deep, as in a manifest (the document, its slides,
 // the slide), so it may nest exactly as deep as a manifest's may.
-function withoutNulls(v: unknown, fail: (why: string) => never, depth = 3, within = new Set<object>()): unknown {
+function withoutNulls(
+  v: unknown,
+  fail: (why: string) => never,
+  depth = 3,
+  within = new Set<object>(),
+  copies = new Map<object, unknown>(),
+): unknown {
   if (typeof v !== "object" || v === null) return v;
   if (depth > maxDepth) fail("it nests too deep");
   if (within.has(v)) fail("it contains itself");
+  // An object met again beside itself is copied once, and the copy shared:
+  // sharing at every level must not cost a copy for every way to reach it.
+  const copied = copies.get(v);
+  if (copied !== undefined) return copied;
   within.add(v);
   let out: unknown;
   if (Array.isArray(v)) {
-    out = Array.from(v, (x: unknown) => withoutNulls(x, fail, depth + 1, within));
+    out = Array.from(v, (x: unknown) => withoutNulls(x, fail, depth + 1, within, copies));
   } else {
     const o: Record<string, unknown> = {};
     for (const [k, x] of Object.entries(v)) {
       // A field named __proto__ is copied as a field, not set as a
       // prototype, so the schema sees -- and refuses -- it, as in a manifest.
       if (x !== null && x !== undefined) {
-        Object.defineProperty(o, k, { value: withoutNulls(x, fail, depth + 1, within), enumerable: true, writable: true, configurable: true });
+        Object.defineProperty(o, k, { value: withoutNulls(x, fail, depth + 1, within, copies), enumerable: true, writable: true, configurable: true });
       }
     }
     out = o;
@@ -367,6 +385,7 @@ function withoutNulls(v: unknown, fail: (why: string) => never, depth = 3, withi
   // Only the ancestors of a value count: the same object met again beside
   // itself is shared, not circular.
   within.delete(v);
+  copies.set(v, out);
   return out;
 }
 
@@ -406,7 +425,7 @@ export function convert(s: SlideInput, lang: string | null): Keyed {
     alternatives: [...groups].map(([type, list]) => ({ type, srcset: srcset(list), media: "" })),
     full: s.full?.url ?? "",
     page: s.page ?? "",
-    color: /^#[0-9a-fA-F]{6}$/.test(color) ? color : "",
+    color: hexColor(color),
     title: collapse(s.description?.title),
     credit: collapse(s.description?.credit),
   };
@@ -434,11 +453,13 @@ function isSlide(s: SlideInput | Slide): s is Slide {
 function checkSlide(s: Slide, fail: (why: string) => never): Keyed {
   const str = (v: unknown, what: string): string => (typeof v === "string" ? v : fail(`${what} must be a string`));
   if (!usableURL(s.src)) fail("src must be an http, https or relative URL");
+  // Every URL checked, and kept absolute (see absolute).
+  const base = document.baseURI;
   const srcsetOK = (set: string, what: string): string => {
     for (const url of srcsetURLs(str(set, what))) {
       if (!usableURL(url)) fail(`${what}: every URL must be http, https or relative`);
     }
-    return set;
+    return absoluteSrcset(set, base);
   };
   if (!Array.isArray(s.alternatives)) fail("alternatives must be an array");
   const full = str(s.full ?? "", "full");
@@ -465,16 +486,16 @@ function checkSlide(s: Slide, fail: (why: string) => never): Keyed {
     alt: s.alt,
     width: s.width,
     height: s.height,
-    src: s.src,
+    src: absolute(s.src, base),
     srcset: srcsetOK(s.srcset ?? "", "srcset"),
     alternatives: s.alternatives.map((a, k) => ({
       type: str(a?.type ?? "", `alternative ${k + 1}: type`),
       media: str(a?.media ?? "", `alternative ${k + 1}: media`),
       srcset: srcsetOK(a?.srcset, `alternative ${k + 1}: srcset`),
     })),
-    full,
-    page,
-    color: /^#[0-9a-fA-F]{6}$/.test(color) ? color : "",
+    full: full && absolute(full, base),
+    page: page && absolute(page, base),
+    color: hexColor(color),
     title: collapse(str(s.title ?? "", "title")),
     credit: collapse(str(s.credit ?? "", "credit")),
   };
@@ -486,7 +507,12 @@ function checkSlide(s: Slide, fail: (why: string) => never): Keyed {
  * to the next comma.
  */
 export function srcsetURLs(srcset: string): string[] {
-  const urls: string[] = [];
+  return srcsetCandidates(srcset).map((c) => c.url);
+}
+
+/** A srcset's candidates, each its URL and what follows it (its descriptors), as srcsetURLs reads them. */
+function srcsetCandidates(srcset: string): { url: string; descriptors: string }[] {
+  const out: { url: string; descriptors: string }[] = [];
   let i = 0;
   const space = /[\t\n\f\r ]/;
   while (i < srcset.length) {
@@ -496,10 +522,12 @@ export function srcsetURLs(srcset: string): string[] {
     while (j < srcset.length && !space.test(srcset[j]!)) j++;
     let url = srcset.slice(i, j);
     i = j;
+    let descriptors = "";
     if (url.endsWith(",")) {
       url = url.replace(/,+$/, "");
     } else {
       // Descriptors, to the next comma outside parentheses.
+      const from = i;
       let depth = 0;
       while (i < srcset.length) {
         const c = srcset[i]!;
@@ -508,8 +536,33 @@ export function srcsetURLs(srcset: string): string[] {
         else if (c === "," && depth === 0) break;
         i++;
       }
+      descriptors = srcset.slice(from, i).trim();
     }
-    if (url) urls.push(url);
+    if (url) out.push({ url, descriptors });
   }
-  return urls;
+  return out;
+}
+
+/**
+ * A URL made absolute, against base, when the slide is read or given -- so
+ * it keeps meaning what it meant then, however the page's address changes
+ * before the photo is fetched (a relative src keeps its meaning the same
+ * way). One Clack will not use is left as it is: it is refused, or inert,
+ * where it is checked.
+ */
+function absolute(url: string, base: string): string {
+  const r = resolveHTTP(url, base);
+  return typeof r === "string" ? r : url;
+}
+
+/** A srcset with each of its URLs made absolute. */
+function absoluteSrcset(srcset: string, base: string): string {
+  return srcsetCandidates(srcset)
+    .map((c) => `${srcsetURL(absolute(c.url, base))}${c.descriptors ? ` ${c.descriptors}` : ""}`)
+    .join(", ");
+}
+
+/** v, if it is a colour as #rrggbb; else "". */
+function hexColor(v: unknown): string {
+  return typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v) ? v : "";
 }

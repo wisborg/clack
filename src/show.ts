@@ -145,7 +145,7 @@ export class ClackShow extends HTMLElement {
   #manifest: ManifestState = { state: "none" };
   /** Where the slides on screen came from. */
   #showing: "none" | "markup" | "manifest" | "script" = "none";
-  /** The manifest whose slides are on screen, when they are a manifest's. */
+  /** The manifest whose slides are on screen, when they are a manifest's; null otherwise. */
   #shownManifest: Manifest | null = null;
   /** An error event owed to the page: the manifest failed while the show was out of it. */
   #owedError = false;
@@ -429,7 +429,7 @@ export class ClackShow extends HTMLElement {
       switch (m.state) {
         case "loaded":
           this.#noticeOff();
-          if (this.#showing !== "manifest" || this.#shownManifest !== m.manifest) this.#showManifest(m.manifest);
+          if (this.#shownManifest !== m.manifest) this.#showManifest(m.manifest);
           break;
         case "failed":
           if (this.#showing !== "markup") this.#markup();
@@ -462,13 +462,7 @@ export class ClackShow extends HTMLElement {
   #startLoad(src: NonNullable<Src>): void {
     const abort = new AbortController();
     this.#manifest = { state: "loading", abort };
-    // Not a URL: failed a task later, as a fetch fails -- a microtask
-    // later would let a page that retries from its error handler loop
-    // through microtasks for ever, and never draw again.
-    const loading =
-      "url" in src
-        ? load(src.url, abort.signal)
-        : new Promise<Manifest>((_, reject) => setTimeout(() => reject(new Error("Clack: src is not a URL")), 0));
+    const loading = "url" in src ? load(src.url, abort.signal) : Promise.reject(new Error("Clack: src is not a URL"));
     const name = "url" in src ? src.url : src.bad;
     loading.then(
       (manifest) => {
@@ -476,11 +470,16 @@ export class ClackShow extends HTMLElement {
         this.#manifest = { state: "loaded", manifest };
         this.#render();
       },
-      (e: unknown) => {
-        if (abort.signal.aborted) return;
-        this.#failed(name, e);
-        this.#render();
-      },
+      // Every failure is acted on a task later, however it came: some come
+      // at once (not a URL; a URL fetch() will not take, with a user name
+      // in it), and a page that retries from its error handler would then
+      // loop through microtasks for ever, and never draw again.
+      (e: unknown) =>
+        setTimeout(() => {
+          if (abort.signal.aborted) return;
+          this.#failed(name, e);
+          this.#render();
+        }, 0),
     );
   }
 
