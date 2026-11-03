@@ -908,3 +908,68 @@ test("a credit with no language of its own is in the page's, not the caption's",
   assertEqual(root.querySelector(".title")!.getAttribute("lang"), "fr", "the title in French");
   assertEqual(root.querySelector(".credit")!.closest("[lang]"), null, "the credit inheriting the page's");
 });
+
+test("a page retrying an invalid src from its error handler stays responsive", async () => {
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    const s = document.createElement(tagName);
+    s.setAttribute("src", "http://a:99999/m.json");
+    let errors = 0;
+    let timerRan = false;
+    let timerRanBy = -1;
+    s.addEventListener("error", () => {
+      errors++;
+      if (errors === 1) setTimeout(() => (timerRan = true), 0);
+      if (errors === 10 && timerRanBy < 0) timerRanBy = timerRan ? 10 : 0;
+      if (errors < 10) s.setAttribute("src", s.getAttribute("src")!);
+    });
+    fixtureEl().append(s);
+    await waitFor(() => errors === 10, "ten failures");
+    assertEqual(timerRanBy, 10, "the page's own timer ran between retries");
+  } finally {
+    console.error = quiet;
+  }
+});
+
+test("src is a property too, and one set before Clack loads is taken up", async () => {
+  const s = show({});
+  s.src = echo(manifestOf(2));
+  assertEqual(s.getAttribute("src"), s.src, "it reflects the attribute");
+  await waitFor(() => s.count === 2, "the manifest");
+  const inert = document.implementation.createHTMLDocument("");
+  const early = inert.createElement(tagName) as unknown as Record<string, unknown>;
+  early["src"] = echo(manifestOf(3));
+  const late = document.adoptNode(early as unknown as ClackShow);
+  fixtureEl().append(late);
+  await waitFor(() => late.count === 3, "the manifest set as a property before Clack loaded");
+});
+
+test("the problems kept, past the limit, are the earliest in the file", () => {
+  const doc = JSON.parse(`{"format":"clack-manifest/1","slides":[],"x-a":[${Array(2000).fill("1e999").join(",")}]}`) as unknown;
+  const paths = check(doc).map((p) => p.path);
+  assert(paths.includes("/x-a/0") && paths.includes("/x-a/999"), "the first thousand");
+  assert(!paths.includes("/x-a/1999"), "not the last");
+});
+
+test("a later failure's notice is given its words a moment after it shows, not at once", async () => {
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    const s = show({ src: echo("{}", { status: 500 }) });
+    const notice = s.shadowRoot!.querySelector<HTMLElement>(".notice")!;
+    await waitFor(() => !notice.hidden, "the first notice");
+    s.setAttribute("src", echo("{}", { status: 500, delay: 60 })); // within the first's moment
+    let textWhenShown: string | null = null;
+    const watch = new MutationObserver(() => {
+      if (!notice.hidden && textWhenShown === null) textWhenShown = notice.textContent ?? "";
+    });
+    watch.observe(notice, { attributes: true, attributeFilter: ["hidden"] });
+    await waitFor(() => textWhenShown !== null, "the second notice");
+    await new Promise((r) => setTimeout(r, 30));
+    watch.disconnect();
+    assertEqual(notice.textContent, "", "still empty just after it shows: the first one's timer is gone");
+  } finally {
+    console.error = quiet;
+  }
+});

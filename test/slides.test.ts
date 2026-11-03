@@ -174,6 +174,16 @@ test("fromInput holds script slides to a manifest's rules beyond the schema too"
   assertThrows(() => fromInput([proto]), TypeError, "a __proto__ field, refused as a manifest refuses it");
 });
 
+test("a script slide may nest exactly as deep as a manifest's", () => {
+  let deep: unknown = [];
+  for (let i = 0; i < 61; i++) deep = [deep];
+  // The slide is 3 deep in a manifest; x-data 4; its arrays the rest.
+  assertThrows(() => fromInput([{ ...ok, "x-data": deep }]), TypeError, "deeper than a manifest allows");
+  let fits: unknown = [];
+  for (let i = 0; i < 59; i++) fits = [fits];
+  assertEqual(fromInput([{ ...ok, "x-data": fits }]).length, 1, "as deep as a manifest allows");
+});
+
 test("a renamed slide given back does not share its key with another", () => {
   const host = markup(["figure#b>img[src=b.jpg][width=3][height=2][alt=B]"]);
   const [b] = readMarkup(host, () => {});

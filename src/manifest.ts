@@ -11,7 +11,7 @@
  */
 import { checkSources, maxDepth, maxProblems, rules } from "./rules";
 import { byCodePoint, describeProblems, escape, type Problem } from "./schema";
-import { convert, type Keyed, type SlideInput } from "./slides";
+import { convert, resolveHTTP, type Keyed, type SlideInput } from "./slides";
 
 export type { Problem };
 export { describeProblems };
@@ -74,8 +74,11 @@ function checkJSON(v: unknown, path: string, depth: number, out: Problem[], skip
         continue;
       }
       if (x === skip) continue;
-      for (const key of Object.keys(x)) {
-        stack.push({ v: (x as Obj)[key], parent: it, key, depth: it.depth + 1 });
+      // Pushed last to first, so they come off the stack in the order the
+      // document has them: the problems kept are the earliest.
+      const keys = Object.keys(x);
+      for (let k = keys.length - 1; k >= 0; k--) {
+        stack.push({ v: (x as Obj)[keys[k]!], parent: it, key: keys[k]!, depth: it.depth + 1 });
       }
     }
   }
@@ -148,7 +151,7 @@ function runToEnd<T>(steps: Generator<void, T>): T {
  * problem, or a SyntaxError for text that is not JSON; nothing else.
  */
 export function parse(text: string, base: string): Manifest {
-  return runToEnd(reading(text, base));
+  return runToEnd(reading(parseJSON(text), base));
 }
 
 /**
@@ -157,9 +160,7 @@ export function parse(text: string, base: string): Manifest {
  * answer input every few milliseconds of them. (JSON.parse itself is one
  * step, the size of the file: no engine offers it in parts.)
  */
-function* reading(text: string, base: string): Generator<void, Manifest> {
-  const doc = parseJSON(text);
-  yield;
+function* reading(doc: unknown, base: string): Generator<void, Manifest> {
   const problems = yield* checking(doc);
   if (problems.length > 0) {
     throw new ManifestError(problems);
@@ -187,15 +188,10 @@ function* building(doc: unknown, base: string): Generator<void, Manifest> {
   // manifest like any other, named by its place; all are gathered first.
   const unresolved: Problem[] = [];
   const resolve = (url: string, path: string): string => {
-    let u: URL;
-    try {
-      u = new URL(url, base);
-    } catch {
-      unresolved.push({ path, message: "is not a URL that can be resolved" });
-      return url;
-    }
-    if (u.protocol !== "https:" && u.protocol !== "http:") unresolved.push({ path, message: "does not resolve to an http or https URL" });
-    return u.href;
+    const r = resolveHTTP(url, base);
+    if (typeof r === "string") return r;
+    unresolved.push({ path, message: r.problem });
+    return url;
   };
   const slides: Keyed[] = [];
   for (const [i, s] of m.slides.entries()) {
@@ -233,8 +229,12 @@ export function decode(bytes: Uint8Array): string {
   }
 }
 
-/** The most a manifest may weigh: 20,000 slides with all their metadata fit with room to spare. */
-export const maxBytes = 16 * 1024 * 1024;
+/**
+ * The most a manifest may weigh, here as in the tools (formats.MaxBytes):
+ * 20,000 slides -- as many as a manifest may hold -- of about 1.6 KB each,
+ * their sources and all their metadata.
+ */
+export const maxBytes = 32 * 1024 * 1024;
 
 /**
  * Fetches and reads the manifest at url. Only JSON is accepted (by its
@@ -288,45 +288,47 @@ export async function load(url: string, signal: AbortSignal): Promise<Manifest> 
     }
     size += value.byteLength;
   }
-  let bytes: Uint8Array;
-  if (buffer) {
-    bytes = buffer.subarray(0, size);
-  } else {
-    bytes = new Uint8Array(size);
+  // Joined, decoded and parsed in one go, so the bytes and their text --
+  // up to three times the manifest's size -- are let go before the long
+  // check and build begin.
+  const joined = (): Uint8Array => {
+    if (buffer) return buffer.subarray(0, size);
+    const bytes = new Uint8Array(size);
     let at = 0;
     for (const p of parts) {
       bytes.set(p, at);
       at += p.byteLength;
     }
-  }
-  // Decoded, then read as parse() reads any manifest -- one way in, which
-  // the tests exercise too -- with the page free to draw and answer input
-  // between the steps.
-  const text = decode(bytes);
+    return bytes;
+  };
   await yieldToPage();
-  const steps = reading(text, response.url || url);
+  signal.throwIfAborted();
+  const doc = parseJSON(decode(joined()));
+  buffer = null;
+  parts = [];
+  // Then read as parse() reads any manifest -- one way in, which the tests
+  // exercise too -- with the page given a turn every few milliseconds, and
+  // a manifest dropped meanwhile not read on.
+  const steps = reading(doc, response.url || url);
   let since = performance.now();
   for (;;) {
+    signal.throwIfAborted();
     const step = steps.next();
     if (step.done) return step.value;
-    // The page gets a turn every few milliseconds of work, not after
-    // every step; and a manifest dropped meanwhile is not read on.
     if (performance.now() - since > 8) {
       await yieldToPage();
-      signal.throwIfAborted();
       since = performance.now();
     }
   }
 }
 
 /**
- * Lets the page draw and answer input before going on -- unless it is
- * hidden, when nobody is waiting. A message to itself rather than a timer:
+ * Lets the page draw and answer input -- and, in a page out of view, its
+ * other work -- before going on. A message to itself rather than a timer:
  * browsers hold chained timers back to 4 ms or more each, and much longer
- * in a page out of view.
+ * in a page out of view, but not messages.
  */
 function yieldToPage(): Promise<void> {
-  if (document.visibilityState === "hidden") return Promise.resolve();
   return new Promise((resolve) => {
     const channel = new MessageChannel();
     channel.port1.onmessage = () => {

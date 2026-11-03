@@ -64,7 +64,9 @@ A keyword added to one validator is added to the other. Both must give the same 
 every case in `test/fixtures/manifests.json` — its edits of the example manifest, with the
 places of the errors, and its whole files as bytes (comments, byte-order marks, bad UTF-8,
 nesting, huge numbers), which `formats.ParseManifest` and `src/manifest.ts` must treat
-alike. Both are fuzzed: the browser test does it on every run, and the Go targets go
+alike. Past 1,000 problems the browser stops looking, and keeps the earliest it found;
+both refuse more than 20,000 slides by their number alone; below those limits the two
+report every place alike. Both are fuzzed: the browser test does it on every run, and the Go targets go
 further with `go test ./tools/internal/formats -fuzz=FuzzManifest -fuzztime=60s` (also
 `FuzzTheme`, and `FuzzStrip` in `tools/internal/jsonc`).
 

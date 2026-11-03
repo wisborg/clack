@@ -149,6 +149,8 @@ export class ClackShow extends HTMLElement {
   #shownManifest: Manifest | null = null;
   /** An error event owed to the page: the manifest failed while the show was out of it. */
   #owedError = false;
+  /** The timer that gives the notice its words (see #noticeOn). */
+  #noticeTimer: ReturnType<typeof setTimeout> | undefined;
   readonly #photos = new Photos();
   /** The slide asked for, which may still be loading. */
   #target = -1;
@@ -190,7 +192,7 @@ export class ClackShow extends HTMLElement {
     // Says so when the manifest could not be had; a polite status, read once.
     this.#notice = el("p", "notice", "notice");
     this.#notice.role = "status";
-    this.#notice.hidden = true;
+    this.#noticeOff();
     this.#stage.append(this.#notice);
 
     const below = el("div", "below", "below");
@@ -253,7 +255,7 @@ export class ClackShow extends HTMLElement {
     // through the accessor now. A value the setter refuses is reported, as
     // it would have been had Clack been there, and the show carries on.
     const own = this as unknown as Record<string, unknown>;
-    for (const name of ["slides", "loop"]) {
+    for (const name of ["src", "slides", "loop"]) {
       if (Object.hasOwn(this, name)) {
         const value = own[name];
         delete own[name];
@@ -340,7 +342,7 @@ export class ClackShow extends HTMLElement {
     if (this.#manifest.state === "loading") this.#dropManifest();
     this.#showing = "script";
     this.#shownManifest = null;
-    this.#notice.hidden = true;
+    this.#noticeOff();
     this.#mutations.disconnect();
     this.#setTitle("", null);
     this.#setSlides(slides);
@@ -353,6 +355,15 @@ export class ClackShow extends HTMLElement {
 
   get count(): number {
     return this.#slides.length;
+  }
+
+  /** The src attribute: the manifest to show, or "" for the markup. */
+  get src(): string {
+    return this.getAttribute("src") ?? "";
+  }
+
+  set src(url: string) {
+    this.setAttribute("src", url);
   }
 
   get loop(): boolean {
@@ -417,7 +428,7 @@ export class ClackShow extends HTMLElement {
       const m = this.#manifest;
       switch (m.state) {
         case "loaded":
-          this.#notice.hidden = true;
+          this.#noticeOff();
           if (this.#showing !== "manifest" || this.#shownManifest !== m.manifest) this.#showManifest(m.manifest);
           break;
         case "failed":
@@ -425,13 +436,13 @@ export class ClackShow extends HTMLElement {
           this.#noticeOn();
           break;
         case "loading":
-          this.#notice.hidden = true;
+          this.#noticeOff();
           // What is shown stays -- unless it is slides from script, just
           // withdrawn: then the markup, until the manifest arrives.
           if (this.#showing === "none" || this.#showing === "script") this.#markup();
           break;
         case "none":
-          this.#notice.hidden = true;
+          this.#noticeOff();
           if (this.#showing !== "markup") this.#markup();
           break;
       }
@@ -451,8 +462,13 @@ export class ClackShow extends HTMLElement {
   #startLoad(src: NonNullable<Src>): void {
     const abort = new AbortController();
     this.#manifest = { state: "loading", abort };
+    // Not a URL: failed a task later, as a fetch fails -- a microtask
+    // later would let a page that retries from its error handler loop
+    // through microtasks for ever, and never draw again.
     const loading =
-      "url" in src ? load(src.url, abort.signal) : Promise.reject(new Error(`Clack: src is not a URL`));
+      "url" in src
+        ? load(src.url, abort.signal)
+        : new Promise<Manifest>((_, reject) => setTimeout(() => reject(new Error("Clack: src is not a URL")), 0));
     const name = "url" in src ? src.url : src.bad;
     loading.then(
       (manifest) => {
@@ -518,15 +534,24 @@ export class ClackShow extends HTMLElement {
    */
   #noticeOn(): void {
     if (!this.#notice.hidden) return;
-    // Unseen (but read) while it is empty, so no blank box shows.
+    // Unseen (but read) while it is empty, so no blank box shows. The
+    // words come a moment later -- from this showing's own timer, not one
+    // left from an earlier failure, which would fill it at once.
+    clearTimeout(this.#noticeTimer);
     this.#notice.textContent = "";
     this.#notice.classList.add("empty");
     this.#notice.hidden = false;
-    setTimeout(() => {
+    this.#noticeTimer = setTimeout(() => {
       if (this.#notice.hidden) return;
       this.#notice.textContent = text.noManifest;
       this.#notice.classList.remove("empty");
     }, 100);
+  }
+
+  /** Hides the notice, and the words it was about to be given. */
+  #noticeOff(): void {
+    clearTimeout(this.#noticeTimer);
+    this.#notice.hidden = true;
   }
 
   /**

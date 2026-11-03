@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -812,4 +813,22 @@ func errorPath(e error) string {
 		return je.Path
 	}
 	return ""
+}
+
+func TestManifestLimits(t *testing.T) {
+	_, manifestSchema := schemas(t)
+	raw := readJSON(t, "schema/manifest-1.schema.json")
+	maxItems := lookupPointer(raw, "/properties/slides/maxItems")
+	if fmt.Sprint(maxItems) != strconv.Itoa(MaxSlides) {
+		t.Errorf("the schema's slides.maxItems is %v, MaxSlides %d", maxItems, MaxSlides)
+	}
+	big := append([]byte(`{"format":"clack-manifest/1","slides":[]`), bytes.Repeat([]byte(" "), MaxBytes)...)
+	big = append(big, '}')
+	if _, errs := ParseManifest(manifestSchema, big); len(errs) != 1 || errorPath(errs[0]) != "" {
+		t.Errorf("a manifest over %d bytes: %v", MaxBytes, errs)
+	}
+	many := []byte(`{"format":"clack-manifest/1","slides":[` + strings.Repeat(`{},`, MaxSlides) + `{}]}`)
+	if _, errs := ParseManifest(manifestSchema, many); len(errs) != 1 || errorPath(errs[0]) != "/slides" {
+		t.Errorf("more slides than allowed: %d errors, the first at %v", len(errs), errs)
+	}
 }

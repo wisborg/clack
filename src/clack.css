@@ -319,13 +319,7 @@
   }
 }
 
-/* When the manifest could not be had. Unseen while still empty (it is a
-   status, and is filled a moment after it appears), so no blank box shows. */
-.notice.empty {
-  opacity: 0;
-}
-
-/* When the manifest could not be had. */
+/* When the manifest could not be had: a short status over the stage. */
 .notice {
   grid-area: 1 / 1;
   place-self: center;
@@ -336,4 +330,10 @@
   background: var(--clack-surface);
   color: var(--clack-muted);
   font-size: 13px;
+}
+
+/* Unseen while still empty (it is filled a moment after it appears, to be
+   read out), so no blank box shows; opacity, not display, keeps it read. */
+.notice.empty {
+  opacity: 0;
 }

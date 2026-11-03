@@ -29,13 +29,11 @@ let compiled: { top: Schema; slide: Schema; maxSlides: number } | undefined;
 /** The manifest without its slides' contents (their number is still checked), and a slide. */
 export function rules(): { top: Schema; slide: Schema; maxSlides: number } {
   if (!compiled) {
-    const slides = manifestSchema.properties.slides;
-    // The top: the published schema with the slides' items left out, by
-    // shallow copies of the parts on the way to them.
-    const top = {
-      ...manifestSchema,
-      properties: { ...manifestSchema.properties, slides: { type: slides.type, maxItems: slides.maxItems } },
-    };
+    // The top: the published schema with the slides' items left out --
+    // and every other rule for the slides kept, whatever is added to them
+    // -- by shallow copies of the parts on the way.
+    const { items: _items, ...slides } = manifestSchema.properties.slides;
+    const top = { ...manifestSchema, properties: { ...manifestSchema.properties, slides } };
     compiled = {
       top: new Schema(top),
       slide: new Schema({ $defs: manifestSchema.$defs, $ref: "#/$defs/slide" }),

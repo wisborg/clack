@@ -66,7 +66,6 @@ export function applyLang(e: HTMLElement, lang: string | null): void {
   else e.lang = lang;
 }
 
-/** A slide as given from script: the slide format of a manifest. */
 /** The image types a manifest may name for a source (schema: $defs/image). */
 export type ImageType = "image/jpeg" | "image/png" | "image/webp" | "image/avif" | "image/jxl";
 
@@ -80,9 +79,9 @@ export interface ImageInput {
 
 /**
  * A slide as given from script: the slide format of a manifest (schema:
- * $defs/slide), held to the same rules. The fields Clack uses are typed
- * here; the metadata classes, focus, duration and x- extensions are
- * allowed and checked by the schema as in a manifest.
+ * $defs/slide), held to the same rules. Every field the format has is
+ * named, so a misspelt one does not compile; the metadata classes are
+ * typed loosely here and checked in full by the schema, as in a manifest.
  */
 export interface SlideInput {
   id: string;
@@ -104,7 +103,16 @@ export interface SlideInput {
       }
     | null
     | undefined;
-  [field: string]: unknown;
+  type?: "image" | null | undefined;
+  focus?: { x: number; y: number } | null | undefined;
+  duration?: number | null | undefined;
+  camera?: Record<string, unknown> | null | undefined;
+  time?: { taken?: string | null | undefined } | null | undefined;
+  location?: Record<string, unknown> | null | undefined;
+  technical?: Record<string, unknown> | null | undefined;
+  extra?: { label: string; value: string }[] | null | undefined;
+  /** Extensions, ignored by Clack: x- and anything after it. */
+  [extension: `x-${string}`]: unknown;
 }
 
 const collapse = (s: string | null | undefined): string => (s ?? "").replace(/\s+/g, " ").trim();
@@ -248,12 +256,22 @@ function markupLang(e: Element, host: Element): string | null {
  * document. Anything else -- javascript:, data:, blob:, file: -- is refused.
  */
 export function usableURL(url: string): boolean {
+  return typeof resolveHTTP(url, document.baseURI) === "string";
+}
+
+/**
+ * url resolved against base, if it comes out http or https; else why not.
+ * The one place that says which URLs Clack will use, for slides from a
+ * manifest (resolved against the manifest's URL) and from the page alike.
+ */
+export function resolveHTTP(url: string, base: string): string | { problem: string } {
+  let u: URL;
   try {
-    const protocol = new URL(url, document.baseURI).protocol;
-    return protocol === "https:" || protocol === "http:";
+    u = new URL(url, base);
   } catch {
-    return false;
+    return { problem: "is not a URL that can be resolved" };
   }
+  return u.protocol === "https:" || u.protocol === "http:" ? u.href : { problem: "does not resolve to an http or https URL" };
 }
 
 /**
@@ -325,7 +343,9 @@ export function fromInput(input: readonly (SlideInput | Slide)[]): Keyed[] {
  * contains itself, or nests deeper than a manifest may, is refused. Only an
  * object's own fields are read, as JSON gives them.
  */
-function withoutNulls(v: unknown, fail: (why: string) => never, depth = 1, within = new Set<object>()): unknown {
+// A slide starts three deep, as in a manifest (the document, its slides,
+// the slide), so it may nest exactly as deep as a manifest's may.
+function withoutNulls(v: unknown, fail: (why: string) => never, depth = 3, within = new Set<object>()): unknown {
   if (typeof v !== "object" || v === null) return v;
   if (depth > maxDepth) fail("it nests too deep");
   if (within.has(v)) fail("it contains itself");

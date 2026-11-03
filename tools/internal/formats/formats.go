@@ -77,13 +77,36 @@ func LoadManifest(schema *jsonschema.Schema, path string) (map[string]any, []err
 
 // ParseManifest is LoadManifest for a manifest already in memory.
 func ParseManifest(schema *jsonschema.Schema, data []byte) (map[string]any, []error) {
+	// The browser reads no more than this (src/manifest.ts maxBytes), so
+	// neither do we: a manifest the tools pass is never refused by Clack.
+	if len(data) > MaxBytes {
+		return nil, []error{jsonschema.Error{Path: "", Message: fmt.Sprintf("is larger than %d bytes", MaxBytes)}}
+	}
 	// encoding/json would quietly turn bytes that are not UTF-8 into
 	// U+FFFD; the browser refuses them, and so do we.
 	if !utf8.Valid(data) {
 		return nil, []error{jsonschema.Error{Path: "", Message: "is not UTF-8"}}
 	}
+	// More slides than a manifest may hold settle the verdict at once, and
+	// the browser looks no further (src/manifest.ts checking): nor do we,
+	// so the two report the same place.
+	if v, err := jsonschema.Decode(data); err == nil {
+		if m, ok := v.(map[string]any); ok {
+			if slides, ok := m["slides"].([]any); ok && len(slides) > MaxSlides {
+				return nil, []error{jsonschema.Error{Path: "/slides", Message: fmt.Sprintf("must have at most %d items", MaxSlides)}}
+			}
+		}
+	}
 	return parse(schema, data)
 }
+
+// MaxBytes is the most a manifest may weigh, in the browser as in the
+// tools: 20,000 slides of about 1.6 KB each, sources and full metadata.
+const MaxBytes = 32 << 20
+
+// MaxSlides is the most slides a manifest may hold: the schema's
+// properties.slides.maxItems, which a test keeps it equal to.
+const MaxSlides = 20000
 
 func parse(schema *jsonschema.Schema, data []byte) (map[string]any, []error) {
 	v, err := jsonschema.Decode(data)

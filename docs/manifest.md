@@ -125,8 +125,9 @@ Clack fetches a manifest with the page's cookies only if it is on the page's own
 accepts it only if:
 
 - the response is a success (2xx), served as `application/json` (or another `+json` type);
-- it is at most 16 MB — refused as soon as it is known to be larger, whether the server said
-  so or not;
+- it is at most 32 MB — room for the 20,000 slides a manifest may hold, at about 1.6 KB each
+  with their sources and all their metadata — refused as soon as it is known to be larger,
+  whether the server said so or not (the tools refuse it too);
 - it is UTF-8, strictly (no byte-order mark, no bytes that are not UTF-8), and JSON — plain
   JSON: unlike a theme, a manifest is written by programs, so it has no comments;
 - its values nest at most 64 deep, and no number is too large to hold;

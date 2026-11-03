@@ -16,7 +16,7 @@ import (
 //	    (default 200), after delay ms (at most 10 s). The path is free, so a
 //	    test can give a manifest the URL its relative URLs resolve against.
 //	GET /big?bytes=N&declare=0|1
-//	    N bytes (at most 32 MiB) of JSON whitespace and then {}: a manifest
+//	    N bytes (at most 64 MiB) of JSON whitespace and then {}: a manifest
 //	    too large to accept. declare=1 sends Content-Length; otherwise the
 //	    body is streamed without saying its size.
 //	GET /redirect?to=URL
@@ -82,8 +82,8 @@ func registerEcho(mux *http.ServeMux, log *testImages) {
 	})
 	mux.HandleFunc("GET /big", func(w http.ResponseWriter, r *http.Request) {
 		n, err := strconv.Atoi(r.URL.Query().Get("bytes"))
-		if err != nil || n < 0 || n > 32<<20 {
-			http.Error(w, "bytes is 0 to 32 MiB", http.StatusBadRequest)
+		if err != nil || n < 0 || n > 64<<20 {
+			http.Error(w, "bytes is 0 to 64 MiB", http.StatusBadRequest)
 			return
 		}
 		headers(w, "application/json")
