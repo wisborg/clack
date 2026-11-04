@@ -136,7 +136,8 @@ accepts it only if:
 - it is a valid `clack-manifest/1`, with nothing it does not know (but `x-` properties).
 
 Relative URLs in it are resolved against the URL it was finally fetched from, after any
-redirects. A manifest is refused whole, never shown in part: one bad slide is a bad
+redirects. The manifest's own URL (`src`) must be http or https too: a `blob:` or `data:`
+manifest has no address to resolve its relative URLs against. A manifest is refused whole, never shown in part: one bad slide is a bad
 manifest.
 
 ## Not supported, and why

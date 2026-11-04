@@ -52,8 +52,8 @@ test("readMarkup reads figures, pictures and bare images", () => {
   assertEqual(a!.id, "dawn", "the figure's id");
   assertEqual(a!.alt, "Low tide", "alt");
   assertEqual(a!.width, 3000, "width");
-  assertEqual(a!.srcset, `${abs("a-640.jpg")} 640w, ${abs("a-1280.jpg")} 1280w`, "srcset, its URLs made absolute");
-  assertEqual(a!.full, abs("a-full.jpg"), "the full-size file");
+  assertEqual(a!.srcset, "a-640.jpg 640w, a-1280.jpg 1280w", "srcset, as the page wrote it");
+  assertEqual(a!.full, "a-full.jpg", "the full-size file, as written");
   assertEqual(a!.color, "#8a8d8c", "the placeholder colour");
   assertEqual(a!.title, "Low tide at dawn", "the title, its spaces collapsed");
   assertEqual(a!.credit, "Public domain", "the credit, from <small>");
@@ -68,7 +68,7 @@ test("readMarkup takes the figure's photo, not an image in its caption", () => {
   const host = markup(["figure>figcaption>img[src=icon.png][width=16][height=16][alt=icon]"]);
   host.firstElementChild!.append(build("img[src=photo.jpg][width=3][height=2][alt=Photo]"));
   const [slide] = readMarkup(host, () => {});
-  assertEqual(slide!.src, abs("photo.jpg"), "the photo");
+  assertEqual(slide!.src, "photo.jpg", "the photo");
 });
 
 test("readMarkup never gives two slides one id", () => {
@@ -115,7 +115,7 @@ const ok: SlideInput = {
 
 test("fromInput groups sources by type", () => {
   const [s] = fromInput([ok]);
-  assertEqual(s!.srcset, `${abs("a-640.jpg")} 640w, ${abs("a-1280,x.jpg").replace(",", "%2C")} 1280w`, "the <img>'s, the comma encoded so it cannot end the URL");
+  assertEqual(s!.srcset, `${abs("a-640.jpg")} 640w, ${abs("a-1280,x.jpg")} 1280w`, "the <img>'s, a comma inside a URL left as it is");
   assertEqual(s!.src, abs("a-1280,x.jpg"), "src is the largest");
   assertEqual(s!.alternatives.length, 1, "one <source>");
   assertEqual(s!.alternatives[0]!.srcset, `${abs("a-640.avif")} 640w, ${abs("a-1280.avif")} 1280w`, "the avif sources");
@@ -267,4 +267,26 @@ test("srcsetURLs reads a srcset as browsers do", () => {
   for (const [set, want] of cases) {
     assertEqual(srcsetURLs(set).join(" | "), want.join(" | "), JSON.stringify(set));
   }
+});
+
+test("markup URLs are used as the page wrote them, and an <img> with none has none", () => {
+  const host = markup([
+    "figure>img[width=3][height=2][alt=A][data-src=lazy.jpg]",
+    "figure>img[src=a.jpg][srcset=/cdn/w_640,h_427/a.jpg 640w][width=3][height=2][alt=B]",
+  ]);
+  const [a, b] = readMarkup(host, () => {});
+  assertEqual(a!.src, "", "no src: none, not the page's own address");
+  assertEqual(b!.srcset, "/cdn/w_640,h_427/a.jpg 640w", "a comma inside a CDN-style URL, as written");
+});
+
+test("a URL that srcset could not hold is encoded, and nothing else", () => {
+  const [s] = fromInput([{ ...ok, sources: [{ url: "https://cdn.example.com/w_640,h_427/a.jpg", width: 640 }, { url: "https://cdn.example.com/a.jpg,", width: 1280 }] }]);
+  assertEqual(s!.srcset, "https://cdn.example.com/w_640,h_427/a.jpg 640w, https://cdn.example.com/a.jpg%2C 1280w", "only the trailing comma");
+});
+
+test("a shared object cannot carry a value deeper than a manifest allows", () => {
+  let d: unknown = [];
+  for (let i = 0; i < 58; i++) d = [d]; // fits where first met, under x-a
+  assertThrows(() => fromInput([{ ...ok, "x-a": d, "x-b": [[[[d]]]] }]), TypeError, "too deep where it is met again");
+  assertEqual(fromInput([{ ...ok, "x-a": d, "x-b": d }]).length, 1, "the same depth twice is fine");
 });

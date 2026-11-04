@@ -199,6 +199,8 @@ async function runOne(t: Test): Promise<Result & { timedOut: boolean }> {
     }
   }
   result.ms = performance.now() - start;
+  result.error = wellFormed(result.error);
+  result.skipped = wellFormed(result.skipped);
   return result;
 }
 
@@ -216,6 +218,14 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
       },
     );
   });
+}
+
+/**
+ * Text as WebDriver can carry it: a lone surrogate (a test of them may fail
+ * with one in its message) is replaced, or the whole report is lost.
+ */
+function wellFormed(text: string): string {
+  return text.replace(/\p{Cs}/gu, "\uFFFD");
 }
 
 function describe(e: unknown): string {

@@ -704,9 +704,10 @@ func TestSharedManifestCases(t *testing.T) {
 			Error json.RawMessage `json:"error"`
 		} `json:"cases"`
 		Raw []struct {
-			Name     string `json:"name"`
-			Bytes    []byte `json:"bytes"` // base64, as encoding/json reads []byte
-			Accepted bool   `json:"accepted"`
+			Name     string  `json:"name"`
+			Bytes    []byte  `json:"bytes"` // base64, as encoding/json reads []byte
+			Accepted bool    `json:"accepted"`
+			Error    *string `json:"error"`
 		} `json:"raw"`
 	}
 	if err := json.Unmarshal(raw, &fixture); err != nil {
@@ -774,6 +775,13 @@ func TestSharedManifestCases(t *testing.T) {
 		}
 		if accepted := len(errs) == 0; accepted != c.Accepted {
 			t.Errorf("raw %s: accepted %v, want %v: %v", c.Name, accepted, c.Accepted, errs)
+		}
+		if c.Error != nil {
+			for _, e := range errs {
+				if errorPath(e) != *c.Error {
+					t.Errorf("raw %s: an error at %q, want only %q: %v", c.Name, errorPath(e), *c.Error, e)
+				}
+			}
 		}
 	}
 }

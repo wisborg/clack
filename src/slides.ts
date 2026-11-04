@@ -178,7 +178,7 @@ export function readMarkup(host: Element, warn: (message: string) => void): Keye
       if (srcset) {
         alternatives.push({
           type: source.getAttribute("type") ?? "",
-          srcset: absoluteSrcset(srcset, document.baseURI),
+          srcset,
           media: source.getAttribute("media") ?? "",
         });
       }
@@ -191,7 +191,6 @@ export function readMarkup(host: Element, warn: (message: string) => void): Keye
       warn(`slide ${n}: data-full must be an http, https or relative URL; it is ignored`);
       full = "";
     }
-    if (full) full = absolute(full, document.baseURI);
 
     const caption = figure?.querySelector(":scope > figcaption");
     let title = "";
@@ -208,10 +207,11 @@ export function readMarkup(host: Element, warn: (message: string) => void): Keye
     }
 
     const captionLang = markupLang(caption ?? figure ?? img, host);
-    // As absolute URLs, read against the page as it is now.
-    const base = document.baseURI;
-    const src = absolute(img.getAttribute("src") ?? "", base);
-    const srcset = absoluteSrcset(img.getAttribute("srcset") ?? "", base);
+    // As the page wrote them: the markup's URLs mean what the page's own
+    // images' do, resolved by the browser as theirs are, in the page's own
+    // encoding -- and an <img> with no src is left with none.
+    const src = img.getAttribute("src") ?? "";
+    const srcset = img.getAttribute("srcset") ?? "";
     let key = given ? `id:${id}` : `photo:${src} ${srcset}`;
     for (let k = 2; keys.has(key); k++) {
       key = `${given ? `id:${id}` : `photo:${src} ${srcset}`}#${k}`;
@@ -351,42 +351,52 @@ export function fromInput(input: readonly (SlideInput | Slide)[]): Keyed[] {
  * contains itself, or nests deeper than a manifest may, is refused. Only an
  * object's own fields are read, as JSON gives them.
  */
-// A slide starts three deep, as in a manifest (the document, its slides,
-// the slide), so it may nest exactly as deep as a manifest's may.
-function withoutNulls(
-  v: unknown,
-  fail: (why: string) => never,
-  depth = 3,
-  within = new Set<object>(),
-  copies = new Map<object, unknown>(),
-): unknown {
-  if (typeof v !== "object" || v === null) return v;
-  if (depth > maxDepth) fail("it nests too deep");
-  if (within.has(v)) fail("it contains itself");
-  // An object met again beside itself is copied once, and the copy shared:
-  // sharing at every level must not cost a copy for every way to reach it.
-  const copied = copies.get(v);
-  if (copied !== undefined) return copied;
-  within.add(v);
-  let out: unknown;
-  if (Array.isArray(v)) {
-    out = Array.from(v, (x: unknown) => withoutNulls(x, fail, depth + 1, within, copies));
-  } else {
-    const o: Record<string, unknown> = {};
-    for (const [k, x] of Object.entries(v)) {
-      // A field named __proto__ is copied as a field, not set as a
-      // prototype, so the schema sees -- and refuses -- it, as in a manifest.
-      if (x !== null && x !== undefined) {
-        Object.defineProperty(o, k, { value: withoutNulls(x, fail, depth + 1, within, copies), enumerable: true, writable: true, configurable: true });
-      }
+function withoutNulls(v: unknown, fail: (why: string) => never): unknown {
+  // Each object copied once, with how many levels of containers it holds
+  // (its height), so a copy met again elsewhere is checked for depth where
+  // it now sits -- sharing must not carry a deep value past the limit.
+  const copies = new Map<object, { copy: unknown; height: number }>();
+  const within = new Set<object>();
+  const walk = (x: unknown, depth: number): { copy: unknown; height: number } => {
+    if (typeof x !== "object" || x === null) return { copy: x, height: 0 };
+    if (within.has(x)) fail("it contains itself");
+    const met = copies.get(x);
+    if (met) {
+      if (depth + met.height - 1 > maxDepth) fail("it nests too deep");
+      return met;
     }
-    out = o;
-  }
-  // Only the ancestors of a value count: the same object met again beside
-  // itself is shared, not circular.
-  within.delete(v);
-  copies.set(v, out);
-  return out;
+    if (depth > maxDepth) fail("it nests too deep");
+    within.add(x);
+    let height = 0;
+    let copy: unknown;
+    if (Array.isArray(x)) {
+      copy = Array.from(x, (y: unknown) => {
+        const r = walk(y, depth + 1);
+        height = Math.max(height, r.height);
+        return r.copy;
+      });
+    } else {
+      const o: Record<string, unknown> = {};
+      for (const [k, y] of Object.entries(x)) {
+        if (y === null || y === undefined) continue;
+        const r = walk(y, depth + 1);
+        height = Math.max(height, r.height);
+        // A field named __proto__ is copied as a field, not set as a
+        // prototype, so the schema sees -- and refuses -- it, as in a manifest.
+        Object.defineProperty(o, k, { value: r.copy, enumerable: true, writable: true, configurable: true });
+      }
+      copy = o;
+    }
+    // Only the ancestors of a value count as containing it: met again
+    // beside itself, it is shared, not circular.
+    within.delete(x);
+    const result = { copy, height: height + 1 };
+    copies.set(x, result);
+    return result;
+  };
+  // A slide starts three deep, as in a manifest (the document, its slides,
+  // the slide), so it may nest exactly as deep as a manifest's may.
+  return walk(v, 3).copy;
 }
 
 /**
@@ -436,7 +446,11 @@ export function convert(s: SlideInput, lang: string | null): Keyed {
  * those are percent-encoded, which a server reads the same.
  */
 function srcsetURL(url: string): string {
-  return url.replace(/[,\s]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0"));
+  // Only what a srcset cannot hold is encoded -- whitespace, and commas at
+  // either end, which the srcset parser strips -- so a comma inside a URL
+  // (a CDN's w_640,h_427) is left as the server expects it.
+  const enc = (c: string): string => "%" + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0");
+  return url.replace(/\s/g, enc).replace(/^,+|,+$/g, (m) => "%2C".repeat(m.length));
 }
 
 /** Whether a slide given from script is in Clack's own shape (as the `slides` getter returns), not a manifest's. */
@@ -453,13 +467,13 @@ function isSlide(s: SlideInput | Slide): s is Slide {
 function checkSlide(s: Slide, fail: (why: string) => never): Keyed {
   const str = (v: unknown, what: string): string => (typeof v === "string" ? v : fail(`${what} must be a string`));
   if (!usableURL(s.src)) fail("src must be an http, https or relative URL");
-  // Every URL checked, and kept absolute (see absolute).
-  const base = document.baseURI;
+  // Every URL checked, and kept as given: a slide in Clack's own shape
+  // is one read from a show, its URLs as the show had them.
   const srcsetOK = (set: string, what: string): string => {
     for (const url of srcsetURLs(str(set, what))) {
       if (!usableURL(url)) fail(`${what}: every URL must be http, https or relative`);
     }
-    return absoluteSrcset(set, base);
+    return set;
   };
   if (!Array.isArray(s.alternatives)) fail("alternatives must be an array");
   const full = str(s.full ?? "", "full");
@@ -486,15 +500,15 @@ function checkSlide(s: Slide, fail: (why: string) => never): Keyed {
     alt: s.alt,
     width: s.width,
     height: s.height,
-    src: absolute(s.src, base),
+    src: s.src,
     srcset: srcsetOK(s.srcset ?? "", "srcset"),
     alternatives: s.alternatives.map((a, k) => ({
       type: str(a?.type ?? "", `alternative ${k + 1}: type`),
       media: str(a?.media ?? "", `alternative ${k + 1}: media`),
       srcset: srcsetOK(a?.srcset, `alternative ${k + 1}: srcset`),
     })),
-    full: full && absolute(full, base),
-    page: page && absolute(page, base),
+    full,
+    page,
     color: hexColor(color),
     title: collapse(str(s.title ?? "", "title")),
     credit: collapse(str(s.credit ?? "", "credit")),
@@ -507,12 +521,7 @@ function checkSlide(s: Slide, fail: (why: string) => never): Keyed {
  * to the next comma.
  */
 export function srcsetURLs(srcset: string): string[] {
-  return srcsetCandidates(srcset).map((c) => c.url);
-}
-
-/** A srcset's candidates, each its URL and what follows it (its descriptors), as srcsetURLs reads them. */
-function srcsetCandidates(srcset: string): { url: string; descriptors: string }[] {
-  const out: { url: string; descriptors: string }[] = [];
+  const out: string[] = [];
   let i = 0;
   const space = /[\t\n\f\r ]/;
   while (i < srcset.length) {
@@ -522,12 +531,10 @@ function srcsetCandidates(srcset: string): { url: string; descriptors: string }[
     while (j < srcset.length && !space.test(srcset[j]!)) j++;
     let url = srcset.slice(i, j);
     i = j;
-    let descriptors = "";
     if (url.endsWith(",")) {
       url = url.replace(/,+$/, "");
     } else {
       // Descriptors, to the next comma outside parentheses.
-      const from = i;
       let depth = 0;
       while (i < srcset.length) {
         const c = srcset[i]!;
@@ -536,30 +543,10 @@ function srcsetCandidates(srcset: string): { url: string; descriptors: string }[
         else if (c === "," && depth === 0) break;
         i++;
       }
-      descriptors = srcset.slice(from, i).trim();
     }
-    if (url) out.push({ url, descriptors });
+    if (url) out.push(url);
   }
   return out;
-}
-
-/**
- * A URL made absolute, against base, when the slide is read or given -- so
- * it keeps meaning what it meant then, however the page's address changes
- * before the photo is fetched (a relative src keeps its meaning the same
- * way). One Clack will not use is left as it is: it is refused, or inert,
- * where it is checked.
- */
-function absolute(url: string, base: string): string {
-  const r = resolveHTTP(url, base);
-  return typeof r === "string" ? r : url;
-}
-
-/** A srcset with each of its URLs made absolute. */
-function absoluteSrcset(srcset: string, base: string): string {
-  return srcsetCandidates(srcset)
-    .map((c) => `${srcsetURL(absolute(c.url, base))}${c.descriptors ? ` ${c.descriptors}` : ""}`)
-    .join(", ");
 }
 
 /** v, if it is a colour as #rrggbb; else "". */

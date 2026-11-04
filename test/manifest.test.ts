@@ -70,13 +70,17 @@ test("the shared manifest cases get the verdicts the Go reference gives", () => 
     const bytes = Uint8Array.from(atob(r.bytes), (ch) => ch.charCodeAt(0));
     let accepted = true;
     let why = "";
+    let places: string[] = [];
     try {
       parse(decode(bytes), "https://example.com/m.json");
     } catch (e) {
       accepted = false;
       why = String(e);
+      places = e instanceof ManifestError ? e.problems.map((p) => p.path) : [""];
     }
     if (accepted !== r.accepted) failures.push(`raw ${r.name}: accepted ${accepted}, want ${r.accepted} ${why}`);
+    const want = (r as { error?: string }).error;
+    if (want !== undefined && places.some((p) => p !== want)) failures.push(`raw ${r.name}: errors at ${places.join(", ")}, want only ${JSON.stringify(want)}`);
   }
   assert(failures.length === 0, failures.join("\n"));
 });
@@ -1031,4 +1035,29 @@ test("an object shared at every level is copied once, not once per way to reach 
   s.slides = [slide];
   assert(performance.now() - t0 < 500, "quickly");
   assertEqual(s.count, 1, "and taken");
+});
+
+test("a src that is not http or https is refused, not fetched", async () => {
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    const blob = URL.createObjectURL(new Blob([manifestOf(1)], { type: "application/json" }));
+    const s = document.createElement(tagName);
+    s.append(figure({}));
+    let failed = false;
+    s.addEventListener("error", () => (failed = true));
+    s.setAttribute("src", blob);
+    fixtureEl().append(s);
+    await waitFor(() => failed, "the error");
+    assertEqual(s.count, 1, "the markup, not the blob's slides");
+    URL.revokeObjectURL(blob);
+  } finally {
+    console.error = quiet;
+  }
+});
+
+test("the problem kept first is the earliest in the file, even inside a container", () => {
+  const doc = JSON.parse(`{"format":"clack-manifest/1","slides":[],"x-a":[[1e999],${Array(1000).fill("1e999").join(",")}]}`) as unknown;
+  const paths = check(doc).map((p) => p.path);
+  assert(paths.includes("/x-a/0/0"), `the first, inside the nested array, is kept: ${paths.slice(0, 3).join(" ")}`);
 });

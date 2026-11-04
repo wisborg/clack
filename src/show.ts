@@ -13,7 +13,7 @@ import { photoKey, Photos, type Photo } from "./images";
 import { canStep, drawnWidth, preloadOrder, step } from "./nav";
 import { describeProblems, load, ManifestError, type Manifest } from "./manifest";
 import { maxProblems } from "./rules";
-import { applyLang, fromInput, readMarkup, type Keyed, type Slide, type SlideInput } from "./slides";
+import { applyLang, fromInput, readMarkup, resolveHTTP, type Keyed, type Slide, type SlideInput } from "./slides";
 import { listen } from "./swipe";
 
 export const tagName = "clack-show";
@@ -41,17 +41,26 @@ type ManifestState =
   | { state: "loaded"; manifest: Manifest }
   | { state: "failed" };
 
-/** What src names: none, a URL resolved against the page, or text that is not a URL (to fail, once, like any other). */
+/**
+ * What src names: none, an http(s) URL resolved against the page, or text
+ * that is not one (to fail, once, like any other). Like every URL Clack
+ * uses, it must be http or https: a blob: or data: manifest has no address
+ * to resolve its own relative URLs against.
+ */
 type Src = { url: string } | { bad: string } | null;
 
 function resolveSrc(src: string | null): Src {
   if (!src) return null;
-  try {
-    return { url: new URL(src, document.baseURI).href };
-  } catch {
-    return { bad: src };
-  }
+  const r = resolveHTTP(src, document.baseURI);
+  return typeof r === "string" ? { url: r } : { bad: src };
 }
+
+/** Where the slides on screen came from (see ClackShow.#showing). */
+type Showing =
+  | { from: "none" }
+  | { from: "markup" }
+  | { from: "manifest"; manifest: Manifest }
+  | { from: "script"; slides: Keyed[] };
 
 const sameSrc = (a: Src, b: Src): boolean =>
   a === b || (a !== null && b !== null && ("url" in a ? "url" in b && a.url === b.url : "bad" in b && a.bad === b.bad));
@@ -118,8 +127,8 @@ export class ClackShow extends HTMLElement {
   #slides: Keyed[] = [];
   readonly #indexById = new Map<string, number>();
   readonly #indexByKey = new Map<string, number>();
-  /** Set while slides given from script are shown, in place of the manifest's or the markup's. */
-  #scripted = false;
+  /** Slides given from script, shown in place of the manifest's or the markup's while set. */
+  #script: Keyed[] | null = null;
   /** The manifest's title, which names the show when the page has not. */
   #showTitle = "";
   /** The warnings of the last reading of the markup: one is given again only if it went away and came back. */
@@ -143,10 +152,12 @@ export class ClackShow extends HTMLElement {
    * -- not a move, not slides from script withdrawn.
    */
   #manifest: ManifestState = { state: "none" };
-  /** Where the slides on screen came from. */
-  #showing: "none" | "markup" | "manifest" | "script" = "none";
-  /** The manifest whose slides are on screen, when they are a manifest's; null otherwise. */
-  #shownManifest: Manifest | null = null;
+  /**
+   * Where the slides on screen came from -- nothing yet, the markup, or
+   * which manifest or which slides from script -- in one field, so what is
+   * shown is never said twice.
+   */
+  #showing: Showing = { from: "none" };
   /** An error event owed to the page: the manifest failed while the show was out of it. */
   #owedError = false;
   /** The timer that gives the notice its words (see #noticeOn). */
@@ -268,7 +279,7 @@ export class ClackShow extends HTMLElement {
     }
     // The markup is read again on a reconnect, in case it changed while
     // the show was out of the page and not watching it.
-    if (this.#showing === "markup") this.#showing = "none";
+    if (this.#showing.from === "markup") this.#showing = { from: "none" };
     this.#ready = true;
     this.#render();
   }
@@ -330,22 +341,8 @@ export class ClackShow extends HTMLElement {
    * markup, at once.
    */
   set slides(input: readonly (SlideInput | Slide)[] | null) {
-    if (input === null) {
-      this.#scripted = false;
-      this.#render();
-      return;
-    }
-    const slides = fromInput(input);
-    this.#scripted = true;
-    // A manifest on its way is dropped, and fetched again if these slides
-    // are withdrawn; one already loaded is kept, to come back to at once.
-    if (this.#manifest.state === "loading") this.#dropManifest();
-    this.#showing = "script";
-    this.#shownManifest = null;
-    this.#noticeOff();
-    this.#mutations.disconnect();
-    this.#setTitle("", null);
-    this.#setSlides(slides);
+    this.#script = input === null ? null : fromInput(input);
+    this.#render();
   }
 
   /** The slide being shown, or about to be: its photo may still be loading. */
@@ -422,30 +419,45 @@ export class ClackShow extends HTMLElement {
    * itself, so a page that answers by giving slides of its own keeps them.
    */
   #render(): void {
-    if (!this.#ready) return;
-    if (!this.#scripted) {
-      if (this.#src && this.#manifest.state === "none") this.#startLoad(this.#src);
-      const m = this.#manifest;
-      switch (m.state) {
-        case "loaded":
-          this.#noticeOff();
-          if (this.#shownManifest !== m.manifest) this.#showManifest(m.manifest);
-          break;
-        case "failed":
-          if (this.#showing !== "markup") this.#markup();
-          this.#noticeOn();
-          break;
-        case "loading":
-          this.#noticeOff();
-          // What is shown stays -- unless it is slides from script, just
-          // withdrawn: then the markup, until the manifest arrives.
-          if (this.#showing === "none" || this.#showing === "script") this.#markup();
-          break;
-        case "none":
-          this.#noticeOff();
-          if (this.#showing !== "markup") this.#markup();
-          break;
+    // Slides from script are the page's own, and shown at once, even out
+    // of the page (as before Clack has loaded): they need no fetch.
+    if (this.#script) {
+      const script = this.#script;
+      if (this.#showing.from !== "script" || this.#showing.slides !== script) {
+        // A manifest on its way is dropped, and fetched again if these
+        // slides are withdrawn; one already loaded is kept, to come back to.
+        if (this.#manifest.state === "loading") this.#dropManifest();
+        this.#showing = { from: "script", slides: script };
+        this.#noticeOff();
+        this.#mutations.disconnect();
+        this.#setTitle("", null);
+        this.#setSlides(script);
       }
+      return;
+    }
+    if (!this.#ready) return;
+    if (this.#src && this.#manifest.state === "none") this.#startLoad(this.#src);
+    const m = this.#manifest;
+    const shown = this.#showing;
+    switch (m.state) {
+      case "loaded":
+        this.#noticeOff();
+        if (shown.from !== "manifest" || shown.manifest !== m.manifest) this.#showManifest(m.manifest);
+        break;
+      case "failed":
+        if (shown.from !== "markup") this.#markup();
+        this.#noticeOn();
+        break;
+      case "loading":
+        this.#noticeOff();
+        // What is shown stays -- unless it is slides from script, just
+        // withdrawn: then the markup, until the manifest arrives.
+        if (shown.from === "none" || shown.from === "script") this.#markup();
+        break;
+      case "none":
+        this.#noticeOff();
+        if (shown.from !== "markup") this.#markup();
+        break;
     }
     if (this.#owedError) {
       this.#owedError = false;
@@ -509,8 +521,7 @@ export class ClackShow extends HTMLElement {
   }
 
   #showManifest(m: Manifest): void {
-    this.#showing = "manifest";
-    this.#shownManifest = m;
+    this.#showing = { from: "manifest", manifest: m };
     this.#mutations.disconnect();
     this.#setTitle(m.title, m.lang);
     this.#setSlides(m.slides);
@@ -518,8 +529,7 @@ export class ClackShow extends HTMLElement {
 
   /** The markup's slides, followed as the markup changes. */
   #markup(): void {
-    this.#showing = "markup";
-    this.#shownManifest = null;
+    this.#showing = { from: "markup" };
     this.#setTitle("", null);
     this.#mutations.observe(this, { childList: true, subtree: true, attributes: true, characterData: true });
     this.#readMarkup();

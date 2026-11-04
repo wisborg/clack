@@ -87,12 +87,6 @@ func ParseManifest(schema *jsonschema.Schema, data []byte) (map[string]any, []er
 	if !utf8.Valid(data) {
 		return nil, []error{jsonschema.Error{Path: "", Message: "is not UTF-8"}}
 	}
-	// encoding/json turns an escaped lone surrogate (\ud800 alone) into
-	// U+FFFD, so two different keys could become one; the browser keeps
-	// them apart. Every string must be well-formed Unicode, here as there.
-	if at := loneSurrogate(data); at >= 0 {
-		return nil, []error{jsonschema.Error{Path: "", Message: fmt.Sprintf("has a lone surrogate escape at byte %d: not well-formed Unicode", at)}}
-	}
 	v, err := jsonschema.Decode(data)
 	if err != nil {
 		return nil, []error{err}
@@ -104,6 +98,14 @@ func ParseManifest(schema *jsonschema.Schema, data []byte) (map[string]any, []er
 		if slides, ok := m["slides"].([]any); ok && len(slides) > MaxSlides {
 			return nil, []error{jsonschema.Error{Path: "/slides", Message: fmt.Sprintf("must have at most %d items", MaxSlides)}}
 		}
+	}
+	// encoding/json turns an escaped lone surrogate (\ud800 alone) into
+	// U+FFFD, so two different keys could become one; the browser keeps
+	// them apart. Every string must be well-formed Unicode, here as there;
+	// found in the raw text, it is reported against the whole file, as
+	// the browser reports it too.
+	if at := loneSurrogate(data); at >= 0 {
+		return nil, []error{jsonschema.Error{Path: "", Message: fmt.Sprintf("has a string that is not well-formed Unicode (a lone surrogate escape at byte %d)", at)}}
 	}
 	return check(schema, v)
 }

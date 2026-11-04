@@ -29,6 +29,7 @@ other formats — is a slide, and so is each child `<img>`. Anything else is lef
   caption already describes it.
 - `width` and `height` are required: they keep the photo's space before it loads, so the
   page never jumps. Without them Clack warns and assumes 3:2.
+- `src` and `srcset` are used as the page wrote them, as the page's own images use theirs.
 - `srcset` (with `w` descriptors) offers the photo at several sizes. Clack works out the
   `sizes` itself, from the size each photo is drawn at.
 - The `<figcaption>` is the title; a `<small>` inside it is the credit. Together they are the
@@ -100,7 +101,9 @@ script may give, and nothing else: URLs in printable ASCII (a space is `%20`), a
 sixteen sources, the image types listed, no property the format does not know (but `x-`
 ones), each width of each type once. A `null` or `undefined` field is taken as absent; an
 object may be used twice (`full` may be one of the `sources`). Slides are plain data, as
-JSON gives it: only an object's own fields are read. Relative URLs are relative to the page. Or the
+JSON gives it: only an object's own fields are read. Relative URLs are relative to the page
+as it is when the slides are given, and kept so, however the page's address changes later.
+Or the
 shape is Clack's own, as the `slides` getter returns it — so `show.slides =
 show.slides.filter(…)` works, the photos of the slides kept are not fetched again, and each
 slide keeps its languages (`lang`, `captionLang`, `creditLang`). Sources are grouped by

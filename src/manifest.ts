@@ -38,74 +38,78 @@ export class ManifestError extends Error {
   }
 }
 
-export { maxDepth };
-
 type Obj = Record<string, unknown>;
 const isObject = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /**
  * What is wrong with a parsed value before any schema is consulted, added
  * to out: values nested more than maxDepth deep; numbers too large to be
- * held (JSON.parse makes them Infinity); and strings, keys included, that
+ * held (JSON.parse makes them Infinity); and strings, names included, that
  * are not well-formed Unicode -- a lone surrogate, which the tools' decoder
- * would turn into U+FFFD, merging keys that are different here
- * (formats.ParseManifest refuses the same). v sits at path, depth deep in
- * its document; the contents of skip, if v holds it, are left for a later
- * call. Walks with a stack of its own, so no document can exhaust the call
- * stack; only containers are put on it, and a path is spelt out only for a
- * value with a problem. Stops once out holds maxProblems.
+ * would turn into U+FFFD, merging names that differ here. That last is
+ * reported once, against the whole file, as the tools report it (they find
+ * it in the raw text, before any path exists); the message says where.
+ *
+ * v sits at path, depth deep in its document; skip, if v holds it, is left
+ * for a later call. The walk is depth first, in the document's order, so
+ * once out holds maxProblems the ones kept are the earliest. It keeps its
+ * own stack -- each container and how far through it -- so no document can
+ * exhaust the call stack, and spells out a path only for a problem.
  */
-function checkJSON(v: unknown, path: string, depth: number, out: Problem[], skip?: unknown): void {
-  interface Item {
-    v: object;
-    parent: Item | null;
-    key: string | number;
+function checkJSON(v: unknown, path: string, depth: number, out: Problem[], lone: Problem[], skip?: unknown): void {
+  interface Frame {
+    c: object;
+    keys: string[] | null; // null for an array, walked by index
+    i: number;
+    key: string | number; // its key in the frame below
     depth: number;
   }
-  const step = (key: string | number): string => (typeof key === "number" ? String(key) : escape(key));
-  const pathOf = (it: Item): string => (it.parent ? `${pathOf(it.parent)}/${step(it.key)}` : path);
-  // A problem, while there is room for one.
-  const report = (at: () => string, message: string): void => {
-    if (out.length < maxProblems) out.push({ path: at(), message });
+  const frames: Frame[] = [];
+  const pathTo = (key?: string | number): string => {
+    let p = path;
+    for (let f = 1; f < frames.length; f++) p += `/${escapeStep(frames[f]!.key)}`;
+    return key === undefined ? p : `${p}/${escapeStep(key)}`;
   };
-  // Looks at one value; true if it is a container, to be looked into.
-  const look = (x: unknown, at: () => string): x is object => {
-    if (typeof x === "number") {
-      if (!Number.isFinite(x)) report(at, "is a number too large to hold");
-      return false;
-    }
-    if (typeof x === "string") {
-      if (loneSurrogate.test(x)) report(at, "is not well-formed Unicode (a lone surrogate)");
-      return false;
-    }
-    return typeof x === "object" && x !== null;
+  const report = (where: string, message: string): void => {
+    if (out.length < maxProblems) out.push({ path: where, message });
   };
-  if (!look(v, () => path)) return;
-  const stack: Item[] = [{ v, parent: null, key: "", depth }];
-  while (stack.length > 0 && out.length < maxProblems) {
-    const it = stack.pop()!;
-    if (it.depth > maxDepth) {
-      report(() => pathOf(it), `nests more than ${maxDepth} deep`);
+  // Into lone, not out: like the tools, which find it before anything else
+  // can be checked, a lone surrogate is then the only problem reported.
+  const surrogate = (where: () => string): void => {
+    if (lone.length === 0) lone.push({ path: "", message: `has a string that is not well-formed Unicode (a lone surrogate), at ${where() || "(the whole file)"}` });
+  };
+  const enter = (c: object, key: string | number, d: number): void => {
+    frames.push({ c, keys: Array.isArray(c) ? null : Object.keys(c), i: 0, key, depth: d });
+  };
+  // The value itself.
+  if (typeof v === "number" && !Number.isFinite(v)) report(path, "is a number too large to hold");
+  if (typeof v === "string" && loneSurrogate.test(v)) surrogate(() => path);
+  if (typeof v !== "object" || v === null || v === skip) return;
+  if (depth > maxDepth) return report(path, `nests more than ${maxDepth} deep`);
+  enter(v, "", depth);
+  while (frames.length > 0 && out.length < maxProblems) {
+    const f = frames[frames.length - 1]!;
+    const n = f.keys ? f.keys.length : (f.c as unknown[]).length;
+    if (f.i >= n) {
+      frames.pop();
       continue;
     }
-    if (it.v === skip) continue;
-    // Looked at in the document's order; the containers among them are
-    // then put on the stack last to first, so they come off in that order
-    // too, and the problems kept are the earliest.
-    const inner: Item[] = [];
-    if (Array.isArray(it.v)) {
-      it.v.forEach((x: unknown, k) => {
-        if (look(x, () => `${pathOf(it)}/${k}`)) inner.push({ v: x, parent: it, key: k, depth: it.depth + 1 });
-      });
-    } else {
-      for (const [k, x] of Object.entries(it.v)) {
-        if (loneSurrogate.test(k)) report(() => `${pathOf(it)}/${escape(k)}`, "has a name that is not well-formed Unicode (a lone surrogate)");
-        if (look(x, () => `${pathOf(it)}/${escape(k)}`)) inner.push({ v: x, parent: it, key: k, depth: it.depth + 1 });
-      }
+    const key: string | number = f.keys ? f.keys[f.i]! : f.i;
+    f.i++;
+    if (typeof key === "string" && loneSurrogate.test(key)) surrogate(() => pathTo(key));
+    const x: unknown = (f.c as Record<string | number, unknown>)[key];
+    if (typeof x === "number") {
+      if (!Number.isFinite(x)) report(pathTo(key), "is a number too large to hold");
+    } else if (typeof x === "string") {
+      if (loneSurrogate.test(x)) surrogate(() => pathTo(key));
+    } else if (typeof x === "object" && x !== null && x !== skip) {
+      if (f.depth + 1 > maxDepth) report(pathTo(key), `nests more than ${maxDepth} deep`);
+      else enter(x, key, f.depth + 1);
     }
-    for (let i = inner.length - 1; i >= 0; i--) stack.push(inner[i]!);
   }
 }
+
+const escapeStep = (key: string | number): string => (typeof key === "number" ? String(key) : escape(key));
 
 /** A surrogate standing alone: in Unicode mode, a pair is one code point and does not match. */
 const loneSurrogate = /\p{Cs}/u;
@@ -138,11 +142,13 @@ function* checking(doc: unknown): Generator<void, Problem[]> {
 
   // Shape first: a value too deep or too large is all that is reported.
   const shape: Problem[] = [];
-  checkJSON(doc, "", 1, shape, all ?? undefined);
+  const lone: Problem[] = [];
+  checkJSON(doc, "", 1, shape, lone, all ?? undefined);
   for (let i = 0; slides && i < slides.length && !full(shape); i++) {
-    checkJSON(slides[i], `/slides/${i}`, 3, shape);
+    checkJSON(slides[i], `/slides/${i}`, 3, shape, lone);
     yield;
   }
+  if (lone.length > 0) return lone;
   if (shape.length > 0) return sortProblems(shape);
 
   const problems = top.validate(doc, false);
