@@ -826,6 +826,10 @@ func errorPath(e error) string {
 func TestManifestLimits(t *testing.T) {
 	_, manifestSchema := schemas(t)
 	raw := readJSON(t, "schema/manifest-1.schema.json")
+	pattern := lookupPointer(raw, "/$defs/slide/properties/placeholder/properties/thumbhash/pattern")
+	if pattern != ThumbHashPattern.String() {
+		t.Errorf("the schema's thumbhash pattern is %v, ThumbHashPattern %s", pattern, ThumbHashPattern)
+	}
 	maxItems := lookupPointer(raw, "/properties/slides/maxItems")
 	if fmt.Sprint(maxItems) != strconv.Itoa(MaxSlides) {
 		t.Errorf("the schema's slides.maxItems is %v, MaxSlides %d", maxItems, MaxSlides)

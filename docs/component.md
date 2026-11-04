@@ -40,7 +40,10 @@ other formats — is a slide, and so is each child `<img>`. Anything else is lef
   others are added before it; a repeated id is renumbered, with a warning.
 - `data-full` names the full-size file, for the full-size view still to come (an http,
   https or relative URL; anything else is ignored, with a warning). `data-color` is a
-  colour (`#rrggbb`) that holds the first photo's place while it loads.
+  colour (`#rrggbb`) that holds the first photo's place while it loads, and
+  `data-thumbhash` a [ThumbHash](https://evanw.github.io/thumbhash/) in base64, painted over
+  it as a blurred impression of the photo (one that is not a ThumbHash is ignored, with a
+  warning).
 
 **Give the images `loading="lazy"`.** Without script the markup is a plain list of photos —
 what a reader without script, or a search engine, sees. With script, Clack draws its own
@@ -99,14 +102,15 @@ The shape is a manifest's slide (see [`manifest.md`](manifest.md)), checked by t
 rules as in a manifest — the manifest schema's own — so whatever a manifest may hold, a
 script may give, and nothing else: URLs in printable ASCII (a space is `%20`), at most
 sixteen sources, the image types listed, no property the format does not know (but `x-`
-ones), each width of each type once. A `null` or `undefined` field is taken as absent; an
+ones), each width of each type once, a `thumbhash` that is one. A `null` or `undefined` field is taken as absent; an
 object may be used twice (`full` may be one of the `sources`). Slides are plain data, as
 JSON gives it: only an object's own fields are read. Relative URLs are relative to the page
 as it is when the slides are given, and kept so, however the page's address changes later.
 Or the
 shape is Clack's own, as the `slides` getter returns it — so `show.slides =
 show.slides.filter(…)` works, the photos of the slides kept are not fetched again, and each
-slide keeps its languages (`lang`, `captionLang`, `creditLang`). Sources are grouped by
+slide keeps its languages (`lang`, `captionLang`, `creditLang`); its `color` and `thumbhash`
+are as `data-color` and `data-thumbhash` above. Sources are grouped by
 type into a `<picture>`; the untyped ones make the `<img>`. A slide that cannot be shown
 throws a `TypeError` that names it and says why, and the show keeps the slides it had. While slides come from
 script neither the markup nor a manifest is read; `show.slides = null` goes back to them.

@@ -70,6 +70,12 @@ report every place alike. Both are fuzzed: the browser test does it on every run
 further with `go test ./tools/internal/formats -fuzz=FuzzManifest -fuzztime=60s` (also
 `FuzzTheme`, and `FuzzStrip` in `tools/internal/jsonc`).
 
+The ThumbHash decoder (`src/thumbhash.ts`) is held to the tools' (`tools/internal/thumbhash`)
+by `test/fixtures/thumbhash.json`, which that package's tests write
+(`go test ./tools/internal/thumbhash -update`) and then keep: the same base64 read, the same
+hashes refused, the same pixels drawn give or take one. Both follow the format's reference
+implementation, and carry its MIT notice (also in `NOTICE`); keep it with them.
+
 ## Dependencies
 
 Every build or test dependency is in `DEPENDENCIES.md` with its reason and how it is

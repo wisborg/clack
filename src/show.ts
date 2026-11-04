@@ -15,6 +15,7 @@ import { describeProblems, load, ManifestError, type Manifest } from "./manifest
 import { maxProblems } from "./rules";
 import { applyLang, fromInput, readMarkup, resolveHTTP, type Keyed, type Slide, type SlideInput } from "./slides";
 import { listen } from "./swipe";
+import { draw, parse } from "./thumbhash";
 
 export const tagName = "clack-show";
 
@@ -100,6 +101,25 @@ function el<K extends keyof HTMLElementTagNameMap>(name: K, className: string, p
   e.className = className;
   if (part) e.setAttribute("part", part);
   return e;
+}
+
+/**
+ * A canvas painted with what a ThumbHash draws: a few pixels a side, which
+ * the stylesheet stretches over the photo's place, the browser's smoothing
+ * finishing the blur. Null if the hash is not one (it was checked when the
+ * slide was read) or the canvas cannot be drawn on.
+ */
+function impression(hash: string): HTMLCanvasElement | null {
+  const t = hash ? parse(hash) : null;
+  if (!t) return null;
+  const { width, height, rgba } = draw(t);
+  const canvas = el("canvas", "impression");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) return null;
+  context.putImageData(new ImageData(rgba, width, height), 0, 0);
+  return canvas;
 }
 
 /** A transition in progress, and what must happen when it ends, however it ends. */
@@ -791,7 +811,8 @@ export class ClackShow extends HTMLElement {
 
   /**
    * Holds the place of the first photo while it loads: a frame of its
-   * proportions, in its colour if it has one, so the page does not wait on
+   * proportions, in its colour if it has one, and with its impression
+   * painted from its ThumbHash if it has one, so the page does not wait on
    * an empty box. The photo fades in over it.
    */
   #placeholder(index: number): void {
@@ -807,7 +828,10 @@ export class ClackShow extends HTMLElement {
       // Checked as #rrggbb when the slide was read.
       figure.style.setProperty("--clack-placeholder", slide.color);
     }
-    figure.append(el("div", "fill"));
+    const fill = el("div", "fill");
+    const canvas = impression(slide.thumbhash);
+    if (canvas) fill.append(canvas);
+    figure.append(fill);
     this.#stage.append(figure);
     this.#figure = figure;
   }

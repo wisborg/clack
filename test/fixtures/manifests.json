@@ -293,6 +293,55 @@
       "error": "/slides/0/placeholder/thumbhash"
     },
     {
+      "name": "a thumbhash with its padding",
+      "set": {
+        "/slides/0/placeholder/thumbhash": "HBmGHQoHgIePeHeHeIB/BwmZECIwVVEmJQ=="
+      },
+      "error": null
+    },
+    {
+      "name": "a thumbhash without its padding",
+      "set": {
+        "/slides/0/placeholder/thumbhash": "HBmGHQoHgIePeHeHeIB/BwmZECIwVVEmJQ"
+      },
+      "error": null
+    },
+    {
+      "name": "a thumbhash with its padding begun but not finished",
+      "set": {
+        "/slides/0/placeholder/thumbhash": "HBmGHQoHgIePeHeHeIB/BwmZECIwVVEmJQ="
+      },
+      "error": "/slides/0/placeholder/thumbhash"
+    },
+    {
+      "name": "a thumbhash a fifth of a group long",
+      "set": {
+        "/slides/0/placeholder/thumbhash": "3OcRJYB4d3h/iIeHeEh3eIhw+j3AA"
+      },
+      "error": "/slides/0/placeholder/thumbhash"
+    },
+    {
+      "name": "a thumbhash cut short of its terms",
+      "set": {
+        "/slides/0/placeholder/thumbhash": "3OcRJYB4d3h/iIeH"
+      },
+      "error": "/slides/0/placeholder/thumbhash"
+    },
+    {
+      "name": "a thumbhash cut to its header",
+      "set": {
+        "/slides/0/placeholder/thumbhash": "3OcRJYB4"
+      },
+      "error": "/slides/0/placeholder/thumbhash"
+    },
+    {
+      "name": "a thumbhash of no width",
+      "set": {
+        "/slides/0/placeholder/thumbhash": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+      },
+      "error": "/slides/0/placeholder/thumbhash"
+    },
+    {
       "name": "a placeholder colour by name",
       "set": {
         "/slides/0/placeholder/color": "grey"

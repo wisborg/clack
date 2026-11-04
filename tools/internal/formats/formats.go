@@ -23,6 +23,7 @@ import (
 
 	"github.com/wisborg/clack/tools/internal/jsonc"
 	"github.com/wisborg/clack/tools/internal/jsonschema"
+	"github.com/wisborg/clack/tools/internal/thumbhash"
 )
 
 // Builtins are the themes Clack ships, by the name a theme extends them
@@ -527,9 +528,16 @@ func Contrast(fg, bg RGBA) float64 {
 	return (a + 0.05) / (b + 0.05)
 }
 
+// ThumbHashPattern is the schema's pattern for a placeholder's thumbhash
+// (TestManifestLimits keeps the two the same). A thumbhash it refuses is
+// the schema's to report; CheckManifest looks only at those it accepts.
+var ThumbHashPattern = regexp.MustCompile(`^[A-Za-z0-9+/]{6,64}={0,2}$`)
+
 // CheckManifest returns what is wrong with a valid manifest that its schema
-// cannot say: slide ids that repeat, and sources of one slide that repeat a
-// width and type, which leaves the browser two files to choose between.
+// cannot say: slide ids that repeat; sources of one slide that repeat a
+// width and type, which leaves the browser two files to choose between;
+// and a thumbhash that is not one -- not base64 as a browser reads it, or
+// too short for what its header says -- which would quietly paint nothing.
 func CheckManifest(doc map[string]any) []error {
 	var errs []error
 	slides, _ := doc["slides"].([]any)
@@ -572,6 +580,12 @@ func CheckManifest(doc map[string]any) []error {
 				errs = append(errs, jsonschema.Error{Path: fmt.Sprintf("/slides/%d/sources/%d", i, k), Message: "another source has the same width and type"})
 			}
 			widths[key] = true
+		}
+		placeholder, _ := slide["placeholder"].(map[string]any)
+		if s, ok := placeholder["thumbhash"].(string); ok && ThumbHashPattern.MatchString(s) {
+			if hash, err := thumbhash.FromBase64(s); err != nil || thumbhash.Check(hash) != nil {
+				errs = append(errs, jsonschema.Error{Path: fmt.Sprintf("/slides/%d/placeholder/thumbhash", i), Message: "is not a ThumbHash"})
+			}
 		}
 	}
 	return errs

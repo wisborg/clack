@@ -2,8 +2,9 @@
  * Slides: what Clack shows, read from the host page's markup or given from
  * script, in one shape whatever the source.
  */
-import { checkSources, maxDepth, rules } from "./rules";
+import { checkSlideRules, maxDepth, rules } from "./rules";
 import { describeProblems, sortProblems } from "./schema";
+import { parse } from "./thumbhash";
 
 /** One `<source>` of a `<picture>`: the same photo in another format. */
 export interface Alternative {
@@ -30,6 +31,8 @@ export interface Slide {
   page: string;
   /** A colour to paint while the photo loads, or "". */
   color: string;
+  /** A ThumbHash in base64, painted while the photo loads, or "". */
+  thumbhash: string;
   title: string;
   credit: string;
   /**
@@ -184,6 +187,12 @@ export function readMarkup(host: Element, warn: (message: string) => void): Keye
       }
     }
 
+    let thumbhash = img.dataset["thumbhash"] ?? "";
+    if (thumbhash && !parse(thumbhash)) {
+      warn(`slide ${n}: data-thumbhash is not a ThumbHash in base64; it is ignored`);
+      thumbhash = "";
+    }
+
     // Checked now, though nothing uses it yet: the full-size view will,
     // and a URL that is not http(s) must never reach a link or an image.
     let full = img.dataset["full"] ?? "";
@@ -233,6 +242,7 @@ export function readMarkup(host: Element, warn: (message: string) => void): Keye
       full,
       page: "",
       color: hexColor(img.dataset["color"]),
+      thumbhash,
       title,
       credit,
     });
@@ -323,7 +333,7 @@ export function fromInput(input: readonly (SlideInput | Slide)[]): Keyed[] {
     // serialisers write one.
     const slide = withoutNulls(s, fail) as SlideInput;
     const problems = rules().slide.validate(slide, false);
-    checkSources(slide, "", problems);
+    checkSlideRules(slide, "", problems);
     if (problems.length > 0) {
       sortProblems(problems);
       fail(describeProblems(problems, 3).map((l) => l.trim().replace(/^\(the whole file\)/, "the slide")).join("; "));
@@ -436,6 +446,7 @@ export function convert(s: SlideInput, lang: string | null): Keyed {
     full: s.full?.url ?? "",
     page: s.page ?? "",
     color: hexColor(color),
+    thumbhash: s.placeholder?.thumbhash ?? "",
     title: collapse(s.description?.title),
     credit: collapse(s.description?.credit),
   };
@@ -481,6 +492,8 @@ function checkSlide(s: Slide, fail: (why: string) => never): Keyed {
   const page = str(s.page ?? "", "page");
   if (page && !usableURL(page)) fail("the page URL must be http, https or relative");
   const color = str(s.color ?? "", "color");
+  const thumbhash = str(s.thumbhash ?? "", "thumbhash");
+  if (thumbhash && !parse(thumbhash)) fail("thumbhash must be a ThumbHash in base64");
   // A slide read from the show and given back keeps its identity, so its
   // photo is not fetched again; the caller makes sure keys are unique.
   const { key, lang, captionLang, creditLang } = s as Partial<Keyed>;
@@ -510,6 +523,7 @@ function checkSlide(s: Slide, fail: (why: string) => never): Keyed {
     full,
     page,
     color: hexColor(color),
+    thumbhash,
     title: collapse(str(s.title ?? "", "title")),
     credit: collapse(str(s.credit ?? "", "credit")),
   };

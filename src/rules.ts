@@ -9,6 +9,7 @@
  */
 import manifestSchema from "../schema/manifest-1.schema.json";
 import { Schema, type Problem } from "./schema";
+import { parse } from "./thumbhash";
 
 /**
  * How deeply a manifest's values may nest -- far beyond any real manifest,
@@ -44,15 +45,30 @@ export function rules(): { top: Schema; slide: Schema; maxSlides: number } {
 }
 
 /**
- * The rule beyond the schema for one slide: it offers each width of each
- * type once (tools/internal/formats.CheckManifest). Only what the schema
- * accepts is considered -- a width that is a whole number from 1 to
- * 100,000; a type that is absent or a string -- and the rest is left to
- * the schema's own errors, so the tools and the browser report the same
- * places whatever the values (Go and JavaScript spell -0 or 1e20
- * differently).
+ * The rules beyond the schema for one slide (tools/internal/formats
+ * .CheckManifest): it offers each width of each type once, and its
+ * thumbhash, if it has one, is one. Only what the schema accepts is
+ * considered, and the rest left to the schema's own errors, so that each
+ * problem is reported once, in the same place by the tools and the browser.
  */
-export function checkSources(slide: unknown, path: string, out: Problem[]): void {
+export function checkSlideRules(slide: unknown, path: string, out: Problem[]): void {
+  checkSources(slide, path, out);
+  const hash = (slide as { placeholder?: { thumbhash?: unknown } | null } | null)?.placeholder?.thumbhash;
+  thumbhashPattern ??= new RegExp(manifestSchema.$defs.slide.properties.placeholder.properties.thumbhash.pattern);
+  if (typeof hash === "string" && thumbhashPattern.test(hash) && !parse(hash)) {
+    out.push({ path: `${path}/placeholder/thumbhash`, message: "is not a ThumbHash" });
+  }
+}
+
+let thumbhashPattern: RegExp | undefined;
+
+/**
+ * Each width of each type once: considering only a width that is a whole
+ * number from 1 to 100,000 and a type that is absent or a string, so the
+ * tools and the browser report the same places whatever the values (Go and
+ * JavaScript spell -0 or 1e20 differently).
+ */
+function checkSources(slide: unknown, path: string, out: Problem[]): void {
   const sources = (slide as { sources?: unknown } | null)?.sources;
   if (!Array.isArray(sources)) return;
   const seen = new Set<string>();

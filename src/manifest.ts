@@ -9,7 +9,7 @@
  * schema in Go (tools/internal/formats), and both are held to the same
  * cases (test/fixtures/manifests.json).
  */
-import { checkSources, maxDepth, maxProblems, rules } from "./rules";
+import { checkSlideRules, maxDepth, maxProblems, rules } from "./rules";
 import { describeProblems, escape, sortProblems, type Problem } from "./schema";
 import { convert, resolveHTTP, type Keyed, type SlideInput } from "./slides";
 
@@ -157,15 +157,15 @@ function* checking(doc: unknown): Generator<void, Problem[]> {
     const s = slides[i];
     const path = `/slides/${i}`;
     slide.validate(s, false, path, problems);
-    // Beyond the schema: ids are unique in the manifest, and a slide
-    // offers each width of each type once.
+    // Beyond the schema: ids are unique in the manifest, and the rules
+    // for each slide alone.
     const id = (s as { id?: unknown } | null)?.id;
     if (typeof id === "string") {
       const first = ids.get(id);
       if (first !== undefined) problems.push({ path: `${path}/id`, message: `"${id}" is also the id of slide ${first}` });
       else ids.set(id, i);
     }
-    checkSources(s, path, problems);
+    checkSlideRules(s, path, problems);
     yield;
   }
   // In order of place, as the tools list them.

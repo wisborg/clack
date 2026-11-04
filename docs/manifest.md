@@ -177,6 +177,9 @@ cost: the browser and Go parse them differently, and photo hosts have no need of
 
 ## Checks beyond the schema
 
-The schema cannot say everything; Clack also refuses a manifest whose slide ids repeat, and
-one with two sources of one slide at the same width and type. The tools check the examples
-the same way (`tools/internal/formats`).
+The schema cannot say everything; Clack also refuses a manifest whose slide ids repeat, one
+with two sources of one slide at the same width and type, and one with a `thumbhash` that
+is not a ThumbHash, which would otherwise paint nothing. A ThumbHash is read as a browser's
+`atob` reads base64 — its padding complete or left off, any bits past its last byte ignored
+— and must hold every term its header says it has, for an image of some width and height.
+The tools check the examples the same way (`tools/internal/formats`).
