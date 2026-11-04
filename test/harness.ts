@@ -184,6 +184,10 @@ export async function run(): Promise<Report> {
 }
 
 async function runOne(t: Test): Promise<Result & { timedOut: boolean }> {
+  // Tell the server which test is starting, so that if the browser itself
+  // goes down the run can say during which (tools/internal/browsertest).
+  // A beacon is sent even if the page dies straight after.
+  navigator.sendBeacon("/progress", t.name);
   testStartSeq = nextSeq;
   const start = performance.now();
   const result = { name: t.name, passed: false, skipped: "", error: "", ms: 0, timedOut: false };

@@ -291,9 +291,13 @@ func cmdTest(ctx context.Context, args []string) error {
 			failed = true
 			continue
 		}
+		srv.Started() // a fresh start for each browser
 		report, err := browsertest.Run(ctx, b, driver, srv.URL, !*headed, os.Stderr)
 		if err != nil {
 			fmt.Printf("%-8s FAILED to run: %v\n", b.Name, err)
+			if last := srv.Started(); last != "" {
+				fmt.Printf("%-8s it went down during %q\n", "", last)
+			}
 			failed = true
 			continue
 		}

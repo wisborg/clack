@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/wisborg/clack/tools/internal/webdriver"
@@ -54,6 +55,20 @@ const page = `<!doctype html>
 type Server struct {
 	URL string
 	srv *http.Server
+
+	mu   sync.Mutex
+	last string // the test last started (see Started)
+}
+
+// Started returns the name of the test the page last said it was
+// starting, and forgets it: when a browser goes down mid-run, the test it
+// went down in.
+func (s *Server) Started() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	last := s.last
+	s.last = ""
+	return last
 }
 
 // Serve starts the test server on a free loopback port. files maps a path
@@ -68,7 +83,19 @@ func Serve(files map[string][]byte) (*Server, error) {
 	images := &testImages{}
 	images.register(mux)
 	registerEcho(mux, images)
-	return serveOn(l, mux, files)
+	srv, err := serveOn(l, mux, files)
+	if err != nil {
+		return nil, err
+	}
+	mux.HandleFunc("POST /progress", func(w http.ResponseWriter, r *http.Request) {
+		name, _ := io.ReadAll(io.LimitReader(r.Body, 1000))
+		srv.mu.Lock()
+		srv.last = string(name)
+		srv.mu.Unlock()
+		securityHeaders(w)
+		w.WriteHeader(http.StatusNoContent)
+	})
+	return srv, nil
 }
 
 // ServeDirs starts a server on addr ("127.0.0.1:0" for any free port)
