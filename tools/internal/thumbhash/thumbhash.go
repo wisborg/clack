@@ -39,6 +39,21 @@ import (
 	"strings"
 )
 
+// The arithmetic here is written so that every machine gets the same bytes
+// from the same image. Go lets a compiler fuse x*y + z into one
+// instruction, rounded once instead of twice, and arm64's does so where
+// amd64's does not; so each product that is then added is converted to
+// float64, which the language defines as rounding it, and which prevents
+// the fusion. The conversions look redundant, and are not.
+//
+// What is left is noise in the last bits of the cosines, which a term that
+// is in truth zero -- every term of a flat channel, many of a symmetric
+// image -- is made of; and a zero term normalises to exactly half way
+// between two four-bit values, where noise would choose the side. So a
+// term within noise of zero is taken as zero (the reference encoder keeps
+// the noise; what it makes of such a term is arbitrary either way).
+const noise = 1e-9
+
 // Encode returns the ThumbHash of an image w by h pixels, at most 100 on a
 // side, given as RGBA bytes (not premultiplied), row by row.
 func Encode(w, h int, rgba []byte) ([]byte, error) {
@@ -53,9 +68,9 @@ func Encode(w, h int, rgba []byte) ([]byte, error) {
 	var avgR, avgG, avgB, avgA float64
 	for i := range w * h {
 		alpha := float64(rgba[i*4+3]) / 255
-		avgR += alpha / 255 * float64(rgba[i*4])
-		avgG += alpha / 255 * float64(rgba[i*4+1])
-		avgB += alpha / 255 * float64(rgba[i*4+2])
+		avgR += float64(alpha / 255 * float64(rgba[i*4]))
+		avgG += float64(alpha / 255 * float64(rgba[i*4+1]))
+		avgB += float64(alpha / 255 * float64(rgba[i*4+2]))
 		avgA += alpha
 	}
 	if avgA > 0 {
@@ -79,9 +94,9 @@ func Encode(w, h int, rgba []byte) ([]byte, error) {
 	a := make([]float64, w*h)
 	for i := range w * h {
 		alpha := float64(rgba[i*4+3]) / 255
-		r := avgR*(1-alpha) + alpha/255*float64(rgba[i*4])
-		g := avgG*(1-alpha) + alpha/255*float64(rgba[i*4+1])
-		b := avgB*(1-alpha) + alpha/255*float64(rgba[i*4+2])
+		r := float64(avgR*(1-alpha)) + float64(alpha/255*float64(rgba[i*4]))
+		g := float64(avgG*(1-alpha)) + float64(alpha/255*float64(rgba[i*4+1]))
+		b := float64(avgB*(1-alpha)) + float64(alpha/255*float64(rgba[i*4+2]))
 		l[i] = (r + g + b) / 3
 		p[i] = (r+g)/2 - b
 		q[i] = r - g
@@ -101,10 +116,13 @@ func Encode(w, h int, rgba []byte) ([]byte, error) {
 				for y := range h {
 					fy := math.Cos(math.Pi / float64(h) * float64(cy) * (float64(y) + 0.5))
 					for x := range w {
-						f += channel[x+y*w] * fx[x] * fy
+						f += float64(channel[x+y*w] * fx[x] * fy)
 					}
 				}
 				f /= float64(w * h)
+				if math.Abs(f) < noise {
+					f = 0
+				}
 				if cx > 0 || cy > 0 {
 					ac = append(ac, f)
 					scale = math.Max(scale, math.Abs(f))
@@ -115,7 +133,7 @@ func Encode(w, h int, rgba []byte) ([]byte, error) {
 		}
 		if scale > 0 {
 			for i := range ac {
-				ac[i] = 0.5 + 0.5/scale*ac[i]
+				ac[i] = 0.5 + float64(0.5/scale*ac[i])
 			}
 		}
 		return dc, ac, scale
@@ -138,7 +156,7 @@ func Encode(w, h int, rgba []byte) ([]byte, error) {
 		}
 		return 0
 	}
-	header24 := round(63*lDC) | round(31.5+31.5*pDC)<<6 | round(31.5+31.5*qDC)<<12 | round(31*lScale)<<18 | b2i(hasAlpha)<<23
+	header24 := round(63*lDC) | round(31.5+float64(31.5*pDC))<<6 | round(31.5+float64(31.5*qDC))<<12 | round(31*lScale)<<18 | b2i(hasAlpha)<<23
 	side := lx
 	if isLandscape {
 		side = ly
@@ -170,29 +188,38 @@ func Encode(w, h int, rgba []byte) ([]byte, error) {
 	return hash, nil
 }
 
-// AspectRatio is the approximate width / height of the image a hash is of.
-func AspectRatio(hash []byte) (float64, error) {
+// shape returns how many luminance terms a hash has across and down, as
+// its header gives them, which is also the shape of the image it is of; an
+// error if it is too short to say, or says there are none.
+func shape(hash []byte) (across, down int, err error) {
 	if len(hash) < 5 {
-		return 0, errors.New("thumbhash: too short")
+		return 0, 0, errors.New("thumbhash: too short")
 	}
-	header := hash[3]
+	side := int(hash[3] & 7)
 	hasAlpha := hash[2]&0x80 != 0
 	isLandscape := hash[4]&0x80 != 0
-	var lx, ly int
-	switch {
-	case isLandscape && hasAlpha:
-		lx, ly = 5, int(header&7)
-	case isLandscape:
-		lx, ly = 7, int(header&7)
-	case hasAlpha:
-		lx, ly = int(header&7), 5
-	default:
-		lx, ly = int(header&7), 7
+	long := 7
+	if hasAlpha {
+		long = 5
 	}
-	if lx == 0 || ly == 0 {
-		return 0, errors.New("thumbhash: no size")
+	if isLandscape {
+		across, down = long, side
+	} else {
+		across, down = side, long
 	}
-	return float64(lx) / float64(ly), nil
+	if across == 0 || down == 0 {
+		return 0, 0, errors.New("thumbhash: no size")
+	}
+	return across, down, nil
+}
+
+// AspectRatio is the approximate width / height of the image a hash is of.
+func AspectRatio(hash []byte) (float64, error) {
+	across, down, err := shape(hash)
+	if err != nil {
+		return 0, err
+	}
+	return float64(across) / float64(down), nil
 }
 
 // FromBase64 reads a hash written in base64 as a browser's atob does
@@ -228,10 +255,7 @@ type terms struct {
 // says it holds, or of no width or height. A hash may run on past its
 // terms; the rest is ignored, as the reference ignores it.
 func read(hash []byte) (*terms, error) {
-	if len(hash) < 5 {
-		return nil, errors.New("thumbhash: too short")
-	}
-	ratio, err := AspectRatio(hash)
+	across, down, err := shape(hash)
 	if err != nil {
 		return nil, err
 	}
@@ -243,23 +267,13 @@ func read(hash []byte) (*terms, error) {
 		qDC:      float64((header24>>12)&63)/31.5 - 1,
 		hasAlpha: header24>>23 != 0,
 		aDC:      1,
-		ratio:    ratio,
+		lx:       max(3, across),
+		ly:       max(3, down),
+		ratio:    float64(across) / float64(down),
 	}
 	lScale := float64((header24>>18)&31) / 31
 	pScale := float64((header16>>3)&63) / 63
 	qScale := float64((header16>>9)&63) / 63
-	isLandscape := header16>>15 != 0
-	switch {
-	case isLandscape && t.hasAlpha:
-		t.lx, t.ly = 5, header16&7
-	case isLandscape:
-		t.lx, t.ly = 7, header16&7
-	case t.hasAlpha:
-		t.lx, t.ly = header16&7, 5
-	default:
-		t.lx, t.ly = header16&7, 7
-	}
-	t.lx, t.ly = max(3, t.lx), max(3, t.ly)
 	aScale := 0.0
 	acStart := 5
 	if t.hasAlpha {
@@ -350,7 +364,7 @@ func Decode(hash []byte) (w, h int, rgba []byte, err error) {
 					cx = 1
 				}
 				for fy2 := fy[cy] * 2; cx*ly < lx*(ly-cy); cx, j = cx+1, j+1 {
-					l += t.lAC[j] * fx[cx] * fy2
+					l += float64(t.lAC[j] * fx[cx] * fy2)
 				}
 			}
 			for cy, j := 0, 0; cy < 3; cy++ {
@@ -360,8 +374,8 @@ func Decode(hash []byte) (w, h int, rgba []byte, err error) {
 				}
 				for fy2 := fy[cy] * 2; cx < 3-cy; cx, j = cx+1, j+1 {
 					f := fx[cx] * fy2
-					p += t.pAC[j] * f
-					q += t.qAC[j] * f
+					p += float64(t.pAC[j] * f)
+					q += float64(t.qAC[j] * f)
 				}
 			}
 			if hasAlpha {
@@ -371,12 +385,13 @@ func Decode(hash []byte) (w, h int, rgba []byte, err error) {
 						cx = 1
 					}
 					for fy2 := fy[cy] * 2; cx < 5-cy; cx, j = cx+1, j+1 {
-						a += t.aAC[j] * fx[cx] * fy2
+						a += float64(t.aAC[j] * fx[cx] * fy2)
 					}
 				}
 			}
-			b := l - 2.0/3.0*p
-			r := (3*l - b + q) / 2
+			// Unfused, as above, so every machine draws the same.
+			b := l - float64(2.0/3.0*p)
+			r := (float64(3*l) - b + q) / 2
 			g := r - q
 			rgba[i], rgba[i+1], rgba[i+2], rgba[i+3] = clamp(r), clamp(g), clamp(b), clamp(a)
 		}

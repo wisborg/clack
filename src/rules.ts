@@ -54,13 +54,27 @@ export function rules(): { top: Schema; slide: Schema; maxSlides: number } {
 export function checkSlideRules(slide: unknown, path: string, out: Problem[]): void {
   checkSources(slide, path, out);
   const hash = (slide as { placeholder?: { thumbhash?: unknown } | null } | null)?.placeholder?.thumbhash;
-  thumbhashPattern ??= new RegExp(manifestSchema.$defs.slide.properties.placeholder.properties.thumbhash.pattern);
-  if (typeof hash === "string" && thumbhashPattern.test(hash) && !parse(hash)) {
+  if (typeof hash === "string" && thumbhashForm().test(hash) && !parse(hash)) {
     out.push({ path: `${path}/placeholder/thumbhash`, message: "is not a ThumbHash" });
   }
 }
 
 let thumbhashPattern: RegExp | undefined;
+
+/** The schema's pattern for a thumbhash, compiled as Schema compiles a pattern. */
+function thumbhashForm(): RegExp {
+  return (thumbhashPattern ??= new RegExp(manifestSchema.$defs.slide.properties.placeholder.properties.thumbhash.pattern, "u"));
+}
+
+/**
+ * Whether text is a ThumbHash as a manifest may give one: of the form the
+ * schema allows, and a hash that can be drawn. Markup and script are held
+ * to the same, so a value is taken or refused alike wherever it is given
+ * -- and only a few dozen characters are ever decoded.
+ */
+export function isThumbHash(text: string): boolean {
+  return thumbhashForm().test(text) && parse(text) !== null;
+}
 
 /**
  * Each width of each type once: considering only a width that is a whole

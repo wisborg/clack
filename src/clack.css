@@ -141,6 +141,18 @@
   height: 100%;
 }
 
+/* With cover, the place it holds is the whole frame, the photo cropped to
+   fill it, and its impression cropped alike. */
+:host([fit="cover"]) .fill {
+  width: 100cqw;
+  height: 100cqh;
+  aspect-ratio: auto;
+}
+
+:host([fit="cover"]) .fill .impression {
+  object-fit: cover;
+}
+
 /* A photo that could not be loaded keeps its place, and says so. */
 .missing {
   box-sizing: border-box;

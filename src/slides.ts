@@ -2,9 +2,8 @@
  * Slides: what Clack shows, read from the host page's markup or given from
  * script, in one shape whatever the source.
  */
-import { checkSlideRules, maxDepth, rules } from "./rules";
+import { checkSlideRules, isThumbHash, maxDepth, rules } from "./rules";
 import { describeProblems, sortProblems } from "./schema";
-import { parse } from "./thumbhash";
 
 /** One `<source>` of a `<picture>`: the same photo in another format. */
 export interface Alternative {
@@ -188,7 +187,7 @@ export function readMarkup(host: Element, warn: (message: string) => void): Keye
     }
 
     let thumbhash = img.dataset["thumbhash"] ?? "";
-    if (thumbhash && !parse(thumbhash)) {
+    if (thumbhash && !isThumbHash(thumbhash)) {
       warn(`slide ${n}: data-thumbhash is not a ThumbHash in base64; it is ignored`);
       thumbhash = "";
     }
@@ -493,7 +492,7 @@ function checkSlide(s: Slide, fail: (why: string) => never): Keyed {
   if (page && !usableURL(page)) fail("the page URL must be http, https or relative");
   const color = str(s.color ?? "", "color");
   const thumbhash = str(s.thumbhash ?? "", "thumbhash");
-  if (thumbhash && !parse(thumbhash)) fail("thumbhash must be a ThumbHash in base64");
+  if (thumbhash && !isThumbHash(thumbhash)) fail("thumbhash must be a ThumbHash in base64");
   // A slide read from the show and given back keeps its identity, so its
   // photo is not fetched again; the caller makes sure keys are unique.
   const { key, lang, captionLang, creditLang } = s as Partial<Keyed>;
