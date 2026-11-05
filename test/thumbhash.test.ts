@@ -100,6 +100,15 @@ test("a slide's ThumbHash from script must be one, in either shape", () => {
   refuses(() => fromInput([{ ...s!, thumbhash: "3OcRJYB4" }]), /ThumbHash/, "Clack's shape, cut short");
   refuses(() => fromInput([{ ...s!, thumbhash: overlong() }]), /ThumbHash/, "Clack's shape, longer than a manifest may give");
   refuses(() => fromInput([{ ...s!, thumbhash: 7 as unknown as string }]), /thumbhash/, "not a string");
+  // Optional in what is given, as in the type: a slide built without one.
+  const { thumbhash: _, ...without } = s!;
+  assertEqual(fromInput([without])[0]!.thumbhash, "", "Clack's shape without one");
+});
+
+test("a slide's colour from script must be one, as its ThumbHash must", () => {
+  const [s] = fromInput([{ id: "a", alt: "A", width: 3, height: 2, sources: [{ url: "a.jpg", width: 3 }], placeholder: { color: "#336699" } }]);
+  assertEqual(fromInput([s!])[0]!.color, "#336699", "given back");
+  refuses(() => fromInput([{ ...s!, color: "grey" }]), /colou?r/, "a colour by name");
 });
 
 test("the first photo's place is painted from its ThumbHash while it loads", async () => {
@@ -133,18 +142,24 @@ test("a placeholder drawn again while the photo loads keeps its impression", asy
   await settledOn(show, "1 of 1");
 });
 
-test("with cover, the impression holds the whole frame the photo will fill", async () => {
-  const show = makeShow([{ delay: 700 }], { fit: "cover" });
+test("with cover, the impression holds the whole frame, cropped as the photo will be", async () => {
+  // A panorama, 10:1: wider than any ThumbHash can say (7:1 at most), so
+  // the hash's own proportions would crop it differently from the photo.
+  const show = makeShow([{ width: 1000, height: 100, delay: 700 }], { fit: "cover" });
   show.querySelector("img")!.dataset["thumbhash"] = gradient();
   await waitFor(() => !!show.shadowRoot!.querySelector(".placeholder .fill canvas"), "the impression");
   const held = part(show, ".placeholder .fill").getBoundingClientRect();
-  assertEqual(getComputedStyle(part(show, ".placeholder canvas")).objectFit, "cover", "cropped as the photo is");
+  const box = part(show, ".placeholder canvas").getBoundingClientRect();
+  // What object-fit: cover makes of a 10:1 photo in the frame: as tall as
+  // the frame, ten times as wide, centred.
+  const width = Math.max(held.width, held.height * 10);
+  const height = Math.max(held.height, held.width / 10);
+  const near = (a: number, b: number): boolean => Math.abs(a - b) < 1;
+  assert(near(box.width, width) && near(box.height, height), `the impression is ${box.width}×${box.height}, the photo will be ${width}×${height}`);
+  assert(near(box.left + box.width / 2, held.left + held.width / 2) && near(box.top + box.height / 2, held.top + held.height / 2), "centred, as the photo will be");
   await settledOn(show, "1 of 1");
   const photo = figures(show)[0]!.querySelector("img")!.getBoundingClientRect();
-  assert(
-    Math.abs(held.width - photo.width) < 1 && Math.abs(held.height - photo.height) < 1,
-    `the place held, ${held.width}×${held.height}, is the photo's, ${photo.width}×${photo.height}`,
-  );
+  assert(near(held.width, photo.width) && near(held.height, photo.height), `the place held, ${held.width}×${held.height}, is the photo's, ${photo.width}×${photo.height}`);
 });
 
 test("a slide without a ThumbHash has no impression painted", async () => {

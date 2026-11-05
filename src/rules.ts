@@ -8,8 +8,8 @@
  * held to exactly the same rules as a manifest's.
  */
 import manifestSchema from "../schema/manifest-1.schema.json";
-import { Schema, type Problem } from "./schema";
-import { parse } from "./thumbhash";
+import { pattern, Schema, type Problem } from "./schema";
+import { parse, type ThumbHash } from "./thumbhash";
 
 /**
  * How deeply a manifest's values may nest -- far beyond any real manifest,
@@ -54,26 +54,45 @@ export function rules(): { top: Schema; slide: Schema; maxSlides: number } {
 export function checkSlideRules(slide: unknown, path: string, out: Problem[]): void {
   checkSources(slide, path, out);
   const hash = (slide as { placeholder?: { thumbhash?: unknown } | null } | null)?.placeholder?.thumbhash;
-  if (typeof hash === "string" && thumbhashForm().test(hash) && !parse(hash)) {
+  if (typeof hash === "string" && thumbhashForm().test(hash) && !thumbhashOf(hash)) {
     out.push({ path: `${path}/placeholder/thumbhash`, message: "is not a ThumbHash" });
   }
 }
 
 let thumbhashPattern: RegExp | undefined;
 
-/** The schema's pattern for a thumbhash, compiled as Schema compiles a pattern. */
+/** The schema's pattern for a thumbhash, compiled as the schema compiles it. */
 function thumbhashForm(): RegExp {
-  return (thumbhashPattern ??= new RegExp(manifestSchema.$defs.slide.properties.placeholder.properties.thumbhash.pattern, "u"));
+  return (thumbhashPattern ??= pattern(manifestSchema.$defs.slide.properties.placeholder.properties.thumbhash.pattern));
 }
 
 /**
- * Whether text is a ThumbHash as a manifest may give one: of the form the
- * schema allows, and a hash that can be drawn. Markup and script are held
- * to the same, so a value is taken or refused alike wherever it is given
- * -- and only a few dozen characters are ever decoded.
+ * Hashes read already, each once: markup is read again on every change
+ * to it, and a placeholder painted from what was read. Bounded, as the
+ * texts come from the page; past the bound it starts again.
  */
-export function isThumbHash(text: string): boolean {
-  return thumbhashForm().test(text) && parse(text) !== null;
+const hashes = new Map<string, ThumbHash | null>();
+
+/** The hash in text, read; null if it is not one, in form or in content. */
+function thumbhashOf(text: string): ThumbHash | null {
+  let t = hashes.get(text);
+  if (t === undefined) {
+    if (hashes.size >= 1000) hashes.clear();
+    t = parse(text);
+    hashes.set(text, t);
+  }
+  return t;
+}
+
+/**
+ * The hash in text, if it is a ThumbHash as a manifest may give one: of
+ * the form the schema allows, and a hash that can be drawn; else null.
+ * Markup and script are held to the same, so a value is taken or refused
+ * alike wherever it is given -- and only a few dozen characters are ever
+ * decoded.
+ */
+export function readThumbHash(text: string): ThumbHash | null {
+  return thumbhashForm().test(text) ? thumbhashOf(text) : null;
 }
 
 /**

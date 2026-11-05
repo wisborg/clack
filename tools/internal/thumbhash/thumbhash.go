@@ -40,19 +40,64 @@ import (
 )
 
 // The arithmetic here is written so that every machine gets the same bytes
-// from the same image. Go lets a compiler fuse x*y + z into one
-// instruction, rounded once instead of twice, and arm64's does so where
-// amd64's does not; so each product that is then added is converted to
-// float64, which the language defines as rounding it, and which prevents
-// the fusion. The conversions look redundant, and are not.
+// from the same image, and draws the same pixels from the same hash. Go
+// lets a compiler fuse x*y + z into one instruction, rounded once instead
+// of twice, and arm64's does so where amd64's (but for GOAMD64=v3) does
+// not; so each product that is then added is converted to float64, which
+// the language defines as rounding it, and which prevents the fusion. The
+// conversions look redundant, and are not. The cosines are our own
+// (cosPi), for the same reason: math.Cos is fused differently on each,
+// and differs in its last bit for about one argument in a hundred here.
+// TestCosinesAreTheSameEverywhere holds every cosine to a checksum.
 //
-// What is left is noise in the last bits of the cosines, which a term that
-// is in truth zero -- every term of a flat channel, many of a symmetric
-// image -- is made of; and a zero term normalises to exactly half way
-// between two four-bit values, where noise would choose the side. So a
-// term within noise of zero is taken as zero (the reference encoder keeps
-// the noise; what it makes of such a term is arbitrary either way).
+// What is left is rounding in the last bits, of which a term that is in
+// truth zero -- every term of a flat channel, many of a symmetric image --
+// is made; and a zero term normalises to exactly half way between two
+// four-bit values, where those bits would choose the side. So a term
+// within noise of zero is taken as zero (the reference encoder keeps the
+// noise; what it makes of such a term is arbitrary either way).
 const noise = 1e-9
+
+// cosPi returns cos(πn/d), for n >= 0 and d > 0, the same to the last bit
+// on every machine and within an ulp or two of the true value. The angle
+// is reduced exactly, in integers, to at most π/4 -- where cos(π/2) is 0,
+// not math.Cos's 6e-17 -- and a series evaluated there without fusion.
+func cosPi(n, d int) float64 {
+	r := n % (2 * d)
+	if r > d {
+		r = 2*d - r // cos(2π - a) = cos(a)
+	}
+	sign := 1.0
+	if 2*r > d {
+		r, sign = d-r, -1 // cos(π - a) = -cos(a)
+	}
+	if 4*r > d {
+		// Past π/4: cos(a) = sin(π/2 - a), and π/2 - πr/d = π(d-2r)/2d.
+		x := math.Pi * float64(d-2*r) / float64(2*d)
+		return sign * float64(x*series(float64(x*x), sinTerms[:]))
+	}
+	x := math.Pi * float64(r) / float64(d)
+	return sign * series(float64(x*x), cosTerms[:])
+}
+
+// series evaluates terms[0] + x2*terms[1] + x2²*terms[2] + ..., each
+// product rounded before it is added.
+func series(x2 float64, terms []float64) float64 {
+	p := 0.0
+	for k := len(terms) - 1; k >= 0; k-- {
+		p = terms[k] + float64(x2*p)
+	}
+	return p
+}
+
+// The Taylor series of cos and of sin(x)/x, to well past float64's
+// precision for |x| <= π/4 (the next terms are below 1e-21).
+var (
+	cosTerms = [...]float64{1, -1.0 / 2, 1.0 / 24, -1.0 / 720, 1.0 / 40320, -1.0 / 3628800, 1.0 / 479001600,
+		-1.0 / 87178291200, 1.0 / 20922789888000, -1.0 / 6402373705728000, 1.0 / 2432902008176640000}
+	sinTerms = [...]float64{1, -1.0 / 6, 1.0 / 120, -1.0 / 5040, 1.0 / 362880, -1.0 / 39916800, 1.0 / 6227020800,
+		-1.0 / 1307674368000, 1.0 / 355687428096000, -1.0 / 121645100408832000, 1.0 / 51090942171709440000}
+)
 
 // Encode returns the ThumbHash of an image w by h pixels, at most 100 on a
 // side, given as RGBA bytes (not premultiplied), row by row.
@@ -111,10 +156,10 @@ func Encode(w, h int, rgba []byte) ([]byte, error) {
 			for cx := 0; cx*ny < nx*(ny-cy); cx++ {
 				f := 0.0
 				for x := range w {
-					fx[x] = math.Cos(math.Pi / float64(w) * float64(cx) * (float64(x) + 0.5))
+					fx[x] = cosPi(cx*(2*x+1), 2*w)
 				}
 				for y := range h {
-					fy := math.Cos(math.Pi / float64(h) * float64(cy) * (float64(y) + 0.5))
+					fy := cosPi(cy*(2*y+1), 2*h)
 					for x := range w {
 						f += float64(channel[x+y*w] * fx[x] * fy)
 					}
@@ -353,10 +398,10 @@ func Decode(hash []byte) (w, h int, rgba []byte, err error) {
 		for x := 0; x < w; x, i = x+1, i+4 {
 			l, p, q, a := t.lDC, t.pDC, t.qDC, t.aDC
 			for cx := range fx {
-				fx[cx] = math.Cos(math.Pi / float64(w) * (float64(x) + 0.5) * float64(cx))
+				fx[cx] = cosPi(cx*(2*x+1), 2*w)
 			}
 			for cy := range fy {
-				fy[cy] = math.Cos(math.Pi / float64(h) * (float64(y) + 0.5) * float64(cy))
+				fy[cy] = cosPi(cy*(2*y+1), 2*h)
 			}
 			for cy, j := 0, 0; cy < ly; cy++ {
 				cx := 0

@@ -110,7 +110,8 @@ Or the
 shape is Clack's own, as the `slides` getter returns it — so `show.slides =
 show.slides.filter(…)` works, the photos of the slides kept are not fetched again, and each
 slide keeps its languages (`lang`, `captionLang`, `creditLang`); its `color` and `thumbhash`
-are as `data-color` and `data-thumbhash` above. Sources are grouped by
+are as a manifest's `placeholder` has them, and one that is not refused like any other bad
+value (unlike `data-color` and `data-thumbhash`, which are ignored with a warning). Sources are grouped by
 type into a `<picture>`; the untyped ones make the `<img>`. A slide that cannot be shown
 throws a `TypeError` that names it and says why, and the show keeps the slides it had. While slides come from
 script neither the markup nor a manifest is read; `show.slides = null` goes back to them.

@@ -2,6 +2,8 @@ package thumbhash
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
@@ -298,4 +300,62 @@ func FuzzDecode(f *testing.F) {
 			t.Fatalf("decoded %d×%d with %d bytes", w, h, len(rgba))
 		}
 	})
+}
+
+// TestCosines checks cosPi against math.Cos over every argument the
+// encoder and decoder use, and at the edges of its reduction.
+func TestCosines(t *testing.T) {
+	// math.Cos is the reference only as far as its argument is exact: π·n/d
+	// is rounded, by up to an ulp of the angle. So, closely, in the first
+	// quadrant, where that is small; and over the whole circle, as closely
+	// as the reference allows.
+	worst, whole := 0.0, 0.0
+	for d := 1; d <= 200; d++ {
+		for n := 0; n <= 8*(2*100); n++ {
+			got, want := cosPi(n, d), math.Cos(math.Pi*float64(n%(2*d))/float64(d))
+			if 2*n <= d {
+				worst = math.Max(worst, math.Abs(got-want))
+			}
+			whole = math.Max(whole, math.Abs(got-want))
+		}
+	}
+	if worst > 5e-16 || whole > 2e-15 {
+		t.Errorf("cosPi is %g from math.Cos at worst in the first quadrant, %g in all", worst, whole)
+	}
+	for _, c := range []struct {
+		n, d int
+		want float64
+	}{{0, 1, 1}, {1, 2, 0}, {1, 1, -1}, {3, 2, 0}, {2, 1, 1}, {1, 4, math.Sqrt2 / 2}} {
+		if got := cosPi(c.n, c.d); math.Abs(got-c.want) > 2e-16 {
+			t.Errorf("cos(π·%d/%d) = %g, want %g", c.n, c.d, got, c.want)
+		}
+	}
+	if cosPi(1, 2) != 0 || cosPi(3, 2) != 0 {
+		t.Error("cos(π/2) is not exactly 0")
+	}
+}
+
+// cosineSum is the checksum of every cosine the encoder and decoder can
+// ask for -- cos(π·c·(2i+1)/2n) for n up to 100 and c below 8 -- bit for bit.
+const cosineSum = "ad2cecf4d63056002da482ba731dab4084ce36f9d8c7f5f0d840ade3d064005b"
+
+// TestCosinesAreTheSameEverywhere holds those cosines to the checksum
+// taken where the fixture was made, so a machine that computes any one of
+// them differently fails here, by name, rather than in a fixture byte that
+// a test image happens to reach. Run it as GOARCH=amd64, and with
+// GOAMD64=v3, as well as natively.
+func TestCosinesAreTheSameEverywhere(t *testing.T) {
+	h := sha256.New()
+	var b [8]byte
+	for n := 1; n <= 100; n++ {
+		for c := range 8 {
+			for i := range n {
+				binary.LittleEndian.PutUint64(b[:], math.Float64bits(cosPi(c*(2*i+1), 2*n)))
+				h.Write(b[:])
+			}
+		}
+	}
+	if got := hex.EncodeToString(h.Sum(nil)); got != cosineSum {
+		t.Errorf("the cosines' checksum is %s, want %s", got, cosineSum)
+	}
 }

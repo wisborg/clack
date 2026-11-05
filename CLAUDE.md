@@ -75,8 +75,8 @@ by `test/fixtures/thumbhash.json`, which that package's tests write
 (`go test ./tools/internal/thumbhash -update`) and then keep: the same base64 read, the same
 hashes refused, the same pixels drawn give or take one. The Go side must make the same bytes
 on every machine — its arithmetic is written so that arm64 does not fuse what amd64 does not,
-so check a change with `GOARCH=amd64 go test ./tools/internal/thumbhash` too (Rosetta runs
-it). Both follow the format's reference
+and its cosines are its own, held to a checksum — so check a change with `GOARCH=amd64 go
+test ./tools/internal/thumbhash` too (Rosetta runs it; it cannot run `GOAMD64=v3`). Both follow the format's reference
 implementation, and carry its MIT notice (also in `NOTICE`); keep it with them.
 
 ## Dependencies

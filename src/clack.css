@@ -142,15 +142,24 @@
 }
 
 /* With cover, the place it holds is the whole frame, the photo cropped to
-   fill it, and its impression cropped alike. */
+   fill it; and its impression is cropped exactly as the photo will be --
+   laid out at the photo's own proportions (not the hash's, which are only
+   approximate), covering the frame, centred, and clipped. */
 :host([fit="cover"]) .fill {
+  position: relative;
+  overflow: hidden;
   width: 100cqw;
   height: 100cqh;
   aspect-ratio: auto;
 }
 
 :host([fit="cover"]) .fill .impression {
-  object-fit: cover;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: max(100cqw, 100cqh * var(--clack-aspect));
+  height: max(100cqh, 100cqw / var(--clack-aspect));
+  transform: translate(-50%, -50%);
 }
 
 /* A photo that could not be loaded keeps its place, and says so. */

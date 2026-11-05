@@ -12,10 +12,10 @@ import { icon } from "./icons";
 import { photoKey, Photos, type Photo } from "./images";
 import { canStep, drawnWidth, preloadOrder, step } from "./nav";
 import { describeProblems, load, ManifestError, type Manifest } from "./manifest";
-import { maxProblems } from "./rules";
+import { maxProblems, readThumbHash } from "./rules";
 import { applyLang, fromInput, readMarkup, resolveHTTP, type Keyed, type Slide, type SlideInput } from "./slides";
 import { listen } from "./swipe";
-import { draw, parse } from "./thumbhash";
+import { draw } from "./thumbhash";
 
 export const tagName = "clack-show";
 
@@ -110,7 +110,7 @@ function el<K extends keyof HTMLElementTagNameMap>(name: K, className: string, p
  * slide was read) or the canvas cannot be drawn on.
  */
 function impression(hash: string): HTMLCanvasElement | null {
-  const t = hash ? parse(hash) : null;
+  const t = readThumbHash(hash);
   if (!t) return null;
   const { width, height, rgba } = draw(t);
   const canvas = el("canvas", "impression");
@@ -190,8 +190,12 @@ export class ClackShow extends HTMLElement {
   /** The slide on screen, or -1 before the first is. */
   #shown = -1;
   #figure: HTMLElement | null = null;
-  /** The last impression painted, kept while the placeholder is drawn again for the same hash. */
-  #impression: { hash: string; canvas: HTMLCanvasElement | null } | null = null;
+  /**
+   * The impressions painted while the first photo loads, by hash, so a
+   * placeholder drawn again -- each step, each change to the markup --
+   * reuses its own; let go of once a photo is up.
+   */
+  readonly #impressions = new Map<string, HTMLCanvasElement | null>();
   #direction: 1 | -1 = 1;
   /** Bumped by every request, so a slow photo cannot arrive after a newer one. */
   #token = 0;
@@ -654,6 +658,7 @@ export class ClackShow extends HTMLElement {
       this.#finishTransitions();
       this.#figure?.remove();
       this.#figure = null;
+      this.#impressions.clear();
       this.#caption(null);
       this.#updateControls();
       return;
@@ -668,7 +673,7 @@ export class ClackShow extends HTMLElement {
       // Its placeholder, if it has one up, is drawn again: its colour or
       // shape may be what changed.
       if (this.#figure?.classList.contains("placeholder")) {
-        this.#placeholder(target, true);
+        this.#placeholder(target);
       }
       return;
     }
@@ -767,9 +772,7 @@ export class ClackShow extends HTMLElement {
     this.#photos.keepOnly(this.#keys([target, this.#shown, ...ahead]));
     this.#stage.classList.toggle("loading", photo.state === "loading");
     if (!this.#figure || this.#figure.classList.contains("placeholder")) {
-      // Painted only if the photo has yet to come: one already here
-      // replaces the placeholder at once.
-      this.#placeholder(target, photo.state === "loading");
+      this.#placeholder(target);
     }
     const pending = photo.settled.then((state) => {
       // The slides may have changed while it loaded: it is found by key.
@@ -818,10 +821,11 @@ export class ClackShow extends HTMLElement {
   /**
    * Holds the place of the first photo while it loads: a frame of its
    * proportions, in its colour if it has one, and with its impression
-   * painted from its ThumbHash if it has one and paint says to, so the
-   * page does not wait on an empty box. The photo fades in over it.
+   * painted from its ThumbHash if it has one and its photo has yet to
+   * come (one already here, or failed, replaces the placeholder at once),
+   * so the page does not wait on an empty box. The photo fades in over it.
    */
-  #placeholder(index: number, paint: boolean): void {
+  #placeholder(index: number): void {
     const slide = this.#slides[index]!;
     this.#figure?.remove();
     const figure = el("figure", "slide placeholder", "slide");
@@ -835,13 +839,14 @@ export class ClackShow extends HTMLElement {
       figure.style.setProperty("--clack-placeholder", slide.color);
     }
     const fill = el("div", "fill");
-    if (paint && slide.thumbhash) {
-      // Drawn once for a hash, however often the placeholder is drawn
-      // again while the photo loads (each step, each change to the markup).
-      if (this.#impression?.hash !== slide.thumbhash) {
-        this.#impression = { hash: slide.thumbhash, canvas: impression(slide.thumbhash) };
+    const photo = this.#photos.peek(slide.key);
+    if (slide.thumbhash && (!photo || photo.state === "loading")) {
+      let canvas = this.#impressions.get(slide.thumbhash);
+      if (canvas === undefined) {
+        canvas = impression(slide.thumbhash);
+        this.#impressions.set(slide.thumbhash, canvas);
       }
-      if (this.#impression.canvas) fill.append(this.#impression.canvas);
+      if (canvas) fill.append(canvas);
     }
     figure.append(fill);
     this.#stage.append(figure);
@@ -852,6 +857,8 @@ export class ClackShow extends HTMLElement {
 
   #display(index: number, photo: Photo, how: How): void {
     this.#finishTransitions();
+    // A photo is up: no placeholder is drawn again after this one.
+    this.#impressions.clear();
     const previous = this.#shown;
     const old = this.#figure;
     const slide = this.#slides[index]!;

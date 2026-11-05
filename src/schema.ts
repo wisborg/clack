@@ -70,6 +70,13 @@ interface Node {
 
 const own = (o: object, k: string): boolean => Object.hasOwn(o, k);
 
+/**
+ * A schema's pattern, compiled as the schema checks it -- the one place
+ * that says how, so a rule that looks only at what a pattern accepts
+ * (rules.ts) agrees with the schema exactly.
+ */
+export const pattern = (source: string): RegExp => new RegExp(source, "u");
+
 /** A compiled schema. */
 export class Schema {
   readonly #root: Node;
@@ -103,7 +110,7 @@ export class Schema {
       }
       if (own(m, "patternProperties")) {
         const p = m["patternProperties"] as Record<string, Json>;
-        into.patternProperties = Object.keys(p).map((k) => [new RegExp(k, "u"), compile(p[k]!)]);
+        into.patternProperties = Object.keys(p).map((k) => [pattern(k), compile(p[k]!)]);
       }
       set("additional", sub("additionalProperties"));
       set("required", m["required"] as string[] | undefined);
@@ -119,7 +126,7 @@ export class Schema {
       set("maxItems", num("maxItems"));
       set("minLength", num("minLength"));
       set("maxLength", num("maxLength"));
-      if (own(m, "pattern")) into.pattern = new RegExp(m["pattern"] as string, "u");
+      if (own(m, "pattern")) into.pattern = pattern(m["pattern"] as string);
       for (const k of ["minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum"] as const) set(k, num(k));
       for (const k of ["allOf", "anyOf", "oneOf"] as const) {
         if (own(m, k)) into[k] = (m[k] as Json[]).map((s) => compile(s));

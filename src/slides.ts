@@ -2,7 +2,7 @@
  * Slides: what Clack shows, read from the host page's markup or given from
  * script, in one shape whatever the source.
  */
-import { checkSlideRules, isThumbHash, maxDepth, rules } from "./rules";
+import { checkSlideRules, maxDepth, readThumbHash, rules } from "./rules";
 import { describeProblems, sortProblems } from "./schema";
 
 /** One `<source>` of a `<picture>`: the same photo in another format. */
@@ -30,8 +30,11 @@ export interface Slide {
   page: string;
   /** A colour to paint while the photo loads, or "". */
   color: string;
-  /** A ThumbHash in base64, painted while the photo loads, or "". */
-  thumbhash: string;
+  /**
+   * A ThumbHash in base64, painted while the photo loads, or "". Always
+   * there in what the show gives; optional in what it is given.
+   */
+  thumbhash?: string;
   title: string;
   credit: string;
   /**
@@ -57,6 +60,7 @@ export interface Slide {
  */
 export interface Keyed extends Slide {
   key: string;
+  thumbhash: string;
   lang: string | null;
   captionLang: string | null;
   creditLang: string | null;
@@ -187,7 +191,7 @@ export function readMarkup(host: Element, warn: (message: string) => void): Keye
     }
 
     let thumbhash = img.dataset["thumbhash"] ?? "";
-    if (thumbhash && !isThumbHash(thumbhash)) {
+    if (thumbhash && !readThumbHash(thumbhash)) {
       warn(`slide ${n}: data-thumbhash is not a ThumbHash in base64; it is ignored`);
       thumbhash = "";
     }
@@ -490,9 +494,12 @@ function checkSlide(s: Slide, fail: (why: string) => never): Keyed {
   if (full && !usableURL(full)) fail("the full-size URL must be http, https or relative");
   const page = str(s.page ?? "", "page");
   if (page && !usableURL(page)) fail("the page URL must be http, https or relative");
+  // The placeholder, held to what a manifest's may be, as everything else
+  // here is: a value that is not one is refused, not quietly dropped.
   const color = str(s.color ?? "", "color");
+  if (color && !hexColor(color)) fail("color must be a colour as #rrggbb");
   const thumbhash = str(s.thumbhash ?? "", "thumbhash");
-  if (thumbhash && !isThumbHash(thumbhash)) fail("thumbhash must be a ThumbHash in base64");
+  if (thumbhash && !readThumbHash(thumbhash)) fail("thumbhash must be a ThumbHash in base64");
   // A slide read from the show and given back keeps its identity, so its
   // photo is not fetched again; the caller makes sure keys are unique.
   const { key, lang, captionLang, creditLang } = s as Partial<Keyed>;

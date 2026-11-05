@@ -116,6 +116,11 @@ export class Photos {
     return photo;
   }
 
+  /** The photo for a slide's key, if there is one; nothing is built or started. */
+  peek(key: string): Photo | undefined {
+    return this.#photos.get(key);
+  }
+
   /** Sets the size every photo is drawn at; the browser fetches more pixels only if it needs them. */
   resize(sizes: (key: string) => string): void {
     for (const [key, photo] of this.#photos) {

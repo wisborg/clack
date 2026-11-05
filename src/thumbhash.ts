@@ -132,10 +132,11 @@ export function draw(t: ThumbHash): { width: number; height: number; rgba: Uint8
   const w = Math.round(ratio > 1 ? 32 : 32 * ratio);
   const h = Math.round(ratio > 1 ? 32 / ratio : 32);
   const rgba = new Uint8ClampedArray(w * h * 4);
-  const fx: number[] = [];
-  const fy: number[] = [];
   const nx = Math.max(lx, hasAlpha ? 5 : 3);
   const ny = Math.max(ly, hasAlpha ? 5 : 3);
+  // Each column's cosines once, as each row's are once per row.
+  const columns = Array.from({ length: w }, (_, x) => Array.from({ length: nx }, (_, cx) => Math.cos((Math.PI / w) * (x + 0.5) * cx)));
+  const fy: number[] = [];
   // Truncated, as the reference stores them, not rounded, as a clamped
   // array would.
   const byte = (v: number): number => Math.trunc(Math.max(0, 255 * Math.min(1, v)));
@@ -143,7 +144,7 @@ export function draw(t: ThumbHash): { width: number; height: number; rgba: Uint8
     for (let cy = 0; cy < ny; cy++) fy[cy] = Math.cos((Math.PI / h) * (y + 0.5) * cy);
     for (let x = 0; x < w; x++, i += 4) {
       let [l, p, q, a] = t.dc;
-      for (let cx = 0; cx < nx; cx++) fx[cx] = Math.cos((Math.PI / w) * (x + 0.5) * cx);
+      const fx = columns[x]!;
       for (let cy = 0, j = 0; cy < ly; cy++) {
         for (let cx = cy ? 0 : 1, fy2 = fy[cy]! * 2; cx * ly < lx * (ly - cy); cx++, j++) l += t.l[j]! * fx[cx]! * fy2;
       }
