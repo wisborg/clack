@@ -23,6 +23,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -196,22 +197,47 @@ func cmdBuild(ctx context.Context, args []string) error {
 	if err := parse(flag.NewFlagSet("build", flag.ContinueOnError), args); err != nil {
 		return err
 	}
+	// Built in memory and checked, and only then written: a bundle that
+	// fails a check -- the notices, the budget -- never reaches dist/, and
+	// what dist/ held before is removed, so it never holds a build older
+	// than the source either.
+	plain, err := bundle.Build(bundle.Options{
+		Entry: "src/clack.ts", Outfile: "dist/clack.js", Banner: banner,
+	})
+	if err == nil {
+		var minified []bundle.File
+		minified, err = bundle.Build(bundle.Options{
+			Entry: "src/clack.ts", Outfile: "dist/clack.min.js", Banner: banner, Minify: true,
+		})
+		plain = append(plain, minified...)
+	}
+	if err == nil {
+		err = checkBuild(plain)
+	}
+	if err != nil {
+		for _, name := range []string{"clack.js", "clack.js.map", "clack.min.js", "clack.min.js.map"} {
+			if rmErr := os.Remove(filepath.Join("dist", name)); rmErr != nil && !errors.Is(rmErr, fs.ErrNotExist) {
+				return errors.Join(err, rmErr)
+			}
+		}
+		return err
+	}
 	if err := os.MkdirAll("dist", 0o755); err != nil {
 		return err
 	}
-	plain, err := bundle.Build(bundle.Options{
-		Entry: "src/clack.ts", Outfile: "dist/clack.js", Write: true, Banner: banner,
-	})
-	if err != nil {
-		return err
+	for _, f := range plain {
+		if err := os.WriteFile(f.Path, f.Contents, 0o644); err != nil {
+			return err
+		}
 	}
-	files, err := bundle.Build(bundle.Options{
-		Entry: "src/clack.ts", Outfile: "dist/clack.min.js", Write: true, Banner: banner, Minify: true,
-	})
-	if err != nil {
-		return err
-	}
-	for _, f := range append(plain, files...) {
+	return nil
+}
+
+// checkBuild checks the bundles just built: each carries the notices, and
+// the minified one is within the budget.
+func checkBuild(files []bundle.File) error {
+	var min []byte
+	for _, f := range files {
 		if filepath.Ext(f.Path) != ".js" {
 			continue
 		}
@@ -220,11 +246,6 @@ func cmdBuild(ctx context.Context, args []string) error {
 				return fmt.Errorf("%s does not carry the notice %q (NOTICE)", filepath.Base(f.Path), n)
 			}
 		}
-	}
-	// The budget is checked against what was just built, not whatever is on
-	// disk.
-	var min []byte
-	for _, f := range files {
 		if filepath.Base(f.Path) == "clack.min.js" {
 			min = f.Contents
 		}

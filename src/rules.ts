@@ -67,8 +67,11 @@ let forms: { thumbhash: RegExp; color: RegExp } | undefined;
  * own shape is held to exactly the manifest's rule.
  */
 function placeholderForms(): { thumbhash: RegExp; color: RegExp } {
-  const { thumbhash, color } = manifestSchema.$defs.slide.properties.placeholder.properties;
-  return (forms ??= { thumbhash: pattern(thumbhash.pattern), color: pattern(color.pattern) });
+  if (!forms) {
+    const { thumbhash, color } = manifestSchema.$defs.slide.properties.placeholder.properties;
+    forms = { thumbhash: pattern(thumbhash.pattern), color: pattern(color.pattern) };
+  }
+  return forms;
 }
 
 /**

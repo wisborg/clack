@@ -816,17 +816,19 @@ export class ClackShow extends HTMLElement {
   /**
    * Holds the place of the first photo while it loads: a frame of its
    * proportions, in its colour if it has one, and with its impression
-   * painted from its ThumbHash if it has one and its photo has yet to
-   * come (one already here, or failed, replaces the placeholder at once),
-   * so the page does not wait on an empty box. The photo fades in over it.
-   * Called only when nothing, or the placeholder, is up. A placeholder
-   * already up is brought up to date in place -- each step,
+   * painted from its ThumbHash if it has one and its photo has not yet
+   * settled (one that has -- shown, or failed -- replaces the placeholder
+   * at once; one in the HTTP cache still has to be decoded, so it is
+   * painted for that moment), so the page does not wait on an empty box. The photo fades in over it.
+   * A placeholder already up is brought up to date in place -- each step,
    * each change to the markup -- and its impression painted again only if
    * the hash is not the one it holds.
    */
   #placeholder(index: number): void {
     const slide = this.#slides[index]!;
     let figure = this.#figure;
+    // Only ever over nothing, or over the placeholder: never a photo.
+    if (figure && !figure.classList.contains("placeholder")) return;
     if (!figure) {
       figure = el("figure", "slide placeholder", "slide");
       figure.role = "group";

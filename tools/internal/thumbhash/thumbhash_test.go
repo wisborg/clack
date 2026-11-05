@@ -352,8 +352,9 @@ const cosineSum = "ad2cecf4d63056002da482ba731dab4084ce36f9d8c7f5f0d840ade3d0640
 // TestCosinesAreTheSameEverywhere holds those cosines to the checksum
 // taken where the fixture was made, so a machine that computes any one of
 // them differently fails here, by name, rather than in a fixture byte that
-// a test image happens to reach. Run it as GOARCH=amd64, and with
-// GOAMD64=v3, as well as natively.
+// a test image happens to reach. Run it as GOARCH=amd64 as well as
+// natively (Rosetta does that on a Mac), and with GOAMD64=v3 on an amd64
+// machine that has it -- Rosetta cannot run it.
 func TestCosinesAreTheSameEverywhere(t *testing.T) {
 	h := sha256.New()
 	var b [8]byte

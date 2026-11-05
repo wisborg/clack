@@ -134,9 +134,11 @@
   background: var(--clack-placeholder, var(--clack-hairline));
 }
 
-/* Its impression, from its ThumbHash: a few pixels, stretched and smoothed. */
+/* Its impression, from its ThumbHash: a few pixels, stretched and smoothed --
+   smoothed whatever the page sets, as image-rendering is inherited. */
 .fill .impression {
   display: block;
+  image-rendering: auto;
   width: 100%;
   height: 100%;
 }

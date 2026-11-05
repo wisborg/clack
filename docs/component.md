@@ -40,7 +40,7 @@ other formats — is a slide, and so is each child `<img>`. Anything else is lef
   others are added before it; a repeated id is renumbered, with a warning.
 - `data-full` names the full-size file, for the full-size view still to come (an http,
   https or relative URL; anything else is ignored, with a warning). `data-color` is a
-  colour (`#rrggbb`) that holds the first photo's place while it loads, and
+  colour (`#rrggbb`) that holds the slide's place until the show's first photo is shown, and
   `data-thumbhash` a [ThumbHash](https://evanw.github.io/thumbhash/) in base64, painted over
   it as a blurred impression of the photo — the same as a manifest's `placeholder.thumbhash`,
   and held to the same rules (one a manifest could not give is ignored, with a warning).
