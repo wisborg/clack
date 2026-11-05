@@ -190,12 +190,8 @@ export class ClackShow extends HTMLElement {
   /** The slide on screen, or -1 before the first is. */
   #shown = -1;
   #figure: HTMLElement | null = null;
-  /**
-   * The impressions painted while the first photo loads, by hash, so a
-   * placeholder drawn again -- each step, each change to the markup --
-   * reuses its own; let go of once a photo is up.
-   */
-  readonly #impressions = new Map<string, HTMLCanvasElement | null>();
+  /** The hash whose impression the placeholder holds, or "" for none. */
+  #painted = "";
   #direction: 1 | -1 = 1;
   /** Bumped by every request, so a slow photo cannot arrive after a newer one. */
   #token = 0;
@@ -658,7 +654,6 @@ export class ClackShow extends HTMLElement {
       this.#finishTransitions();
       this.#figure?.remove();
       this.#figure = null;
-      this.#impressions.clear();
       this.#caption(null);
       this.#updateControls();
       return;
@@ -670,8 +665,8 @@ export class ClackShow extends HTMLElement {
       this.#target = target;
       this.#updateControls();
       this.#refreshShown();
-      // Its placeholder, if it has one up, is drawn again: its colour or
-      // shape may be what changed.
+      // Its placeholder, if it has one up, is brought up to date: its
+      // colour, shape or hash may be what changed.
       if (this.#figure?.classList.contains("placeholder")) {
         this.#placeholder(target);
       }
@@ -824,41 +819,45 @@ export class ClackShow extends HTMLElement {
    * painted from its ThumbHash if it has one and its photo has yet to
    * come (one already here, or failed, replaces the placeholder at once),
    * so the page does not wait on an empty box. The photo fades in over it.
+   * Called only when nothing, or the placeholder, is up. A placeholder
+   * already up is brought up to date in place -- each step,
+   * each change to the markup -- and its impression painted again only if
+   * the hash is not the one it holds.
    */
   #placeholder(index: number): void {
     const slide = this.#slides[index]!;
-    this.#figure?.remove();
-    const figure = el("figure", "slide placeholder", "slide");
-    figure.role = "group";
-    figure.ariaRoleDescription = text.slide;
+    let figure = this.#figure;
+    if (!figure) {
+      figure = el("figure", "slide placeholder", "slide");
+      figure.role = "group";
+      figure.ariaRoleDescription = text.slide;
+      figure.ariaBusy = "true";
+      figure.append(el("div", "fill"));
+      this.#stage.append(figure);
+      this.#figure = figure;
+      this.#painted = "";
+    }
     figure.ariaLabel = text.of(index + 1, this.#slides.length);
-    figure.ariaBusy = "true";
     figure.style.setProperty("--clack-aspect", String(slide.width / slide.height));
     if (slide.color) {
       // Checked as #rrggbb when the slide was read.
       figure.style.setProperty("--clack-placeholder", slide.color);
+    } else {
+      figure.style.removeProperty("--clack-placeholder");
     }
-    const fill = el("div", "fill");
     const photo = this.#photos.peek(slide.key);
-    if (slide.thumbhash && (!photo || photo.state === "loading")) {
-      let canvas = this.#impressions.get(slide.thumbhash);
-      if (canvas === undefined) {
-        canvas = impression(slide.thumbhash);
-        this.#impressions.set(slide.thumbhash, canvas);
-      }
-      if (canvas) fill.append(canvas);
+    const hash = slide.thumbhash && (!photo || photo.state === "loading") ? slide.thumbhash : "";
+    if (hash !== this.#painted) {
+      const canvas = hash ? impression(hash) : null;
+      figure.firstElementChild!.replaceChildren(...(canvas ? [canvas] : []));
+      this.#painted = hash;
     }
-    figure.append(fill);
-    this.#stage.append(figure);
-    this.#figure = figure;
   }
 
   // ---- Showing a slide -------------------------------------------------
 
   #display(index: number, photo: Photo, how: How): void {
     this.#finishTransitions();
-    // A photo is up: no placeholder is drawn again after this one.
-    this.#impressions.clear();
     const previous = this.#shown;
     const old = this.#figure;
     const slide = this.#slides[index]!;

@@ -40,6 +40,9 @@ func images() []image {
 	return []image{
 		makeImage("landscape gradient", 100, 75, func(x, y int) [4]int { return [4]int{x * 255 / 99, y * 255 / 74, 128, 255} }),
 		makeImage("portrait pattern", 30, 80, func(x, y int) [4]int { return [4]int{(x * y) % 256, 200, (x * 7) % 256, 255} }),
+		// Landscape with alpha: its header gives the luminance terms down,
+		// and five across (seven without alpha).
+		makeImage("landscape with alpha", 100, 60, func(x, y int) [4]int { return [4]int{255 - x*2, y * 4, (x + y) % 256, 255 - x*5/2} }),
 		makeImage("square with alpha", 64, 64, func(x, y int) [4]int { return [4]int{x * 4, 255 - y*4, 90, (x * y) % 256} }),
 		makeImage("wide strip", 100, 9, func(x, y int) [4]int {
 			r := 20
@@ -128,7 +131,7 @@ func TestFromBase64(t *testing.T) {
 // TestFixture keeps the shared fixture what this package makes of the test
 // images and texts; run with -update to rewrite it after a deliberate change.
 func TestFixture(t *testing.T) {
-	f := fixture{Comment: "Made by go test ./tools/internal/thumbhash -update, from its encoder and decoder: what Clack's decoder (src/thumbhash.ts) must make of each. \"base64\" gives texts and their bytes in hex, or null where they must be refused. \"refused\" gives hashes, in hex, that must be refused: too short for what their headers say, or of no width. \"images\" gives test images (made in that test) by name and size, the hash of each in hex, and what the hash draws: its size and its pixels as RGBA, in hex, each of which Clack's may differ from by one, as cosines differ slightly between engines."}
+	f := fixture{Comment: "Made by go test ./tools/internal/thumbhash -update, from its encoder and decoder: what Clack's decoder (src/thumbhash.ts) must make of each. \"base64\" gives texts and their bytes in hex, or null where they must be refused. \"refused\" gives hashes, in hex, that must be refused: too short for what their headers say, or of no width or height. \"images\" gives test images (made in that test) by name and size, the hash of each in hex, and what the hash draws: its size and its pixels as RGBA, in hex, each of which Clack's may differ from by one, as cosines differ slightly between engines."}
 	for _, c := range base64Cases {
 		bc := base64Case{Text: c.text}
 		if b, err := FromBase64(c.text); err == nil {
@@ -137,7 +140,7 @@ func TestFixture(t *testing.T) {
 		}
 		f.Base64 = append(f.Base64, bc)
 	}
-	f.Refused = append(f.Refused, hex.EncodeToString(noWidth))
+	f.Refused = append(f.Refused, hex.EncodeToString(noWidth), hex.EncodeToString(noHeight))
 	for _, im := range images() {
 		hash, err := Encode(im.w, im.h, im.rgba)
 		if err != nil {
@@ -267,8 +270,12 @@ func TestEncodeRefuses(t *testing.T) {
 }
 
 // noWidth is a hash of a portrait image whose header says it has no
-// luminance terms across: complete, but of no width.
-var noWidth = make([]byte, 23)
+// luminance terms across: complete, but of no width. noHeight is a
+// landscape one with none down.
+var (
+	noWidth  = make([]byte, 23)
+	noHeight = func() []byte { b := make([]byte, 23); b[4] = 0x80; return b }()
+)
 
 // TestDecodeRefuses checks that a hash too short for what its header says
 // is refused, not drawn from bytes that are not there.
@@ -283,6 +290,9 @@ func TestDecodeRefuses(t *testing.T) {
 	}
 	if _, _, _, err := Decode(noWidth); err == nil {
 		t.Error("a hash of no width decoded")
+	}
+	if _, _, _, err := Decode(noHeight); err == nil {
+		t.Error("a hash of no height decoded")
 	}
 }
 

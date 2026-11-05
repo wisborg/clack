@@ -198,7 +198,9 @@ What makes a slideshow look professional or cheap is mostly what happens between
 - **No layout shift:** every slide's dimensions are known in advance (from `width`/`height`
   or the manifest).
 - **Placeholders:** a ThumbHash — about 25 bytes per photo, carried in the manifest — paints a
-  blurred impression of the photo instantly while the real one loads. The decoder is ~150 lines
+  blurred impression of the photo instantly while the real one loads. The first photo's, for
+  now; after that, the photo on screen stays until the next is decoded, with a hairline if it
+  is slow. The decoder is ~150 lines
   we write ourselves, following the format's reference implementation (MIT, noted in `NOTICE`).
 - **Colour:** images keep their ICC profile (see the media pipeline), so wide-gamut photos show
   in wide gamut on screens that can display it. The theme's background colours are chosen with

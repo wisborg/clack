@@ -1,8 +1,11 @@
 # Dependencies
 
-What Clack ships — `dist/clack.js` and `dist/clack.min.js` — contains no third-party code at
-all. Everything below is used to build and test it, on a developer's machine or in CI, and
-never reaches a website.
+What Clack ships — `dist/clack.js` and `dist/clack.min.js` — depends on nothing and contains no
+third-party code but one: its ThumbHash decoder (`src/thumbhash.ts`) is ours, but follows the
+format's reference implementation, the only definition the format has, so it carries that
+implementation's MIT notice. The notice is in `NOTICE` and at the end of both files, and the
+build fails if either file lacks it. Everything below is used to build and test Clack, on a
+developer's machine or in CI, and never reaches a website.
 
 Each entry says what it is for, why it is not ours, who maintains it, its licence, and how
 the copy we run is checked. A change to any of them — a new entry, a version, a pin — is

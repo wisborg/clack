@@ -60,7 +60,7 @@ visitor's manifest from what they are allowed to see.
 | `sources` | required: the photo at one to sixteen sizes, each `{ url, width, height?, type? }`. The browser fetches the one that fits the screen and its pixel density. Give `type` (`image/avif`, `image/webp`, `image/jpeg`, `image/png`, `image/jxl`) when offering more than one format; a browser skips types it cannot show. |
 | `full` | the full-size file, `{ url, width, height?, type? }`, fetched only when the full-size view opens. Without it, that view uses the largest source. |
 | `page` | the photo's own page, if it has one |
-| `placeholder` | `{ thumbhash, color }`: a ThumbHash (base64, about 25 bytes) painted as a blurred impression of the photo while it loads, and its average colour for the moment before that |
+| `placeholder` | `{ thumbhash, color }`: a ThumbHash (base64, about 25 bytes), painted as a blurred impression of the photo while it loads, and its average colour for the moment before that. Clack paints them while the show's first photo loads; after that, the photo on screen stays until the next one is ready. |
 | `focus` | `{ x, y }` from 0 to 1: the point kept in view when the photo is cropped to fill a frame |
 | `duration` | seconds this slide stays during auto-play, in place of the show's interval |
 | `description`, `camera`, `time`, `location`, `technical` | metadata, by class (below) |

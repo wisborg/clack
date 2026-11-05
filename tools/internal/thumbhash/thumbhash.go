@@ -391,18 +391,24 @@ func Decode(hash []byte) (w, h int, rgba []byte, err error) {
 	if hasAlpha {
 		n, m = max(lx, 5), max(ly, 5)
 	}
-	fx := make([]float64, n)
+	// Each column's cosines once, and each row's once per row: what the
+	// reference works out afresh for every pixel, the same values.
+	columns := make([][]float64, w)
+	for x := range columns {
+		columns[x] = make([]float64, n)
+		for cx := range columns[x] {
+			columns[x][cx] = cosPi(cx*(2*x+1), 2*w)
+		}
+	}
 	fy := make([]float64, m)
 	clamp := func(v float64) byte { return byte(math.Max(0, 255*math.Min(1, v))) }
 	for y, i := 0, 0; y < h; y++ {
+		for cy := range fy {
+			fy[cy] = cosPi(cy*(2*y+1), 2*h)
+		}
 		for x := 0; x < w; x, i = x+1, i+4 {
 			l, p, q, a := t.lDC, t.pDC, t.qDC, t.aDC
-			for cx := range fx {
-				fx[cx] = cosPi(cx*(2*x+1), 2*w)
-			}
-			for cy := range fy {
-				fy[cy] = cosPi(cy*(2*y+1), 2*h)
-			}
+			fx := columns[x]
 			for cy, j := 0, 0; cy < ly; cy++ {
 				cx := 0
 				if cy == 0 {

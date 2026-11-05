@@ -48,6 +48,16 @@ const sizeBudget = 32 << 10
 
 const banner = "/*! Clack | Apache-2.0 | https://github.com/wisborg/clack */"
 
+// notices are what each bundle must carry of the licences of code it
+// follows (NOTICE). They arrive as legal comments (/*! */), which esbuild
+// keeps at the end of the file; checked here, because nothing else would
+// notice a setting, a reworded comment or an esbuild upgrade dropping them.
+var notices = []string{
+	"Copyright (c) 2023 Evan Wallace",
+	"Permission is hereby granted, free of charge, to any person obtaining a copy",
+	"The above copyright notice and this permission notice shall be included in all",
+}
+
 type command struct {
 	name string
 	help string
@@ -189,9 +199,10 @@ func cmdBuild(ctx context.Context, args []string) error {
 	if err := os.MkdirAll("dist", 0o755); err != nil {
 		return err
 	}
-	if _, err := bundle.Build(bundle.Options{
+	plain, err := bundle.Build(bundle.Options{
 		Entry: "src/clack.ts", Outfile: "dist/clack.js", Write: true, Banner: banner,
-	}); err != nil {
+	})
+	if err != nil {
 		return err
 	}
 	files, err := bundle.Build(bundle.Options{
@@ -199,6 +210,16 @@ func cmdBuild(ctx context.Context, args []string) error {
 	})
 	if err != nil {
 		return err
+	}
+	for _, f := range append(plain, files...) {
+		if filepath.Ext(f.Path) != ".js" {
+			continue
+		}
+		for _, n := range notices {
+			if !bytes.Contains(f.Contents, []byte(n)) {
+				return fmt.Errorf("%s does not carry the notice %q (NOTICE)", filepath.Base(f.Path), n)
+			}
+		}
 	}
 	// The budget is checked against what was just built, not whatever is on
 	// disk.

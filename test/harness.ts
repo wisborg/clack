@@ -65,14 +65,14 @@ export function assertEqual<T>(actual: T, expected: T, what: string): void {
 }
 
 /** Fails the test unless fn throws an instance of type. */
-export function assertThrows(fn: () => unknown, type: new (...args: never[]) => Error, what: string): void {
+export function assertThrows(fn: () => unknown, type: new (...args: never[]) => Error, what: string, message?: RegExp): void {
   try {
     fn();
   } catch (e) {
-    if (e instanceof type) {
+    if (e instanceof type && (!message || message.test(e.message))) {
       return;
     }
-    throw new Error(`${what}: threw ${describe(e)}, want a ${type.name}`);
+    throw new Error(`${what}: threw ${describe(e)}, want a ${type.name}${message ? ` matching ${message}` : ""}`);
   }
   throw new Error(`${what}: did not throw`);
 }

@@ -54,34 +54,21 @@ export function rules(): { top: Schema; slide: Schema; maxSlides: number } {
 export function checkSlideRules(slide: unknown, path: string, out: Problem[]): void {
   checkSources(slide, path, out);
   const hash = (slide as { placeholder?: { thumbhash?: unknown } | null } | null)?.placeholder?.thumbhash;
-  if (typeof hash === "string" && thumbhashForm().test(hash) && !thumbhashOf(hash)) {
+  if (typeof hash === "string" && placeholderForms().thumbhash.test(hash) && !parse(hash)) {
     out.push({ path: `${path}/placeholder/thumbhash`, message: "is not a ThumbHash" });
   }
 }
 
-let thumbhashPattern: RegExp | undefined;
-
-/** The schema's pattern for a thumbhash, compiled as the schema compiles it. */
-function thumbhashForm(): RegExp {
-  return (thumbhashPattern ??= pattern(manifestSchema.$defs.slide.properties.placeholder.properties.thumbhash.pattern));
-}
+let forms: { thumbhash: RegExp; color: RegExp } | undefined;
 
 /**
- * Hashes read already, each once: markup is read again on every change
- * to it, and a placeholder painted from what was read. Bounded, as the
- * texts come from the page; past the bound it starts again.
+ * The schema's patterns for a placeholder's thumbhash and colour, compiled
+ * as the schema compiles them, so a value given from markup or in Clack's
+ * own shape is held to exactly the manifest's rule.
  */
-const hashes = new Map<string, ThumbHash | null>();
-
-/** The hash in text, read; null if it is not one, in form or in content. */
-function thumbhashOf(text: string): ThumbHash | null {
-  let t = hashes.get(text);
-  if (t === undefined) {
-    if (hashes.size >= 1000) hashes.clear();
-    t = parse(text);
-    hashes.set(text, t);
-  }
-  return t;
+function placeholderForms(): { thumbhash: RegExp; color: RegExp } {
+  const { thumbhash, color } = manifestSchema.$defs.slide.properties.placeholder.properties;
+  return (forms ??= { thumbhash: pattern(thumbhash.pattern), color: pattern(color.pattern) });
 }
 
 /**
@@ -89,10 +76,15 @@ function thumbhashOf(text: string): ThumbHash | null {
  * the form the schema allows, and a hash that can be drawn; else null.
  * Markup and script are held to the same, so a value is taken or refused
  * alike wherever it is given -- and only a few dozen characters are ever
- * decoded.
+ * decoded. (Read afresh each time: it costs a few microseconds.)
  */
 export function readThumbHash(text: string): ThumbHash | null {
-  return thumbhashForm().test(text) ? thumbhashOf(text) : null;
+  return placeholderForms().thumbhash.test(text) ? parse(text) : null;
+}
+
+/** Whether text is a colour as a manifest's placeholder may give one. */
+export function isColor(text: string): boolean {
+  return placeholderForms().color.test(text);
 }
 
 /**

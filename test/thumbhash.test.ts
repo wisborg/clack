@@ -6,21 +6,11 @@
 import { fromInput, readMarkup, type SlideInput } from "../src/slides";
 import { draw, fromBase64, parse, read } from "../src/thumbhash";
 import fixture from "./fixtures/thumbhash.json";
-import { assert, assertEqual, fixture as host, test } from "./harness";
+import { assert, assertEqual, assertThrows, fixture as host, test } from "./harness";
 import { figures, makeShow, part, settledOn, waitFor } from "./util";
 
 const fromHex = (hex: string): Uint8Array => Uint8Array.from(hex.match(/../g) ?? [], (b) => parseInt(b, 16));
 const toHex = (bytes: Uint8Array): string => Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-/** Asserts that fn throws a TypeError whose message matches. */
-function refuses(fn: () => unknown, message: RegExp, what: string): void {
-  try {
-    fn();
-  } catch (e) {
-    assert(e instanceof TypeError && message.test(e.message), `${what}: ${String(e)}`);
-    return;
-  }
-  assert(false, `${what}: accepted`);
-}
 const toBase64 = (bytes: Uint8Array): string => btoa(String.fromCharCode(...bytes));
 
 test("ThumbHash: base64 is read as the tools read it", () => {
@@ -30,7 +20,7 @@ test("ThumbHash: base64 is read as the tools read it", () => {
   }
 });
 
-test("ThumbHash: a hash short of its terms, or of no width, is refused", () => {
+test("ThumbHash: a hash short of its terms, or of no width or height, is refused", () => {
   for (const hex of fixture.refused) {
     assertEqual(read(fromHex(hex)), null, hex);
   }
@@ -66,7 +56,7 @@ function gradient(): string {
 /** A hash followed by more base64: drawable, but longer than a manifest may give. */
 const overlong = (): string => gradient() + "A".repeat(40);
 
-test("a slide's ThumbHash is read from markup, and a bad one ignored, with a warning", () => {
+test("a slide's ThumbHash and colour are read from markup, and a bad one ignored, with a warning", () => {
   const hash = gradient();
   const h = host();
   for (const value of [hash, "AAAAAA=", overlong()]) {
@@ -87,6 +77,24 @@ test("a slide's ThumbHash is read from markup, and a bad one ignored, with a war
   assertEqual(c!.thumbhash, "", "one longer than a manifest may give ignored");
   assertEqual(warnings.length, 2, `two warnings: ${warnings.join("; ")}`);
   assert(warnings.every((w) => w.includes("data-thumbhash")), warnings.join("; "));
+  // A colour, held to the manifest's rule as the hash is.
+  const colors = ["#336699", "#369", "grey"];
+  h.replaceChildren();
+  for (const color of colors) {
+    const fig = document.createElement("figure");
+    const img = document.createElement("img");
+    img.src = "a.jpg";
+    img.width = 3;
+    img.height = 2;
+    img.alt = "A";
+    img.dataset["color"] = color;
+    fig.append(img);
+    h.append(fig);
+  }
+  warnings.length = 0;
+  assertEqual(readMarkup(h, (m) => warnings.push(m)).map((s) => s.color).join(), "#336699,,", "only #rrggbb kept");
+  assertEqual(warnings.length, 2, `two warnings: ${warnings.join("; ")}`);
+  assert(warnings.every((w) => w.includes("data-color")), warnings.join("; "));
 });
 
 test("a slide's ThumbHash from script must be one, in either shape", () => {
@@ -96,10 +104,10 @@ test("a slide's ThumbHash from script must be one, in either shape", () => {
   assertEqual(s!.thumbhash, hash, "the manifest's shape");
   assertEqual(fromInput([s!])[0]!.thumbhash, hash, "Clack's shape, given back");
   assertEqual(fromInput([{ ...slide }])[0]!.thumbhash, "", "none");
-  refuses(() => fromInput([{ ...slide, placeholder: { thumbhash: "3OcRJYB4" } }]), /ThumbHash/, "the manifest's shape, cut short");
-  refuses(() => fromInput([{ ...s!, thumbhash: "3OcRJYB4" }]), /ThumbHash/, "Clack's shape, cut short");
-  refuses(() => fromInput([{ ...s!, thumbhash: overlong() }]), /ThumbHash/, "Clack's shape, longer than a manifest may give");
-  refuses(() => fromInput([{ ...s!, thumbhash: 7 as unknown as string }]), /thumbhash/, "not a string");
+  assertThrows(() => fromInput([{ ...slide, placeholder: { thumbhash: "3OcRJYB4" } }]), TypeError, "the manifest's shape, cut short", /ThumbHash/);
+  assertThrows(() => fromInput([{ ...s!, thumbhash: "3OcRJYB4" }]), TypeError, "Clack's shape, cut short", /ThumbHash/);
+  assertThrows(() => fromInput([{ ...s!, thumbhash: overlong() }]), TypeError, "Clack's shape, longer than a manifest may give", /ThumbHash/);
+  assertThrows(() => fromInput([{ ...s!, thumbhash: 7 as unknown as string }]), TypeError, "not a string", /thumbhash/);
   // Optional in what is given, as in the type: a slide built without one.
   const { thumbhash: _, ...without } = s!;
   assertEqual(fromInput([without])[0]!.thumbhash, "", "Clack's shape without one");
@@ -108,7 +116,7 @@ test("a slide's ThumbHash from script must be one, in either shape", () => {
 test("a slide's colour from script must be one, as its ThumbHash must", () => {
   const [s] = fromInput([{ id: "a", alt: "A", width: 3, height: 2, sources: [{ url: "a.jpg", width: 3 }], placeholder: { color: "#336699" } }]);
   assertEqual(fromInput([s!])[0]!.color, "#336699", "given back");
-  refuses(() => fromInput([{ ...s!, color: "grey" }]), /colou?r/, "a colour by name");
+  assertThrows(() => fromInput([{ ...s!, color: "grey" }]), TypeError, "a colour by name", /colou?r/);
 });
 
 test("the first photo's place is painted from its ThumbHash while it loads", async () => {
@@ -129,16 +137,21 @@ test("the first photo's place is painted from its ThumbHash while it loads", asy
   assertEqual(figures(show)[0]!.querySelector("canvas"), null, "gone once the photo is up");
 });
 
-test("a placeholder drawn again while the photo loads keeps its impression", async () => {
+test("a placeholder brought up to date while the photo loads keeps its impression", async () => {
   const show = makeShow([{ delay: 900 }]);
   const img = show.querySelector("img")!;
   img.dataset["thumbhash"] = gradient();
   await waitFor(() => !!show.shadowRoot!.querySelector(".placeholder .fill canvas"), "the impression");
-  const first = part(show, ".placeholder");
+  const placeholder = part(show, ".placeholder");
   const canvas = part(show, ".placeholder canvas");
-  img.alt = "changed"; // the markup changes, and the placeholder is drawn again
-  await waitFor(() => part(show, ".placeholder") !== first, "the placeholder drawn again");
+  img.dataset["color"] = "#336699"; // the markup changes, and the placeholder with it
+  await waitFor(() => placeholder.style.getPropertyValue("--clack-placeholder") === "#336699", "the new colour");
+  assertEqual(part(show, ".placeholder"), placeholder, "the same placeholder, brought up to date");
   assertEqual(part(show, ".placeholder canvas"), canvas, "the same canvas, not decoded again");
+  delete img.dataset["thumbhash"];
+  await waitFor(() => !placeholder.querySelector("canvas"), "the impression gone with its hash");
+  img.dataset["thumbhash"] = gradient();
+  await waitFor(() => !!placeholder.querySelector("canvas"), "painted again with its hash back");
   await settledOn(show, "1 of 1");
 });
 

@@ -2,7 +2,7 @@
  * Slides: what Clack shows, read from the host page's markup or given from
  * script, in one shape whatever the source.
  */
-import { checkSlideRules, maxDepth, readThumbHash, rules } from "./rules";
+import { checkSlideRules, isColor, maxDepth, readThumbHash, rules } from "./rules";
 import { describeProblems, sortProblems } from "./schema";
 
 /** One `<source>` of a `<picture>`: the same photo in another format. */
@@ -190,6 +190,11 @@ export function readMarkup(host: Element, warn: (message: string) => void): Keye
       }
     }
 
+    let color = img.dataset["color"] ?? "";
+    if (color && !isColor(color)) {
+      warn(`slide ${n}: data-color is not a colour as #rrggbb; it is ignored`);
+      color = "";
+    }
     let thumbhash = img.dataset["thumbhash"] ?? "";
     if (thumbhash && !readThumbHash(thumbhash)) {
       warn(`slide ${n}: data-thumbhash is not a ThumbHash in base64; it is ignored`);
@@ -244,7 +249,7 @@ export function readMarkup(host: Element, warn: (message: string) => void): Keye
       alternatives,
       full,
       page: "",
-      color: hexColor(img.dataset["color"]),
+      color,
       thumbhash,
       title,
       credit,
@@ -433,7 +438,6 @@ export function convert(s: SlideInput, lang: string | null): Keyed {
   const srcset = (list: { url: string; width: number }[]): string =>
     list.map((src) => `${srcsetURL(src.url)} ${src.width}w`).join(", ");
   const largest = imgSources.reduce((a, b) => (b.width > a.width ? b : a));
-  const color = s.placeholder?.color ?? "";
   return {
     key: `id:${s.id}`,
     lang,
@@ -448,7 +452,8 @@ export function convert(s: SlideInput, lang: string | null): Keyed {
     alternatives: [...groups].map(([type, list]) => ({ type, srcset: srcset(list), media: "" })),
     full: s.full?.url ?? "",
     page: s.page ?? "",
-    color: hexColor(color),
+    // Both checked against the schema already.
+    color: s.placeholder?.color ?? "",
     thumbhash: s.placeholder?.thumbhash ?? "",
     title: collapse(s.description?.title),
     credit: collapse(s.description?.credit),
@@ -497,7 +502,7 @@ function checkSlide(s: Slide, fail: (why: string) => never): Keyed {
   // The placeholder, held to what a manifest's may be, as everything else
   // here is: a value that is not one is refused, not quietly dropped.
   const color = str(s.color ?? "", "color");
-  if (color && !hexColor(color)) fail("color must be a colour as #rrggbb");
+  if (color && !isColor(color)) fail("color must be a colour as #rrggbb");
   const thumbhash = str(s.thumbhash ?? "", "thumbhash");
   if (thumbhash && !readThumbHash(thumbhash)) fail("thumbhash must be a ThumbHash in base64");
   // A slide read from the show and given back keeps its identity, so its
@@ -528,7 +533,7 @@ function checkSlide(s: Slide, fail: (why: string) => never): Keyed {
     })),
     full,
     page,
-    color: hexColor(color),
+    color,
     thumbhash,
     title: collapse(str(s.title ?? "", "title")),
     credit: collapse(str(s.credit ?? "", "credit")),
@@ -567,9 +572,4 @@ export function srcsetURLs(srcset: string): string[] {
     if (url) out.push(url);
   }
   return out;
-}
-
-/** v, if it is a colour as #rrggbb; else "". */
-function hexColor(v: unknown): string {
-  return typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v) ? v : "";
 }
