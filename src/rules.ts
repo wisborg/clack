@@ -11,20 +11,6 @@ import manifestSchema from "../schema/manifest-1.schema.json";
 import { pattern, Schema, type Problem } from "./schema";
 import { parse, type ThumbHash } from "./thumbhash";
 
-/**
- * How deeply a manifest's values may nest -- far beyond any real manifest,
- * whose slides go five deep. The tools apply the same limit
- * (formats.CheckJSON), so the two agree on every file.
- */
-export const maxDepth = 64;
-
-/**
- * The most problems collected from one manifest. Its verdict is settled by
- * the first; a list of millions would only use up memory, and the console
- * could not show it anyway.
- */
-export const maxProblems = 1000;
-
 let compiled: { top: Schema; slide: Schema; maxSlides: number } | undefined;
 
 /** The manifest without its slides' contents (their number is still checked), and a slide. */

@@ -229,14 +229,14 @@ func check(schema *jsonschema.Schema, v any) (map[string]any, []error) {
 }
 
 // MaxDepth is how deeply a document's values may nest: far beyond any real
-// theme or manifest. Clack in the browser has the same limit (src/rules.ts
+// theme or manifest. Clack in the browser has the same limit (src/json.ts
 // maxDepth). A document nested beyond encoding/json's own limit, 10,000,
 // fails to decode here before this is checked, with no path, where the
 // browser finds it too deep at a path: both refuse it.
 const MaxDepth = 64
 
 // CheckJSON returns what is wrong with a decoded document before any schema
-// is consulted, as the browser checks it (src/manifest.ts checkJSON):
+// is consulted, as the browser checks it (src/json.ts checkJSON):
 // values nested more than MaxDepth deep, and numbers too large to hold,
 // which a browser's JSON.parse turns into Infinity. Sorted by place.
 func CheckJSON(doc any) []jsonschema.Error {
@@ -541,9 +541,17 @@ func ParseColor(s string) (RGBA, error) {
 	return RGBA{}, fmt.Errorf("%q is not a colour", s)
 }
 
+// The arithmetic below is written so no machine fuses a multiply and an
+// add (arm64 does, amd64 does not, unless kept from it by an explicit
+// conversion -- as in tools/internal/thumbhash), so a contrast near a
+// threshold gets the same verdict on every machine the tools run on. The
+// browser's may still differ from it in the last bit, where an engine's
+// power function rounds differently; a ratio that close to 4.5 or 3 is
+// not one a theme meets by choosing colours.
+
 // Over composites c over an opaque background.
 func (c RGBA) Over(bg RGBA) RGBA {
-	mix := func(f, b float64) float64 { return f*c.A + b*(1-c.A) }
+	mix := func(f, b float64) float64 { return float64(f*c.A) + float64(b*(1-c.A)) }
 	return RGBA{mix(c.R, bg.R), mix(c.G, bg.G), mix(c.B, bg.B), 1}
 }
 
@@ -555,7 +563,7 @@ func (c RGBA) Luminance() float64 {
 		}
 		return math.Pow((v+0.055)/1.055, 2.4)
 	}
-	return 0.2126*lin(c.R) + 0.7152*lin(c.G) + 0.0722*lin(c.B)
+	return float64(0.2126*lin(c.R)) + float64(0.7152*lin(c.G)) + float64(0.0722*lin(c.B))
 }
 
 // Contrast is the WCAG contrast ratio of fg, composited over bg, against

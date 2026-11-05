@@ -15,6 +15,7 @@ import (
 
 	"github.com/evanw/esbuild/pkg/api"
 
+	"github.com/wisborg/clack/tools/internal/jsonc"
 	"github.com/wisborg/clack/tools/internal/jsonschema"
 )
 
@@ -126,7 +127,8 @@ var schemas = api.Plugin{
 }
 
 // themes loads each built-in theme (themes/*.json) without what only a
-// person reads: its "$schema", for editors, and its description. The tools
+// person reads: its comments, its "$schema", for editors, and its
+// description. The tools
 // check the files themselves (tools/internal/formats).
 var themes = api.Plugin{
 	Name: "themes",
@@ -135,6 +137,10 @@ var themes = api.Plugin{
 			src, err := os.ReadFile(args.Path)
 			if err != nil {
 				return api.OnLoadResult{}, err
+			}
+			// Comments allowed, as in any theme (formats.Load).
+			if src, err = jsonc.Strip(src); err != nil {
+				return api.OnLoadResult{}, fmt.Errorf("%s: %w", args.Path, err)
 			}
 			var theme map[string]json.RawMessage
 			if err := json.Unmarshal(src, &theme); err != nil {

@@ -4,8 +4,8 @@
 import type { ClackShow } from "../src/clack";
 import { builtinTheme, compile, contrast, maxThemeBytes, parseColor, readTheme, readThemeBytes, stripComments, ThemeError } from "../src/theme";
 import fixture from "./fixtures/themes.json";
-import { assert, assertEqual, assertThrows, test } from "./harness";
-import { echo, makeShow, places, random, setPointer, waitFor } from "./util";
+import { assert, assertEqual, assertThrows, sleep, test } from "./harness";
+import { echo, imageLog, makeShow, places, quietly, random, resetImageLog, setPointer, waitFor } from "./util";
 
 const builtinNames = ["base", "gallery", "darkroom", "mat", "minimal", "contact-sheet"];
 
@@ -153,18 +153,6 @@ const token = (show: ClackShow, name: string): string => getComputedStyle(show).
 /** The show's box, which carries its layout's choices. */
 const box = (show: ClackShow): HTMLElement => show.shadowRoot!.querySelector<HTMLElement>(".show")!;
 
-/** Runs fn with console.error collected rather than shown. */
-async function quietly(fn: (errors: string[]) => Promise<void>): Promise<void> {
-  const errors: string[] = [];
-  const quiet = console.error;
-  console.error = (...args: unknown[]) => errors.push(args.map(String).join(" "));
-  try {
-    await fn(errors);
-  } finally {
-    console.error = quiet;
-  }
-}
-
 test("a built-in theme is taken up at once, by its name, and base without one", () => {
   const show = makeShow([{}]);
   assertEqual(token(show, "canvas"), "light-dark(#f3f3f1, #1b1b1b)", "base, with no theme named");
@@ -201,7 +189,9 @@ test("a theme file that is refused, or cannot be had, leaves the theme there was
     [echo(pale, { path: "pale.json" }), "/colors/light/muted: on canvas is"],
     [echo("{}", { path: "gone.json", status: 404 }), "404"],
     [echo(pale, { path: "pale.txt", type: "text/plain" }), "application/json"],
-    ["javascript:alert(1)", "neither a built-in theme's name nor an http(s) URL"],
+    ["javascript:alert(1)", "not an http(s) URL"],
+    ["Darkroom", "not a built-in theme (they are base, gallery, darkroom, mat, minimal, contact-sheet)"],
+    ["galery", "not a built-in theme"],
   ] as const) {
     await quietly(async (errors) => {
       const show = makeShow([{}], { theme: "mat" });
@@ -219,6 +209,73 @@ test("a theme asked for while another is on its way replaces it", async () => {
   show.theme = echo(slow, { path: "slow.json", delay: 400 });
   show.theme = "mat";
   assertEqual(box(show).dataset["layout"], "matted", "mat, at once");
-  await new Promise((r) => setTimeout(r, 600));
+  await sleep(600);
   assertEqual(box(show).dataset["layout"], "matted", "still mat: the slow one was dropped");
+});
+
+/** How many times the test server was asked for a theme file at this path (by /echo, which logs each). */
+async function fetchesOf(path: string): Promise<number> {
+  return (await imageLog()).filter((e) => e.startsWith(`manifest /echo/${path}?`)).length;
+}
+
+test("a word that is not a built-in theme's name is not fetched, and space around a name is no matter", async () => {
+  const show = makeShow([{}], { theme: " darkroom " });
+  assertEqual(box(show).dataset["layout"], "stage", "darkroom, the spaces aside");
+  show.theme = "   ";
+  assertEqual(box(show).dataset["layout"], "gallery", "base, for nothing but spaces");
+  const before = performance.getEntriesByType("resource").length;
+  await quietly(async (errors) => {
+    for (const word of ["Darkroom", "galery", "contact_sheet"]) show.theme = word;
+    assertEqual(errors.length, 3, `each said: ${errors.join(" | ")}`);
+  });
+  await sleep(100);
+  const fetched = performance.getEntriesByType("resource").slice(before).map((e) => e.name);
+  assert(!fetched.some((u) => /Darkroom|galery|contact_sheet/.test(u)), `fetched: ${fetched.join(" ")}`);
+  assertEqual(box(show).dataset["layout"], "gallery", "base kept");
+});
+
+test("a theme file is fetched once for the page, however it is spelt and however many shows ask", async () => {
+  await resetImageLog();
+  const shared = JSON.stringify({ format: "clack-theme/1", name: "Shared", extends: "mat" });
+  const url = echo(shared, { path: "shared.json", delay: 200 });
+  const shows = [makeShow([{}], { theme: url }), makeShow([{}], { theme: url })];
+  // The same file, spelt another way: the same once resolved, so nothing to do.
+  shows[0]!.theme = url.replace("/echo/", "/echo/./");
+  await waitFor(() => shows.every((s) => box(s).dataset["layout"] === "matted"), "both shows in the shared theme");
+  shows.push(makeShow([{}], { theme: url }));
+  await waitFor(() => box(shows[2]!).dataset["layout"] === "matted", "a third, later");
+  assertEqual(await fetchesOf("shared.json"), 1, "fetched once");
+});
+
+test("a theme file that failed is fetched again when it is asked for again", async () => {
+  await resetImageLog();
+  const url = echo("{}", { path: "retry.json", status: 503 });
+  const show = makeShow([{}]);
+  await quietly(async (errors) => {
+    show.theme = url;
+    await waitFor(() => errors.length === 1, "the first failure");
+    show.theme = url;
+    await waitFor(() => errors.length === 2, "the second");
+  });
+  assertEqual(await fetchesOf("retry.json"), 2, "fetched each time");
+});
+
+test("a 0 without a unit, as a theme may write it, still makes valid CSS", async () => {
+  const zero = JSON.stringify({
+    format: "clack-theme/1",
+    name: "Zero",
+    layout: { padding: { inline: { min: "0", ideal: "4cqi", max: "48px" }, top: "0" } },
+    caption: { tracking: "0" },
+    controls: { size: "0" },
+    transition: { duration: "0" },
+  });
+  const show = makeShow([{}, {}], { theme: echo(zero, { path: "zero.json" }) });
+  await waitFor(() => token(show, "control-size") === "0px", "the theme");
+  const button = show.shadowRoot!.querySelector("button")!.getBoundingClientRect();
+  assert(button.width >= 24 && button.height >= 24, `a control is still at least 24px: ${button.width}×${button.height}`);
+  const padding = getComputedStyle(box(show));
+  assertEqual(padding.paddingTop, "0px", "the top, 0");
+  assert(parseFloat(padding.paddingLeft) > 0 && parseFloat(padding.paddingBottom) > 0, `the rest kept: ${padding.padding}`);
+  // (The show's own is the page's: the tests set it short on every show.)
+  assertEqual(new Map(compile(readTheme(zero)).properties).get("--clack-transition-duration"), "0s", "no transition");
 });

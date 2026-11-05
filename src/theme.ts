@@ -21,11 +21,8 @@ import darkroom from "../themes/darkroom.json";
 import gallery from "../themes/gallery.json";
 import mat from "../themes/mat.json";
 import minimal from "../themes/minimal.json";
-import { checkJSON, decodeUTF8, fetchJSON, parseJSON } from "./json";
+import { checkJSON, decodeUTF8, fetchJSON, hasLoneSurrogate, isObject, loneSurrogateProblem, parseJSON, type Obj } from "./json";
 import { describeProblems, Schema, sortProblems, type Problem } from "./schema";
-
-type Obj = Record<string, unknown>;
-const isObject = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /** The built-in themes, by the name a page or a theme gives them. base is what every theme starts from. */
 const builtins = new Map<string, Obj>([
@@ -36,6 +33,9 @@ const builtins = new Map<string, Obj>([
   ["minimal", minimal],
   ["contact-sheet", contactSheet],
 ]);
+
+/** The built-in themes' names. */
+export const builtinNames: readonly string[] = [...builtins.keys()];
 
 /** Whether name is a built-in theme's. */
 export const isBuiltin = (name: string): boolean => builtins.has(name);
@@ -116,11 +116,15 @@ export function readThemeBytes(bytes: Uint8Array): Obj {
  */
 export function readTheme(text: string): Obj {
   let doc: unknown;
+  let stripped: string;
   try {
-    doc = parseJSON(stripComments(text));
+    stripped = stripComments(text);
+    doc = parseJSON(stripped);
   } catch (e) {
     throw new ThemeError([{ path: "", message: `is not JSON: ${(e as Error).message}` }]);
   }
+  // In the text, with its comments gone, as the tools look (formats.Parse).
+  if (hasLoneSurrogate(stripped)) throw new ThemeError([loneSurrogateProblem]);
   const shape: Problem[] = [];
   const lone: Problem[] = [];
   checkJSON(doc, "", 1, shape, lone);
@@ -335,7 +339,11 @@ export function compile(t: Obj): Compiled {
   const set = (name: string, value: unknown): void => {
     p.push([`--clack-${name}`, String(value)]);
   };
-  const length = (v: unknown): string => (isObject(v) ? `clamp(${String(v["min"])}, ${String(v["ideal"])}, ${String(v["max"])})` : String(v));
+  // A length or duration of 0, which the schema allows without a unit, is
+  // given one: inside clamp() or max(), as Clack's styles use them, a bare
+  // 0 is a number, not a length, and makes the whole declaration invalid.
+  const one = (v: unknown, unit: string): string => (v === "0" ? `0${unit}` : String(v));
+  const length = (v: unknown): string => (isObject(v) ? `clamp(${one(v["min"], "px")}, ${one(v["ideal"], "px")}, ${one(v["max"], "px")})` : one(v, "px"));
   const get = (path: string): unknown => path.split(".").reduce<unknown>((o, k) => (isObject(o) ? o[k] : undefined), t);
 
   const schemes = schemesOf(t);
@@ -353,15 +361,16 @@ export function compile(t: Obj): Compiled {
   set("frame-width", length(get("layout.frame.width")));
   for (const part of ["caption", "header"]) {
     set(`${part}-font`, `var(--clack-${String(get(`${part}.font`))})`);
-    for (const token of ["size", "weight", "style", "tracking", "case"]) set(`${part}-${token}`, get(`${part}.${token}`));
+    for (const token of ["size", "weight", "style", "case"]) set(`${part}-${token}`, get(`${part}.${token}`));
+    set(`${part}-tracking`, one(get(`${part}.tracking`), "em"));
   }
   set("caption-credit", get("caption.credit") ? "block" : "none");
-  set("control-size", get("controls.size"));
+  set("control-size", length(get("controls.size")));
   set("transition", get("transition.type"));
-  set("transition-duration", get("transition.duration"));
+  set("transition-duration", one(get("transition.duration"), "s"));
   set("index-row-height", length(get("index.rowHeight")));
   set("index-frame-width", length(get("index.frameWidth")));
-  set("index-gap", get("index.gap"));
+  set("index-gap", length(get("index.gap")));
 
   const choices: Record<string, string> = {
     layout: String(get("layout.type")),

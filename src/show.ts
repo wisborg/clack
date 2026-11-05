@@ -12,10 +12,11 @@ import { icon } from "./icons";
 import { photoKey, Photos, type Photo } from "./images";
 import { canStep, drawnWidth, preloadOrder, step } from "./nav";
 import { describeProblems, load, ManifestError, type Manifest } from "./manifest";
-import { maxProblems, readThumbHash } from "./rules";
+import { maxProblems } from "./json";
+import { readThumbHash } from "./rules";
 import { applyLang, fromInput, readMarkup, resolveHTTP, type Keyed, type Slide, type SlideInput } from "./slides";
 import { listen } from "./swipe";
-import { builtinTheme, compile, isBuiltin, loadTheme, ThemeError, type Compiled } from "./theme";
+import { builtinNames, builtinTheme, compile, isBuiltin, loadTheme, ThemeError, type Compiled } from "./theme";
 import { draw } from "./thumbhash";
 
 export const tagName = "clack-show";
@@ -116,6 +117,24 @@ function lookOf({ properties, choices }: Compiled): Look {
   return { sheet, choices };
 }
 
+/**
+ * The looks of theme files, by URL, each fetched once for the page and
+ * shared by every show that asks for it -- and forgotten if it fails, so
+ * asking again fetches it again. Not cancelled when a show stops wanting
+ * it: another may want it still, and a theme file is small.
+ */
+const themeFiles = new Map<string, Promise<Look>>();
+
+function themeFile(url: string): Promise<Look> {
+  let look = themeFiles.get(url);
+  if (!look) {
+    look = loadTheme(url, new AbortController().signal).then((t) => lookOf(compile(t)));
+    themeFiles.set(url, look);
+    look.catch(() => themeFiles.delete(url));
+  }
+  return look;
+}
+
 // The built-in themes' looks, each made once and shared by every show.
 const builtinLooks = new Map<string, Look>();
 
@@ -179,11 +198,8 @@ export class ClackShow extends HTMLElement {
   readonly #live: HTMLDivElement;
   /** The show's outermost box, which carries the theme's layout choices. */
   readonly #box: HTMLDivElement;
-  /**
-   * The theme asked for (a built-in's name, or a URL as given), whether it
-   * failed, and its fetch while it is on its way.
-   */
-  #theme: { asked: string; failed: boolean; abort: AbortController | null } = { asked: "", failed: false, abort: null };
+  /** The theme asked for (a built-in's name, or a theme file's URL, resolved), and whether it failed. */
+  #theme: { asked: string; failed: boolean } = { asked: "", failed: false };
 
   #slides: Keyed[] = [];
   readonly #indexById = new Map<string, number>();
@@ -598,41 +614,38 @@ export class ClackShow extends HTMLElement {
   // ---- The theme ---------------------------------------------------------
 
   /**
-   * Takes up the theme asked for: a built-in at once; a theme file once it
-   * has been fetched and checked, the show keeping the theme it has until
-   * then -- and keeping it, if the file cannot be had or is refused, which
-   * is said to the console. The same theme asked for again does nothing,
-   * unless it failed: asking again is how a page retries.
+   * Takes up the theme asked for: a built-in at once, by its name; a theme
+   * file once it has been fetched and checked, the show keeping the theme
+   * it has until then -- and keeping it, if the file cannot be had or is
+   * refused, which is said to the console. A word that is not a built-in's
+   * name is not fetched as a file: it is a misspelt name far more often
+   * than a file without a dot or a slash. The same theme asked for again
+   * -- the same name, or a URL that resolves the same, against the page's
+   * address now -- does nothing, unless it failed: asking again is how a
+   * page retries.
    */
   #setTheme(value: string): void {
-    const asked = value || "base";
-    const theme = this.#theme;
-    if (asked === theme.asked && !theme.failed) return;
-    theme.abort?.abort();
-    this.#theme = { asked, failed: false, abort: null };
+    const given = value.trim() || "base";
+    const url = isBuiltin(given) || /^[\w-]+$/.test(given) ? null : resolveHTTP(given, document.baseURI);
+    const asked = typeof url === "string" ? url : given;
+    if (asked === this.#theme.asked && !this.#theme.failed) return;
+    const mine = (this.#theme = { asked, failed: false });
     if (isBuiltin(asked)) {
       this.#look(builtinLook(asked));
-      return;
+    } else if (url === null) {
+      this.#themeFailed(asked, new Error(`it is not a built-in theme (they are ${builtinNames.join(", ")}), nor a URL`));
+    } else if (typeof url !== "string") {
+      this.#themeFailed(asked, new Error(`it is not an http(s) URL (${url.problem})`));
+    } else {
+      themeFile(url).then(
+        (look) => {
+          if (this.#theme === mine) this.#look(look);
+        },
+        (e: unknown) => {
+          if (this.#theme === mine) this.#themeFailed(url, e);
+        },
+      );
     }
-    const url = resolveHTTP(asked, document.baseURI);
-    if (typeof url !== "string") {
-      this.#themeFailed(asked, new Error(`it is neither a built-in theme's name nor an http(s) URL (${url.problem})`));
-      return;
-    }
-    const abort = new AbortController();
-    this.#theme.abort = abort;
-    loadTheme(url, abort.signal).then(
-      (resolved) => {
-        if (abort.signal.aborted) return;
-        this.#theme.abort = null;
-        this.#look(lookOf(compile(resolved)));
-      },
-      (e: unknown) => {
-        if (abort.signal.aborted) return;
-        this.#theme.abort = null;
-        this.#themeFailed(url, e);
-      },
-    );
   }
 
   /** The theme asked for could not be had, or was refused: said to the console, the show keeping the theme it has. */
@@ -1059,7 +1072,8 @@ export class ClackShow extends HTMLElement {
       return 0;
     }
     const value = style.getPropertyValue("--clack-transition-duration").trim();
-    const m = /^([0-9.]+)(ms|s)$/.exec(value);
+    // A page may set it too, and 0 needs no unit there.
+    const m = /^([0-9.]+)(ms|s)$/.exec(value === "0" ? "0s" : value);
     let ms = m ? Number(m[1]) * (m[2] === "s" ? 1000 : 1) : 700;
     if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
       ms = Math.min(ms, 200);

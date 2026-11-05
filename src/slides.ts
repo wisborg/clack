@@ -2,7 +2,8 @@
  * Slides: what Clack shows, read from the host page's markup or given from
  * script, in one shape whatever the source.
  */
-import { checkSlideRules, isColor, maxDepth, readThumbHash, rules } from "./rules";
+import { maxDepth } from "./json";
+import { checkSlideRules, isColor, readThumbHash, rules } from "./rules";
 import { describeProblems, sortProblems } from "./schema";
 
 /** One `<source>` of a `<picture>`: the same photo in another format. */

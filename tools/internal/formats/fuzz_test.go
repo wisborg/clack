@@ -76,13 +76,23 @@ func FuzzTheme(f *testing.F) {
 		if len(errs) > 0 {
 			return
 		}
-		// What a theme resolves to is itself a theme, and checks clean.
+		// What a theme resolves to is itself a theme, and checks clean --
+		// read with Parse, not ParseTheme: resolved, it holds every token
+		// of base besides its own, and may be larger than a file may be.
 		again, err := json.Marshal(resolved)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, errs := ParseTheme(schema, again, builtins); len(errs) > 0 {
+		doc, errs := Parse(schema, again)
+		if len(errs) > 0 {
 			t.Fatalf("an accepted theme, resolved, is refused: %v", errs)
+		}
+		twice, err := Resolve(doc, builtins)
+		if err != nil {
+			t.Fatalf("an accepted theme, resolved, does not resolve: %v", err)
+		}
+		if errs := CheckContrast(twice); len(errs) > 0 {
+			t.Fatalf("an accepted theme, resolved, falls short: %v", errs)
 		}
 	})
 }

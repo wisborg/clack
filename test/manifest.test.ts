@@ -5,8 +5,8 @@ import example from "../schema/examples/manifest.json";
 import fixture from "./fixtures/manifests.json";
 import patternCases from "./fixtures/patterns.json";
 import manifestSchemaForTest from "../schema/manifest-1.schema.json";
-import { assert, assertEqual, fixture as fixtureEl, test } from "./harness";
-import { echo, figure, img, imageLog, places, random, resetImageLog, setPointer, settledOn, waitFor } from "./util";
+import { assert, assertEqual, fixture as fixtureEl, sleep, test } from "./harness";
+import { echo, figure, img, imageLog, places, quietly, random, resetImageLog, setPointer, settledOn, waitFor } from "./util";
 
 /** A deep copy of the example manifest, through JSON as a fetched one would come. */
 function exampleCopy(): unknown {
@@ -213,14 +213,10 @@ test("a manifest that cannot be had leaves the markup, says so, and fires error"
   s.append(figure({}));
   let fired = false;
   s.addEventListener("error", () => (fired = true));
-  const quiet = console.error;
-  console.error = () => {};
-  try {
+  await quietly(async () => {
     fixtureEl().append(s);
     await waitFor(() => fired, "the error event");
-  } finally {
-    console.error = quiet;
-  }
+  });
   const notice = s.shadowRoot!.querySelector<HTMLElement>(".notice")!;
   assertEqual(notice.hidden, false, "the notice is shown");
   assertEqual(notice.role, "status", "as a status");
@@ -323,9 +319,7 @@ test("a manifest is fetched once: not twice when Clack loads late, nor again whe
 });
 
 test("after a manifest fails, the notice goes once the page moves on", async () => {
-  const quiet = console.error;
-  console.error = () => {};
-  try {
+  await quietly(async () => {
     const s = show({ src: echo("{}", { status: 500 }) }, 1);
     const notice = s.shadowRoot!.querySelector<HTMLElement>(".notice")!;
     await waitFor(() => !notice.hidden, "the notice");
@@ -335,23 +329,17 @@ test("after a manifest fails, the notice goes once the page moves on", async () 
     await waitFor(() => !notice.hidden, "the notice again");
     s.slides = [{ id: "s", alt: "", width: 300, height: 200, sources: [{ url: img(300, 200), width: 300 }] }];
     assertEqual(notice.hidden, true, "gone, slides from script");
-  } finally {
-    console.error = quiet;
-  }
+  });
 });
 
 test("a src that fails after another loaded leaves the markup, not the old manifest", async () => {
-  const quiet = console.error;
-  console.error = () => {};
-  try {
+  await quietly(async () => {
     const s = show({ src: echo(manifestOf(3)) }, 1);
     await waitFor(() => s.count === 3, "the first manifest");
     s.setAttribute("src", echo("{}", { status: 404 }));
     await waitFor(() => s.count === 1, "the markup's one slide");
     assert(s.shadowRoot!.querySelector(".title")!.getAttribute("lang") !== "da", "nor the old manifest's language");
-  } finally {
-    console.error = quiet;
-  }
+  });
 });
 
 test("slides withdrawn before Clack loads start one fetch, not two", async () => {
@@ -376,9 +364,7 @@ test("a show moved while its manifest loads does not start it again", async () =
 });
 
 test("a show whose manifest failed, once moved, does not fail again", async () => {
-  const quiet = console.error;
-  console.error = () => {};
-  try {
+  await quietly(async () => {
     let errors = 0;
     const s = document.createElement(tagName);
     s.addEventListener("error", () => errors++);
@@ -386,11 +372,9 @@ test("a show whose manifest failed, once moved, does not fail again", async () =
     fixtureEl().append(s);
     await waitFor(() => errors === 1, "the error");
     fixtureEl().append(s);
-    await new Promise((r) => setTimeout(r, 300));
+    await sleep(300);
     assertEqual(errors, 1, "error events");
-  } finally {
-    console.error = quiet;
-  }
+  });
 });
 
 test("after a manifest with no slides, changing src does not bring in the markup", async () => {
@@ -412,10 +396,7 @@ test("markup added while the first manifest loads is shown until it arrives", as
 });
 
 test("a refused manifest is logged with its URL and every problem, by place", async () => {
-  const logged: string[] = [];
-  const quiet = console.error;
-  console.error = (...args: unknown[]) => logged.push(args.map(String).join(" "));
-  try {
+  const logged = await quietly(async () => {
     const slides = Array.from({ length: 12 }, (_, i) => ({ id: `s${i}` }));
     const url = echo(JSON.stringify({ format: "clack-manifest/1", slides }));
     const s = document.createElement(tagName);
@@ -424,9 +405,7 @@ test("a refused manifest is logged with its URL and every problem, by place", as
     s.setAttribute("src", url);
     fixtureEl().append(s);
     await waitFor(() => failed, "the error");
-  } finally {
-    console.error = quiet;
-  }
+  });
   const message = logged.join("\n");
   assert(message.includes("/echo/manifest.json"), "names the manifest");
   assert(message.includes("48 problems"), `counts every problem: ${message.slice(0, 200)}`);
@@ -434,9 +413,7 @@ test("a refused manifest is logged with its URL and every problem, by place", as
 });
 
 test("a src that is not a URL fails once, and the notice goes with it", async () => {
-  const quiet = console.error;
-  console.error = () => {};
-  try {
+  await quietly(async () => {
     let errors = 0;
     const s = document.createElement(tagName);
     s.addEventListener("error", () => errors++);
@@ -450,15 +427,11 @@ test("a src that is not a URL fails once, and the notice goes with it", async ()
     const notice = s.shadowRoot!.querySelector<HTMLElement>(".notice")!;
     s.removeAttribute("src");
     await waitFor(() => notice.hidden === true, "the notice to go");
-  } finally {
-    console.error = quiet;
-  }
+  });
 });
 
 test("setting src again after a failure retries it", async () => {
-  const quiet = console.error;
-  console.error = () => {};
-  try {
+  await quietly(async () => {
     await resetImageLog();
     let errors = 0;
     const url = echo("{}", { status: 503 });
@@ -470,9 +443,7 @@ test("setting src again after a failure retries it", async () => {
     s.setAttribute("src", url); // the same, as a page retrying would
     await waitFor(() => errors === 2, "the retry's failure");
     assertEqual(await manifestFetches(), 2, "fetched twice");
-  } finally {
-    console.error = quiet;
-  }
+  });
 });
 
 test("a show moved with an await between does not fetch its manifest again", async () => {
@@ -581,9 +552,7 @@ test("random URLs: whatever the schema's pattern accepts, the browser resolves",
 });
 
 test("a manifest that failed on a refetch is never brought back from before", async () => {
-  const quiet = console.error;
-  console.error = () => {};
-  try {
+  await quietly(async () => {
     // The same URL: it works the first time, and fails every time after.
     const url = `/once/m${Math.random().toString(36).slice(2)}?${new URLSearchParams({ body: manifestOf(3) })}`;
     const s = show({ src: url }, 1);
@@ -599,9 +568,7 @@ test("a manifest that failed on a refetch is never brought back from before", as
     await new Promise((r) => setTimeout(r, 100));
     assertEqual(s.count, 1, "the markup, not the copy from before");
     assertEqual(s.shadowRoot!.querySelector<HTMLElement>(".notice")!.hidden, false, "and the notice, back with it");
-  } finally {
-    console.error = quiet;
-  }
+  });
 });
 
 test("slides withdrawn bring a loaded manifest back at once: goTo works straight away", async () => {
@@ -614,9 +581,7 @@ test("slides withdrawn bring a loaded manifest back at once: goTo works straight
 });
 
 test("a manifest that fails while the show is out of the page fetches nothing until it is back", async () => {
-  const quiet = console.error;
-  console.error = () => {};
-  try {
+  await quietly(async () => {
     const s = show({ src: echo(manifestOf(2)) });
     await waitFor(() => s.count === 2 && s.slides[0]!.alt === "manifest photo 1", "the manifest");
     // Markup whose photos nobody has fetched yet, so a fetch would show.
@@ -631,9 +596,7 @@ test("a manifest that fails while the show is out of the page fetches nothing un
     parent.append(s);
     await waitFor(() => s.slides[0]?.alt === "photo 1", "the markup, once back");
     assertEqual(s.shadowRoot!.querySelector<HTMLElement>(".notice")!.hidden, false, "with the notice");
-  } finally {
-    console.error = quiet;
-  }
+  });
 });
 
 test("a new manifest's captions show at once, even while a photo is still coming", async () => {
@@ -658,9 +621,7 @@ test("a new manifest's captions show at once, even while a photo is still coming
 });
 
 test("a page that answers a failed manifest with slides of its own keeps them", async () => {
-  const quiet = console.error;
-  console.error = () => {};
-  try {
+  await quietly(async () => {
     const s = document.createElement(tagName);
     s.append(figure({}));
     s.addEventListener("error", () => {
@@ -677,9 +638,7 @@ test("a page that answers a failed manifest with slides of its own keeps them", 
     await new Promise((r) => setTimeout(r, 100));
     assertEqual(s.count, 2, "the fallback stays, whatever the markup does");
     assertEqual(s.slides[0]!.alt, "fallback", "the page's slides");
-  } finally {
-    console.error = quiet;
-  }
+  });
 });
 
 test("a relative src means what it meant when it was set, wherever the page goes", async () => {
@@ -719,9 +678,7 @@ test("slides withdrawn while the show is out of the page are back as soon as it 
 });
 
 test("a manifest failing while the show is out of the page fires error once it is back", async () => {
-  const quiet = console.error;
-  console.error = () => {};
-  try {
+  await quietly(async () => {
     let errors = 0;
     const s = show({ src: echo("{}", { status: 500, delay: 200 }) });
     s.addEventListener("error", () => errors++);
@@ -731,15 +688,11 @@ test("a manifest failing while the show is out of the page fires error once it i
     assertEqual(errors, 0, "not while out of the page");
     parent.append(s);
     assertEqual(errors, 1, "once back");
-  } finally {
-    console.error = quiet;
-  }
+  });
 });
 
 test("an error owed for a manifest since dropped is never fired", async () => {
-  const quiet = console.error;
-  console.error = () => {};
-  try {
+  await quietly(async () => {
     let errors = 0;
     const s = show({ src: echo("{}", { status: 500, delay: 200 }) });
     s.addEventListener("error", () => errors++);
@@ -750,9 +703,7 @@ test("an error owed for a manifest since dropped is never fired", async () => {
     parent.append(s);
     await waitFor(() => s.count === 2, "the new manifest");
     assertEqual(errors, 0, "no error for the manifest dropped");
-  } finally {
-    console.error = quiet;
-  }
+  });
 });
 
 test("slides withdrawn while a manifest is fetched again give way to the markup at once", async () => {
@@ -787,9 +738,7 @@ test("Clack loading late fetches nothing for a src the page has given slides in 
 });
 
 test("a src that is not a URL fails a moment later, so a page can listen for it, and can retry", async () => {
-  const quiet = console.error;
-  console.error = () => {};
-  try {
+  await quietly(async () => {
     const s = document.createElement(tagName);
     s.setAttribute("src", "http://a:99999/m.json");
     fixtureEl().append(s);
@@ -801,9 +750,7 @@ test("a src that is not a URL fails a moment later, so a page can listen for it,
     await waitFor(() => errors === 3, "each failure, retried");
     await new Promise((r) => setTimeout(r, 100));
     assertEqual(errors, 3, "no more than asked for");
-  } finally {
-    console.error = quiet;
-  }
+  });
 });
 
 test("a large manifest is checked in batches, each problem at its place", () => {
@@ -815,9 +762,7 @@ test("a large manifest is checked in batches, each problem at its place", () => 
 });
 
 test("the failure notice is unseen until its words are in it", async () => {
-  const quiet = console.error;
-  console.error = () => {};
-  try {
+  await quietly(async () => {
     const s = show({ src: echo("{}", { status: 500 }) });
     const notice = s.shadowRoot!.querySelector<HTMLElement>(".notice")!;
     // Looked at the moment it appears, not whenever a poll comes round.
@@ -832,9 +777,7 @@ test("the failure notice is unseen until its words are in it", async () => {
     assertEqual(whenShown!.opacity, "0", "and unseen while empty");
     await waitFor(() => notice.textContent !== "", "its words");
     assertEqual(getComputedStyle(notice).opacity, "1", "seen once it has them");
-  } finally {
-    console.error = quiet;
-  }
+  });
 });
 
 test("a slide with a million problems is checked without throwing, and its problems capped", () => {
@@ -861,9 +804,7 @@ test("a credit with no language of its own is in the page's, not the caption's",
 });
 
 test("a page retrying an invalid src from its error handler stays responsive", async () => {
-  const quiet = console.error;
-  console.error = () => {};
-  try {
+  await quietly(async () => {
     const s = document.createElement(tagName);
     s.setAttribute("src", "http://a:99999/m.json");
     let errors = 0;
@@ -878,9 +819,7 @@ test("a page retrying an invalid src from its error handler stays responsive", a
     fixtureEl().append(s);
     await waitFor(() => errors === 10, "ten failures");
     assertEqual(timerRanBy, 10, "the page's own timer ran between retries");
-  } finally {
-    console.error = quiet;
-  }
+  });
 });
 
 test("src is a property too, and one set before Clack loads is taken up", async () => {
@@ -904,9 +843,7 @@ test("the problems kept, past the limit, are the earliest in the file", () => {
 });
 
 test("a later failure's notice is given its words a moment after it shows, not at once", async () => {
-  const quiet = console.error;
-  console.error = () => {};
-  try {
+  await quietly(async () => {
     const s = show({ src: echo("{}", { status: 500 }) });
     const notice = s.shadowRoot!.querySelector<HTMLElement>(".notice")!;
     await waitFor(() => !notice.hidden, "the first notice");
@@ -920,15 +857,11 @@ test("a later failure's notice is given its words a moment after it shows, not a
     await new Promise((r) => setTimeout(r, 30));
     watch.disconnect();
     assertEqual(notice.textContent, "", "still empty just after it shows: the first one's timer is gone");
-  } finally {
-    console.error = quiet;
-  }
+  });
 });
 
 test("a page retrying a src that fetch refuses at once stays responsive", async () => {
-  const quiet = console.error;
-  console.error = () => {};
-  try {
+  await quietly(async () => {
     const s = document.createElement(tagName);
     s.setAttribute("src", `${location.origin.replace("//", "//user:pw@")}/m.json`); // fetch refuses credentials in a URL
     let errors = 0;
@@ -943,9 +876,7 @@ test("a page retrying a src that fetch refuses at once stays responsive", async 
     fixtureEl().append(s);
     await waitFor(() => errors === 10, "ten failures");
     assertEqual(timerRanBy, 10, "the page's own timer ran between retries");
-  } finally {
-    console.error = quiet;
-  }
+  });
 });
 
 test("too many slides are refused for their number alone, whatever else is wrong", () => {
@@ -985,9 +916,7 @@ test("an object shared at every level is copied once, not once per way to reach 
 });
 
 test("a src that is not http or https is refused, not fetched", async () => {
-  const quiet = console.error;
-  console.error = () => {};
-  try {
+  await quietly(async () => {
     const blob = URL.createObjectURL(new Blob([manifestOf(1)], { type: "application/json" }));
     const s = document.createElement(tagName);
     s.append(figure({}));
@@ -998,9 +927,7 @@ test("a src that is not http or https is refused, not fetched", async () => {
     await waitFor(() => failed, "the error");
     assertEqual(s.count, 1, "the markup, not the blob's slides");
     URL.revokeObjectURL(blob);
-  } finally {
-    console.error = quiet;
-  }
+  });
 });
 
 test("the problem kept first is the earliest in the file, even inside a container", () => {

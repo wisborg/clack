@@ -161,3 +161,16 @@ export function echo(body: string, o: { path?: string; type?: string; status?: n
   if (o.delay) q.set("delay", String(o.delay));
   return `/echo/${o.path ?? "manifest.json"}?${q}`;
 }
+
+/** Runs fn with console.error collected rather than shown, and returns what was said. */
+export async function quietly(fn: (errors: string[]) => Promise<void>): Promise<string[]> {
+  const errors: string[] = [];
+  const quiet = console.error;
+  console.error = (...args: unknown[]) => errors.push(args.map(String).join(" "));
+  try {
+    await fn(errors);
+  } finally {
+    console.error = quiet;
+  }
+  return errors;
+}

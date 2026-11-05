@@ -4,8 +4,28 @@
  * checking its shape -- nesting, numbers, Unicode -- before any schema is
  * consulted, as the tools do (tools/internal/formats).
  */
-import { maxDepth, maxProblems } from "./rules";
 import { escape, type Problem } from "./schema";
+
+/**
+ * How deeply a manifest's or a theme's values may nest -- far beyond any
+ * real one: a manifest's slides go five deep, a theme four. The tools
+ * apply the same limit (formats.MaxDepth), so the two agree on every file.
+ */
+export const maxDepth = 64;
+
+/**
+ * The most problems collected from one manifest or theme. Its verdict is
+ * settled by the first; a list of millions would only use up memory, and
+ * the console could not show it anyway. The tools have no such limit, so
+ * past it the two may name different places (the browser keeps the
+ * earliest it found); below it, they name the same.
+ */
+export const maxProblems = 1000;
+
+export type Obj = Record<string, unknown>;
+
+/** Whether v is a JSON object (not an array, not null). */
+export const isObject = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /**
  * What is wrong with a parsed value before any schema is consulted, added
@@ -79,6 +99,46 @@ const escapeStep = (key: string | number): string => (typeof key === "number" ? 
 
 /** A surrogate standing alone: in Unicode mode, a pair is one code point and does not match. */
 const loneSurrogate = /\p{Cs}/u;
+
+/**
+ * Whether JSON text holds a \u escape, in a string, that is half of a
+ * surrogate pair without its other half (formats.loneSurrogate). Looked for
+ * in the text, as the tools look for it, and not in the parsed value: the
+ * walk of that stops at a value nested too deep, or once enough problems
+ * are found, and never sees a value that a repeated key replaced.
+ * Unescaped, a lone surrogate cannot reach the text: UTF-8 cannot hold one.
+ */
+export function hasLoneSurrogate(text: string): boolean {
+  const unit = (at: number): number => (/^[0-9a-fA-F]{4}$/.test(text.slice(at, at + 4)) ? parseInt(text.slice(at, at + 4), 16) : -1);
+  let inString = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (!inString) {
+      if (c === '"') inString = true;
+    } else if (c === '"') {
+      inString = false;
+    } else if (c === "\\" && i + 1 < text.length) {
+      if (text[i + 1] !== "u") {
+        i++; // a two-character escape
+        continue;
+      }
+      const u = unit(i + 2);
+      if (u < 0) return false; // not JSON: the parser says so
+      if (u >= 0xdc00 && u <= 0xdfff) return true; // a low half with no high half before it
+      if (u >= 0xd800 && u <= 0xdbff) {
+        const low = text[i + 6] === "\\" && text[i + 7] === "u" ? unit(i + 8) : -1;
+        if (low < 0xdc00 || low > 0xdfff) return true; // a high half with no low half after it
+        i += 11;
+      } else {
+        i += 5;
+      }
+    }
+  }
+  return false;
+}
+
+/** The problem a lone surrogate is, reported against the whole file. */
+export const loneSurrogateProblem: Problem = { path: "", message: "has a string that is not well-formed Unicode (a lone surrogate escape)" };
 
 /**
  * Parses JSON, throwing only a SyntaxError: a parser may give up on a

@@ -26,7 +26,7 @@ for what the element does so far.
   large calibrated screen and on a phone, not when it works.
 - **No runtime dependencies**, and as few build dependencies as possible, each written down
   with its reason in `DEPENDENCIES.md`.
-- **No third party at view time.** Clack requests the images and manifest it is given, and
+- **No third party at view time.** Clack requests the images, manifest and theme file it is given, and
   nothing else: no fonts from a font service, no analytics, no telemetry.
 - **The host site stays in charge.** Clack never leaks styles into the page, never needs the
   page to loosen its Content-Security-Policy, and never shows metadata nobody asked it to
@@ -278,7 +278,7 @@ show returns focus to the same thumbnail.
 - Data is only ever inserted with `textContent` and attribute setters — never `innerHTML` — so
   a caption cannot become markup. No `eval`, no `new Function`, no inline event handlers; the
   component is tested on a page with a strict Content-Security-Policy and Trusted Types enforced.
-  It makes no network request except for the images and manifest it is given.
+  It makes no network request except for the images, manifest and theme file it is given.
 
 ### Targets
 

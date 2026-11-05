@@ -170,12 +170,17 @@ The element is 3:2 unless the page gives it a height.
 ## Styling
 
 A theme ([`themes.md`](themes.md)) says how the show looks. The `theme` attribute names a
-built-in one, taken up at once, or the URL of a theme file. A theme file is fetched as a
-manifest is — served as JSON, cookies sent to the page's own origin only — and checked
-whole before anything of it is used; until it is here the show keeps the theme it had, and
-if it cannot be had or is refused, the show keeps that theme for good and the console says
-why, each problem by its place in the file. Setting the same `theme` again retries a theme
-that failed. (No event says so yet.)
+built-in one, taken up at once, or the URL of a theme file. A single word is always a name:
+one that is not a built-in theme's (`Darkroom`, `galery`) is refused with a message in the
+console, and never fetched, so a file needs a `.`, a `/` or a scheme in its URL
+(`harbour.json`, `./harbour`). Spaces around the value are ignored.
+
+A theme file is fetched as a manifest is — served as JSON, cookies sent to the page's own
+origin only — and checked whole before anything of it is used; until it is here the show
+keeps the theme it had, and if it cannot be had or is refused, the show keeps that theme for
+good and the console says why, each problem by its place in the file. A file is fetched once
+for the page, however many shows use it and however its URL is spelt; setting `theme` again
+to one that failed fetches it again. (No event says so yet.)
 
 Every token of a theme becomes a custom property on the element, named after it —
 `--clack-canvas`, `--clack-text`, `--clack-transition-duration`, and so on (`compile` in

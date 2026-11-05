@@ -119,7 +119,8 @@ func TestThemesArriveWithoutWhatOnlyAPersonReads(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(dir, "themes"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	write(t, dir, "themes/a.json", `{"$schema": "../schema/x.json", "name": "A", "description": "only words", "scheme": "dark"}`)
+	write(t, dir, "themes/a.json", `{"$schema": "../schema/x.json", "name": "A", // a comment
+	"description": "only words", "scheme": "dark"}`)
 	entry := write(t, dir, "a.ts", `import theme from "./themes/a.json";
 export const s: unknown = theme;
 `)

@@ -40,8 +40,8 @@ delegates; do not add a target that does the work itself.
   `new Function`, inline styles via `<style>` or `style=""` attributes: DOM is built with
   `createElement`/`textContent`, styles are constructable stylesheets adopted by the shadow
   root. The strict-policy test page enforces this.
-- Clack never reads metadata from image files, never requests anything but the images and
-  manifest it is given, and never shows metadata unless the page asked for it. A slide's
+- Clack never reads metadata from image files, never requests anything but the images,
+  manifest and theme file it is given, and never shows metadata unless the page asked for it. A slide's
   title and credit are its caption, not metadata in this sense: shown by default, as a
   `<figcaption>` is (decided with the user, 2026-11-02). Everything else about a photo — the
   caption's longer text, keywords, camera, time, place, technical details, extra facts —
@@ -73,7 +73,10 @@ further with `go test ./tools/internal/formats -fuzz=FuzzManifest -fuzztime=60s`
 Themes are held alike the same way: `test/fixtures/themes.json` edits the annotated example
 theme and gives whole files, and `formats.ParseTheme` and `src/theme.ts` must refuse each at
 the same places — after the schema, a theme is resolved onto the built-in it extends and its
-contrasts are checked, each step only if the one before passed.
+contrasts are checked, each step only if the one before passed. As with manifests, past 1,000
+problems the browser keeps only the earliest it found. A contrast within the last bit of a
+threshold could still go either way between the tools and a browser, whose power functions
+may round differently; the tools' own arithmetic is unfused, so they agree on every machine.
 
 The ThumbHash decoder (`src/thumbhash.ts`) is held to the tools' (`tools/internal/thumbhash`)
 by `test/fixtures/thumbhash.json`, which that package's tests write

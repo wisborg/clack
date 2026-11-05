@@ -9,8 +9,8 @@
  * schema in Go (tools/internal/formats), and both are held to the same
  * cases (test/fixtures/manifests.json).
  */
-import { checkJSON, decodeUTF8, fetchJSON, parseJSON, yieldToPage } from "./json";
-import { checkSlideRules, maxProblems, rules } from "./rules";
+import { checkJSON, decodeUTF8, fetchJSON, hasLoneSurrogate, isObject, loneSurrogateProblem, maxProblems, parseJSON, yieldToPage } from "./json";
+import { checkSlideRules, rules } from "./rules";
 import { describeProblems, sortProblems, type Problem } from "./schema";
 import { convert, resolveHTTP, type Keyed, type SlideInput } from "./slides";
 
@@ -39,9 +39,6 @@ export class ManifestError extends Error {
   }
 }
 
-type Obj = Record<string, unknown>;
-const isObject = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
-
 /**
  * Checks a parsed manifest against the format, returning its problems, in
  * order of place -- at most maxProblems of them; none means it is valid.
@@ -58,13 +55,15 @@ export function check(doc: unknown): Problem[] {
  * are not looked at: the manifest is refused for their number already.
  * Checking stops once maxProblems are found; the verdict is settled.
  */
-function* checking(doc: unknown): Generator<void, Problem[]> {
+function* checking(doc: unknown, loneInText = false): Generator<void, Problem[]> {
   const all = isObject(doc) && Array.isArray(doc["slides"]) ? (doc["slides"] as unknown[]) : null;
   const { top, slide, maxSlides } = rules();
   // More slides than a manifest may hold settle the verdict, alone and at
   // once, as in the tools (formats.ParseManifest): nothing else is looked
   // at, so the two report the one same place.
   if (all && all.length > maxSlides) return [{ path: "/slides", message: `must have at most ${maxSlides} items` }];
+  // Then a lone surrogate, if the text had one (hasLoneSurrogate), alone.
+  if (loneInText) return [loneSurrogateProblem];
   const slides = all;
   const full = (problems: Problem[]): boolean => problems.length >= maxProblems;
 
@@ -114,7 +113,7 @@ function runToEnd<T>(steps: Generator<void, T>): T {
  * problem, or a SyntaxError for text that is not JSON; nothing else.
  */
 export function parse(text: string, base: string): Manifest {
-  return runToEnd(reading(parseJSON(text), base));
+  return runToEnd(reading(parseJSON(text), base, hasLoneSurrogate(text)));
 }
 
 /**
@@ -123,8 +122,8 @@ export function parse(text: string, base: string): Manifest {
  * answer input every few milliseconds of them. (JSON.parse itself is one
  * step, the size of the file: no engine offers it in parts.)
  */
-function* reading(doc: unknown, base: string): Generator<void, Manifest> {
-  const problems = yield* checking(doc);
+function* reading(doc: unknown, base: string, lone: boolean): Generator<void, Manifest> {
+  const problems = yield* checking(doc, lone);
   if (problems.length > 0) {
     throw new ManifestError(problems);
   }
@@ -199,12 +198,15 @@ export async function load(url: string, signal: AbortSignal): Promise<Manifest> 
   let { bytes, url: at }: { bytes: Uint8Array | null; url: string } = await fetchJSON(url, signal, "manifest", maxBytes);
   await yieldToPage();
   signal.throwIfAborted();
-  const doc = parseJSON(decode(bytes!));
+  let text: string | null = decode(bytes!);
   bytes = null;
+  const doc = parseJSON(text);
+  const lone = hasLoneSurrogate(text);
+  text = null;
   // Then read as parse() reads any manifest -- one way in, which the tests
   // exercise too -- with the page given a turn every few milliseconds, and
   // a manifest dropped meanwhile not read on.
-  const steps = reading(doc, at);
+  const steps = reading(doc, at, lone);
   let since = performance.now();
   for (;;) {
     signal.throwIfAborted();
