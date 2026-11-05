@@ -13,7 +13,9 @@ test("defines <clack-show>", () => {
 
 test("styles its shadow root under the strict policy", () => {
   const el = make();
-  assertEqual(el.shadowRoot?.adoptedStyleSheets.length, 1, "adopted stylesheets");
+  // The theme's (base's, as none is named), then Clack's own.
+  assertEqual(el.shadowRoot?.adoptedStyleSheets.length, 2, "adopted stylesheets");
+  assertEqual(getComputedStyle(el).getPropertyValue("--clack-control-size"), "40px", "a token, from the theme");
   // A custom element is display: inline unless its own stylesheet says
   // otherwise, so this shows the sheet was applied, not merely adopted.
   assertEqual(getComputedStyle(el).display, "block", "display");

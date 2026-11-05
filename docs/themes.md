@@ -95,7 +95,7 @@ to `auto` gets base's light colours for the scheme Darkroom leaves out.
 The contrasts are WCAG 2.2's: 4.5:1 for text (1.4.3), 3:1 for controls and focus indicators
 (1.4.11). They are checked when a theme loads, in every scheme it is shown in, with
 translucent colours composited over the colour beneath them first. A theme that falls short
-is refused with the pair, the scheme and the ratio it reached, such as `light: muted on
+is refused with the pair, the scheme and the ratio it reached, such as `/colors/light/muted: on
 canvas is 3.95:1, needs 4.5:1`. (This check found three such pairs in the first draft of the
 built-in themes.)
 
@@ -185,15 +185,30 @@ added as further values. A theme can never name a font to fetch.
 
 ## How a theme is checked
 
-1. Comments are removed, and the file is parsed as JSON. Its values may nest at most 64
-   deep, and no number may be too large to hold — the same limits as a manifest's.
-2. It is checked against the schema: every property known, every value of its type.
-3. It is merged onto the theme it extends, down to `base`.
-4. The result's contrasts are checked in each scheme it is shown in.
+1. The file is at most 64 KB (base, which sets every token, is under 3 KB), and UTF-8.
+2. Comments are removed, and the file is parsed as JSON. Its values may nest at most 64
+   deep, no number may be too large to hold, and every string must be well-formed Unicode
+   — the same limits as a manifest's.
+3. It is checked against the schema: every property known, every value of its type.
+4. It is merged onto the theme it extends, down to `base`.
+5. The result's contrasts are checked in each scheme it is shown in.
 
-Each failure names where it is, for example `/colors/light/canvas: "red" does not have the
-expected form`. A theme that fails is not used; the show keeps the theme it had.
+Each step is taken only if the one before it passed. Each failure names where it is, for
+example `/colors/light/canvas: "red" does not have the expected form`; a contrast is named
+at the colour that falls short, in the theme as merged, for example `/colors/light/muted: on
+canvas is 3.95:1, needs 4.5:1`. A theme that fails is not used; the show keeps the theme it
+had.
 
 The built-in themes and the examples go through the same checks in the tools
-(`tools/internal/formats`), and Clack's loader in the browser will be tested against the same
-files.
+(`tools/internal/formats`, `ParseTheme`), and both are held to the same cases
+([`test/fixtures/themes.json`](../test/fixtures/themes.json)): the same verdict, and the same
+places, for every one.
+
+## What Clack draws of a theme, so far
+
+Every token is checked and compiled, but the show does not yet draw all of them. It does
+draw the colours (all but the mat, frame, label and film roles), the scheme, the padding,
+the shadow, the caption's type and whether it shows the credit, the controls' size, and the
+transition's duration, or `none`. The layouts but `gallery`, the mat and frame, the caption
+card, the header, floating controls and their reveal, the progress line, the `slide`
+transition (a crossfade until then), the details panel and the index are still to come.

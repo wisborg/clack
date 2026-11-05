@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/wisborg/clack/tools/internal/jsonc"
 	"github.com/wisborg/clack/tools/internal/jsonschema"
 )
 
@@ -274,37 +275,126 @@ func edit(t *testing.T, example string, set map[string]any) []byte {
 	return out
 }
 
-func TestThemeRefusals(t *testing.T) {
+// The cases Clack's own theme checker in the browser is held to as well
+// (test/theme.test.ts): the same files, the same verdicts.
+func TestSharedThemeCases(t *testing.T) {
 	themeSchema, _ := schemas(t)
-	for name, c := range map[string]struct {
-		path string
-		set  map[string]any
-	}{
-		"a url() colour":                  {"/colors/light/canvas", map[string]any{"/colors/light/canvas": "url(https://example.com/x.png)"}},
-		"a CSS keyword colour":            {"/colors/light/canvas", map[string]any{"/colors/light/canvas": "red"}},
-		"a colour with a comment":         {"/colors/light/canvas", map[string]any{"/colors/light/canvas": "#fff/**/"}},
-		"a legacy rgb() colour":           {"/colors/light/canvas", map[string]any{"/colors/light/canvas": "rgb(0, 0, 0)"}},
-		"a channel above 255":             {"/colors/light/canvas", map[string]any{"/colors/light/canvas": "rgb(256 0 0)"}},
-		"var() in a colour":               {"/colors/light/canvas", map[string]any{"/colors/light/canvas": "var(--x)"}},
-		"an unknown role":                 {"/colors/light/glow", map[string]any{"/colors/light/glow": "#fff"}},
-		"a third scheme":                  {"/colors/sepia", map[string]any{"/colors/sepia": map[string]any{}}},
-		"CSS smuggled in":                 {"/css", map[string]any{"/css": "body { display: none }"}},
-		"extends a URL":                   {"/extends", map[string]any{"/extends": "https://example.com/theme.json"}},
-		"a font to fetch":                 {"/fonts/serif", map[string]any{"/fonts": map[string]any{"serif": "https://fonts.example.com/x.woff2"}}},
-		"a negative length":               {"/index/gap", map[string]any{"/index/gap": "-4px"}},
-		"a calc() length":                 {"/index/gap", map[string]any{"/index/gap": "calc(100vw - 1px)"}},
-		"a length with no unit":           {"/index/gap", map[string]any{"/index/gap": "8"}},
-		"an incomplete clamp":             {"/index/rowHeight", map[string]any{"/caption/size": "17px", "/index/rowHeight": map[string]any{"min": "1px"}}},
-		"a huge caption":                  {"/caption/size", map[string]any{"/caption/size": "200px"}},
-		"a slow transition":               {"/transition/duration", map[string]any{"/transition": map[string]any{"duration": "10s"}}},
-		"an unknown layout":               {"/layout/type", map[string]any{"/layout": map[string]any{"type": "carousel"}}},
-		"the next format":                 {"/format", map[string]any{"/format": "clack-theme/2"}},
-		"no name":                         {"(document)", map[string]any{"/name": nil}},
-		"a forced scheme's other colours": {"/colors", map[string]any{"/scheme": "dark"}},
-	} {
-		data := edit(t, "schema/examples/theme-annotated.json", c.set)
-		_, errs := Parse(themeSchema, data)
-		wantError(t, name, c.path, errs)
+	all := builtins(t, themeSchema)
+	raw, err := os.ReadFile(filepath.Join(root, "test/fixtures/themes.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture struct {
+		Cases []struct {
+			Name  string          `json:"name"`
+			Set   json.RawMessage `json:"set"`
+			Error json.RawMessage `json:"error"`
+		} `json:"cases"`
+		Raw []struct {
+			Name     string  `json:"name"`
+			Text     *string `json:"text"`
+			Bytes    []byte  `json:"bytes"` // base64, as encoding/json reads []byte
+			File     string  `json:"file"`
+			Accepted bool    `json:"accepted"`
+			Error    *string `json:"error"`
+		} `json:"raw"`
+	}
+	if err := json.Unmarshal(raw, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	example, err := os.ReadFile(filepath.Join(root, "schema/examples/theme-annotated.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	example, err = jsonc.Strip(example)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range fixture.Cases {
+		var want []string
+		if string(c.Error) != "null" {
+			var one string
+			if json.Unmarshal(c.Error, &one) == nil {
+				want = []string{one}
+			} else if err := json.Unmarshal(c.Error, &want); err != nil {
+				t.Fatalf("%s: error is %s", c.Name, c.Error)
+			}
+		}
+		doc, err := jsonschema.Decode(example)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, edit := range orderedObject(t, c.Set) {
+			v, err := jsonschema.Decode(edit.value)
+			if err != nil {
+				t.Fatalf("%s: %v", c.Name, err)
+			}
+			doc = setPointer(t, doc, edit.key, v)
+		}
+		data, _ := json.Marshal(doc)
+		_, errs := ParseTheme(themeSchema, data, all)
+		comparePlaces(t, c.Name, want, errs)
+	}
+	for _, c := range fixture.Raw {
+		data := c.Bytes
+		switch {
+		case c.Text != nil:
+			data = []byte(*c.Text)
+		case c.File != "":
+			if data, err = os.ReadFile(filepath.Join(root, c.File)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		_, errs := ParseTheme(themeSchema, data, all)
+		if accepted := len(errs) == 0; accepted != c.Accepted {
+			t.Errorf("raw %s: accepted %v, want %v: %v", c.Name, accepted, c.Accepted, errs)
+		}
+		if c.Error != nil {
+			for _, e := range errs {
+				if errorPath(e) != *c.Error {
+					t.Errorf("raw %s: an error at %q, want only %q: %v", c.Name, errorPath(e), *c.Error, e)
+				}
+			}
+		}
+	}
+}
+
+// comparePlaces checks that errs are at exactly the places in want, or that
+// there are none if want is nil.
+func comparePlaces(t *testing.T, name string, want []string, errs []error) {
+	t.Helper()
+	got := map[string]bool{}
+	for _, e := range errs {
+		got[errorPath(e)] = true
+	}
+	switch {
+	case want == nil && len(errs) > 0:
+		t.Errorf("%s: refused: %v", name, errs)
+	case want != nil && len(errs) == 0:
+		t.Errorf("%s: accepted", name)
+	case want != nil:
+		for p := range got {
+			if !slices.Contains(want, p) {
+				t.Errorf("%s: an error at %q, want only %q: %v", name, p, want, errs)
+			}
+		}
+		for _, p := range want {
+			if !got[p] {
+				t.Errorf("%s: no error at %q: %v", name, p, errs)
+			}
+		}
+	}
+}
+
+func TestThemeLimits(t *testing.T) {
+	themeSchema, _ := schemas(t)
+	all := builtins(t, themeSchema)
+	big := append([]byte(`{"format":"clack-theme/1","name":"N"}`), bytes.Repeat([]byte(" "), MaxThemeBytes)...)
+	if _, errs := ParseTheme(themeSchema, big, all); len(errs) != 1 || errorPath(errs[0]) != "" || !strings.Contains(errs[0].Error(), "larger") {
+		t.Errorf("a theme over %d bytes: %v", MaxThemeBytes, errs)
+	}
+	if _, errs := ParseTheme(themeSchema, big[:MaxThemeBytes], all); len(errs) > 0 {
+		t.Errorf("a theme of exactly %d bytes: %v", MaxThemeBytes, errs)
 	}
 }
 
@@ -435,7 +525,7 @@ func TestContrast(t *testing.T) {
 		msgs = append(msgs, e.Error())
 	}
 	got := strings.Join(msgs, "; ")
-	for _, want := range []string{"light: text on canvas is 4.48:1", "light: text on surface", "light: edgePrint on film"} {
+	for _, want := range []string{"/colors/light/text: on canvas is 4.48:1", "/colors/light/text: on surface", "/colors/light/edgePrint: on film"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("want %q in %q", want, got)
 		}
@@ -746,27 +836,7 @@ func TestSharedManifestCases(t *testing.T) {
 		if parsed != nil {
 			errs = append(errs, CheckManifest(parsed)...)
 		}
-		got := map[string]bool{}
-		for _, e := range errs {
-			got[errorPath(e)] = true
-		}
-		switch {
-		case want == nil && len(errs) > 0:
-			t.Errorf("%s: refused: %v", c.Name, errs)
-		case want != nil && len(errs) == 0:
-			t.Errorf("%s: accepted", c.Name)
-		case want != nil:
-			for p := range got {
-				if !slices.Contains(want, p) {
-					t.Errorf("%s: an error at %q, want only %q: %v", c.Name, p, want, errs)
-				}
-			}
-			for _, p := range want {
-				if !got[p] {
-					t.Errorf("%s: no error at %q: %v", c.Name, p, errs)
-				}
-			}
-		}
+		comparePlaces(t, c.Name, want, errs)
 	}
 	for _, c := range fixture.Raw {
 		doc, errs := ParseManifest(manifestSchema, c.Bytes)

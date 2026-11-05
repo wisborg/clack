@@ -10,6 +10,7 @@ import "./manifest.test";
 import "./schema.test";
 import "./schemas.test";
 import "./thumbhash.test";
+import "./theme.test";
 
 declare global {
   interface Window {

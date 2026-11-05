@@ -163,7 +163,7 @@ func contentType(path string) string {
 	switch {
 	case strings.HasSuffix(path, ".js"):
 		return "text/javascript; charset=utf-8"
-	case strings.HasSuffix(path, ".map"):
+	case strings.HasSuffix(path, ".map"), strings.HasSuffix(path, ".json"):
 		return "application/json"
 	}
 	return "application/octet-stream"

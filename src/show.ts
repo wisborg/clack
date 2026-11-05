@@ -15,6 +15,7 @@ import { describeProblems, load, ManifestError, type Manifest } from "./manifest
 import { maxProblems, readThumbHash } from "./rules";
 import { applyLang, fromInput, readMarkup, resolveHTTP, type Keyed, type Slide, type SlideInput } from "./slides";
 import { listen } from "./swipe";
+import { builtinTheme, compile, isBuiltin, loadTheme, ThemeError, type Compiled } from "./theme";
 import { draw } from "./thumbhash";
 
 export const tagName = "clack-show";
@@ -96,6 +97,37 @@ function styles(): CSSStyleSheet {
   return sheet;
 }
 
+/** A theme as the show adopts it: its stylesheet, and its layout's choices. */
+interface Look {
+  sheet: CSSStyleSheet;
+  choices: Compiled["choices"];
+}
+
+/**
+ * A compiled theme as a stylesheet of its own: one rule for :host, its
+ * properties set one at a time through the CSS object model, so each value
+ * is only ever a value.
+ */
+function lookOf({ properties, choices }: Compiled): Look {
+  const sheet = new CSSStyleSheet();
+  sheet.replaceSync(":host {}");
+  const style = (sheet.cssRules[0] as CSSStyleRule).style;
+  for (const [name, value] of properties) style.setProperty(name, value);
+  return { sheet, choices };
+}
+
+// The built-in themes' looks, each made once and shared by every show.
+const builtinLooks = new Map<string, Look>();
+
+function builtinLook(name: string): Look {
+  let look = builtinLooks.get(name);
+  if (!look) {
+    look = lookOf(compile(builtinTheme(name)));
+    builtinLooks.set(name, look);
+  }
+  return look;
+}
+
 function el<K extends keyof HTMLElementTagNameMap>(name: K, className: string, part = ""): HTMLElementTagNameMap[K] {
   const e = document.createElement(name);
   e.className = className;
@@ -132,7 +164,7 @@ interface Running {
 
 /** The `<clack-show>` element. */
 export class ClackShow extends HTMLElement {
-  static readonly observedAttributes = ["loop", "fit", "label", "src"];
+  static readonly observedAttributes = ["loop", "fit", "label", "src", "theme"];
 
   readonly #internals: ElementInternals;
   /** The manifest's title, hidden, in its language: what names the show when it does (see #name). */
@@ -145,6 +177,13 @@ export class ClackShow extends HTMLElement {
   readonly #previous: HTMLButtonElement;
   readonly #next: HTMLButtonElement;
   readonly #live: HTMLDivElement;
+  /** The show's outermost box, which carries the theme's layout choices. */
+  readonly #box: HTMLDivElement;
+  /**
+   * The theme asked for (a built-in's name, or a URL as given), whether it
+   * failed, and its fetch while it is on its way.
+   */
+  #theme: { asked: string; failed: boolean; abort: AbortController | null } = { asked: "", failed: false, abort: null };
 
   #slides: Keyed[] = [];
   readonly #indexById = new Map<string, number>();
@@ -217,9 +256,9 @@ export class ClackShow extends HTMLElement {
     this.#internals.ariaLabel = text.show;
 
     const root = this.attachShadow({ mode: "open" });
-    root.adoptedStyleSheets = [styles()];
-
     const show = el("div", "show", "show");
+    this.#box = show;
+    this.#look(builtinLook("base"));
     // Focusable by a click (not by Tab), so the keys work after clicking
     // the photo; the controls are what Tab reaches.
     this.#stage = el("div", "stage", "stage");
@@ -290,7 +329,7 @@ export class ClackShow extends HTMLElement {
     // through the accessor now. A value the setter refuses is reported, as
     // it would have been had Clack been there, and the show carries on.
     const own = this as unknown as Record<string, unknown>;
-    for (const name of ["src", "slides", "loop"]) {
+    for (const name of ["src", "slides", "loop", "theme"]) {
       if (Object.hasOwn(this, name)) {
         const value = own[name];
         delete own[name];
@@ -344,6 +383,9 @@ export class ClackShow extends HTMLElement {
       case "fit":
         this.#photos.resize((key) => this.#sizes(this.#indexByKey.get(key) ?? -1));
         break;
+      case "theme":
+        this.#setTheme(value ?? "");
+        break;
     }
   }
 
@@ -385,6 +427,15 @@ export class ClackShow extends HTMLElement {
 
   set src(url: string) {
     this.setAttribute("src", url);
+  }
+
+  /** The theme: a built-in theme's name, or the URL of a theme file; "" for base. */
+  get theme(): string {
+    return this.getAttribute("theme") ?? "";
+  }
+
+  set theme(value: string) {
+    this.setAttribute("theme", value);
   }
 
   get loop(): boolean {
@@ -542,6 +593,63 @@ export class ClackShow extends HTMLElement {
     this.#manifest = { state: "none" };
     // An error owed for a manifest dropped is not owed any more.
     this.#owedError = false;
+  }
+
+  // ---- The theme ---------------------------------------------------------
+
+  /**
+   * Takes up the theme asked for: a built-in at once; a theme file once it
+   * has been fetched and checked, the show keeping the theme it has until
+   * then -- and keeping it, if the file cannot be had or is refused, which
+   * is said to the console. The same theme asked for again does nothing,
+   * unless it failed: asking again is how a page retries.
+   */
+  #setTheme(value: string): void {
+    const asked = value || "base";
+    const theme = this.#theme;
+    if (asked === theme.asked && !theme.failed) return;
+    theme.abort?.abort();
+    this.#theme = { asked, failed: false, abort: null };
+    if (isBuiltin(asked)) {
+      this.#look(builtinLook(asked));
+      return;
+    }
+    const url = resolveHTTP(asked, document.baseURI);
+    if (typeof url !== "string") {
+      this.#themeFailed(asked, new Error(`it is neither a built-in theme's name nor an http(s) URL (${url.problem})`));
+      return;
+    }
+    const abort = new AbortController();
+    this.#theme.abort = abort;
+    loadTheme(url, abort.signal).then(
+      (resolved) => {
+        if (abort.signal.aborted) return;
+        this.#theme.abort = null;
+        this.#look(lookOf(compile(resolved)));
+      },
+      (e: unknown) => {
+        if (abort.signal.aborted) return;
+        this.#theme.abort = null;
+        this.#themeFailed(url, e);
+      },
+    );
+  }
+
+  /** The theme asked for could not be had, or was refused: said to the console, the show keeping the theme it has. */
+  #themeFailed(name: string, e: unknown): void {
+    this.#theme.failed = true;
+    if (e instanceof ThemeError) {
+      const n = e.problems.length;
+      console.error(`Clack: the theme ${name} was refused, for ${n} problem${n === 1 ? "" : "s"}; the show keeps the theme it had:\n${describeProblems(e.problems, 100).join("\n")}`);
+    } else {
+      console.error(`Clack: the theme ${name} could not be used; the show keeps the theme it had:`, e);
+    }
+  }
+
+  /** Shows the show in a look: its stylesheet before Clack's own, which no theme can override, and its choices on the show's box. */
+  #look({ sheet, choices }: Look): void {
+    this.shadowRoot!.adoptedStyleSheets = [sheet, styles()];
+    for (const [name, value] of Object.entries(choices)) this.#box.dataset[name] = value;
   }
 
   #showManifest(m: Manifest): void {

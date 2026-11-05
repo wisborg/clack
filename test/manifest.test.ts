@@ -6,33 +6,11 @@ import fixture from "./fixtures/manifests.json";
 import patternCases from "./fixtures/patterns.json";
 import manifestSchemaForTest from "../schema/manifest-1.schema.json";
 import { assert, assertEqual, fixture as fixtureEl, test } from "./harness";
-import { figure, img, imageLog, resetImageLog, settledOn, waitFor } from "./util";
+import { echo, figure, img, imageLog, places, random, resetImageLog, setPointer, settledOn, waitFor } from "./util";
 
 /** A deep copy of the example manifest, through JSON as a fetched one would come. */
 function exampleCopy(): unknown {
   return JSON.parse(JSON.stringify(example)) as unknown;
-}
-
-/** Sets the value at a JSON Pointer (null removes it; "" replaces the document). */
-function setPointer(doc: unknown, pointer: string, value: unknown): unknown {
-  if (pointer === "") return value;
-  const parts = pointer.split("/").slice(1).map((p) => p.replaceAll("~1", "/").replaceAll("~0", "~"));
-  let cur = doc as Record<string, unknown>;
-  for (const p of parts.slice(0, -1)) {
-    if (cur[p] === undefined || cur[p] === null) cur[p] = {};
-    cur = cur[p] as Record<string, unknown>;
-  }
-  // A key under a value that is not an object or array: the random edits
-  // ask for these, and they make no sense; the document is left as it was.
-  if (typeof cur !== "object" || cur === null) return doc;
-  const last = parts[parts.length - 1]!;
-  if (value === null) {
-    delete cur[last];
-  } else {
-    // An own property even for "__proto__", as JSON.parse makes it.
-    Object.defineProperty(cur, last, { value, enumerable: true, writable: true, configurable: true });
-  }
-  return doc;
 }
 
 test("the shared manifest cases get the verdicts the Go reference gives", () => {
@@ -116,28 +94,6 @@ test("parse refuses what is not JSON, and names every problem in what is", () =>
   assertEqual(paths.join(" "), "/extra /slides/0 /slides/0 /slides/0 /slides/0", "every problem, by place");
 });
 
-/** A tiny pseudo-random generator, seeded, so a failure can be repeated. */
-function random(seed: number): () => number {
-  let s = seed >>> 0;
-  return () => {
-    s = (s + 0x6d2b79f5) >>> 0;
-    let t = s;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-/** Every place in a document, as JSON Pointers. */
-function places(doc: unknown, at = ""): string[] {
-  const out = [at];
-  if (Array.isArray(doc)) doc.forEach((v, i) => out.push(...places(v, `${at}/${i}`)));
-  else if (typeof doc === "object" && doc !== null) {
-    for (const [k, v] of Object.entries(doc)) out.push(...places(v, `${at}/${k.replaceAll("~", "~0").replaceAll("/", "~1")}`));
-  }
-  return out;
-}
-
 test("no manifest, however broken, makes the checker throw or the parser fail other than as it should", () => {
   const values: unknown[] = [
     null, true, false, 0, -1, 0.5, 1e308, -1e308, 2 ** 53, "", "x", "javascript:alert(1)", "//", "#", "x-",
@@ -184,15 +140,6 @@ test("no manifest, however broken, makes the checker throw or the parser fail ot
     }
   }
 });
-
-/** A URL on the test server that answers with body, as type. */
-function echo(body: string, o: { path?: string; type?: string; status?: number; delay?: number } = {}): string {
-  const q = new URLSearchParams({ body });
-  if (o.type) q.set("type", o.type);
-  if (o.status) q.set("status", String(o.status));
-  if (o.delay) q.set("delay", String(o.delay));
-  return `/echo/${o.path ?? "manifest.json"}?${q}`;
-}
 
 function manifestOf(n: number, extra: Record<string, unknown> = {}): string {
   const slides = Array.from({ length: n }, (_, i) => ({

@@ -61,7 +61,49 @@ func Parse(schema *jsonschema.Schema, data []byte) (map[string]any, []error) {
 	if err != nil {
 		return nil, []error{err}
 	}
-	return parse(schema, stripped)
+	v, err := jsonschema.Decode(stripped)
+	if err != nil {
+		return nil, []error{err}
+	}
+	// As in a manifest (ParseManifest): every string well-formed Unicode,
+	// here as in the browser. Comments are gone by now, so an escape in one
+	// counts for nothing, there as here.
+	if at := loneSurrogate(stripped); at >= 0 {
+		return nil, []error{jsonschema.Error{Path: "", Message: fmt.Sprintf("has a string that is not well-formed Unicode (a lone surrogate escape at byte %d)", at)}}
+	}
+	return check(schema, v)
+}
+
+// MaxThemeBytes is the most a theme file may weigh, in the browser as in
+// the tools: base, which sets every token, is under 3 KB, so a theme of 64
+// KB is one with something in it that is not a theme.
+const MaxThemeBytes = 64 << 10
+
+// ParseTheme reads a theme file as Clack does in the browser (src/theme.ts),
+// and returns it resolved onto the built-in it extends, or every way it
+// fails: too large, not UTF-8, not JSON once its comments are removed,
+// against the schema, in resolving, and in contrast -- each step only if
+// the one before it passed, as there. builtins holds the built-in themes
+// as loaded, by name.
+func ParseTheme(schema *jsonschema.Schema, data []byte, builtins map[string]map[string]any) (map[string]any, []error) {
+	if len(data) > MaxThemeBytes {
+		return nil, []error{jsonschema.Error{Path: "", Message: fmt.Sprintf("is larger than %d bytes", MaxThemeBytes)}}
+	}
+	if !utf8.Valid(data) {
+		return nil, []error{jsonschema.Error{Path: "", Message: "is not UTF-8"}}
+	}
+	doc, errs := Parse(schema, data)
+	if len(errs) > 0 {
+		return nil, errs
+	}
+	resolved, err := Resolve(doc, builtins)
+	if err != nil {
+		return nil, []error{err}
+	}
+	if errs := CheckContrast(resolved); len(errs) > 0 {
+		return nil, errs
+	}
+	return resolved, nil
 }
 
 // LoadManifest reads a manifest file and checks it, as Clack does in the
@@ -169,14 +211,6 @@ const MaxBytes = 32 << 20
 // MaxSlides is the most slides a manifest may hold: the schema's
 // properties.slides.maxItems, which a test keeps it equal to.
 const MaxSlides = 20000
-
-func parse(schema *jsonschema.Schema, data []byte) (map[string]any, []error) {
-	v, err := jsonschema.Decode(data)
-	if err != nil {
-		return nil, []error{err}
-	}
-	return check(schema, v)
-}
 
 // check is parse for a document already decoded.
 func check(schema *jsonschema.Schema, v any) (map[string]any, []error) {
@@ -289,7 +323,7 @@ func Resolve(theme map[string]any, builtins map[string]map[string]any) (map[stri
 		own, _ := theme["colors"].(map[string]any)
 		for scheme := range own {
 			if scheme != shown {
-				return nil, fmt.Errorf("/colors/%s: this theme is shown only in %s, so its %s colours would never be used", scheme, shown, scheme)
+				return nil, jsonschema.Error{Path: "/colors/" + scheme, Message: fmt.Sprintf("this theme is shown only in %s, so its %s colours would never be used", shown, scheme)}
 			}
 		}
 		if colors, ok := out["colors"].(map[string]any); ok {
@@ -303,7 +337,7 @@ func Resolve(theme map[string]any, builtins map[string]map[string]any) (map[stri
 // colours still present.
 func chain(theme map[string]any, builtins map[string]map[string]any, depth int) (map[string]any, error) {
 	if depth > len(Builtins) {
-		return nil, errors.New("themes extend each other in a cycle")
+		return nil, jsonschema.Error{Path: "/extends", Message: "themes extend each other in a cycle"}
 	}
 	parentName, _ := theme["extends"].(string)
 	if parentName == "" {
@@ -311,7 +345,7 @@ func chain(theme map[string]any, builtins map[string]map[string]any, depth int) 
 	}
 	parent, ok := builtins[parentName]
 	if !ok {
-		return nil, fmt.Errorf("extends %q, which is not a built-in theme", parentName)
+		return nil, jsonschema.Error{Path: "/extends", Message: fmt.Sprintf("%q is not a built-in theme", parentName)}
 	}
 	beneath := parent
 	if parentName != "base" {
@@ -403,40 +437,46 @@ var contrastRules = []contrastRule{
 var opaque = []string{"canvas", "surface", "label", "film"}
 
 // CheckContrast returns every pair of roles in a resolved theme that falls
-// short of the contrast it needs, in each scheme the theme is shown in.
+// short of the contrast it needs, in each scheme the theme is shown in,
+// each at the place of the colour that falls short (in the resolved theme:
+// the theme itself may have set only the colour beneath it).
 func CheckContrast(resolved map[string]any) []error {
 	var errs []error
 	colors, _ := resolved["colors"].(map[string]any)
 	for _, scheme := range Schemes(resolved) {
 		palette, _ := colors[scheme].(map[string]any)
-		get := func(role string) (RGBA, error) {
+		at := func(role string) string { return "/colors/" + scheme + "/" + role }
+		// A role that is not set, or not a colour, is reported once,
+		// however many pairs it is in.
+		bad := map[string]bool{}
+		get := func(role string) (RGBA, bool) {
 			s, ok := palette[role].(string)
+			var c RGBA
+			var err error
 			if !ok {
-				return RGBA{}, fmt.Errorf("%s: %s is not set", scheme, role)
+				err = errors.New("is not set")
+			} else if c, err = ParseColor(s); err == nil {
+				return c, true
 			}
-			c, err := ParseColor(s)
-			if err != nil {
-				return RGBA{}, fmt.Errorf("%s: %s: %w", scheme, role, err)
+			if !bad[role] {
+				bad[role] = true
+				errs = append(errs, jsonschema.Error{Path: at(role), Message: err.Error()})
 			}
-			return c, nil
+			return RGBA{}, false
 		}
 		for _, role := range opaque {
-			c, err := get(role)
-			if err != nil {
-				errs = append(errs, err)
-			} else if c.A != 1 {
-				errs = append(errs, fmt.Errorf("%s: %s must be opaque", scheme, role))
+			if c, ok := get(role); ok && c.A != 1 {
+				errs = append(errs, jsonschema.Error{Path: at(role), Message: "must be opaque"})
 			}
 		}
 		for _, r := range contrastRules {
-			fg, err1 := get(r.fg)
-			bg, err2 := get(r.bg)
-			if err := errors.Join(err1, err2); err != nil {
-				errs = append(errs, err)
+			fg, ok1 := get(r.fg)
+			bg, ok2 := get(r.bg)
+			if !ok1 || !ok2 {
 				continue
 			}
 			if c := Contrast(fg, bg); c < r.min {
-				errs = append(errs, fmt.Errorf("%s: %s on %s is %.2f:1, needs %.1f:1", scheme, r.fg, r.bg, c, r.min))
+				errs = append(errs, jsonschema.Error{Path: at(r.fg), Message: fmt.Sprintf("on %s is %.2f:1, needs %.1f:1", r.bg, c, r.min)})
 			}
 		}
 	}

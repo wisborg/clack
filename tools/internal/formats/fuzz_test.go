@@ -72,15 +72,18 @@ func FuzzTheme(f *testing.F) {
 		builtins[name] = doc
 	}
 	f.Fuzz(func(t *testing.T, data []byte) {
-		doc, errs := Parse(schema, data)
-		if doc == nil || len(errs) > 0 {
+		resolved, errs := ParseTheme(schema, data, builtins)
+		if len(errs) > 0 {
 			return
 		}
-		resolved, err := Resolve(doc, builtins)
+		// What a theme resolves to is itself a theme, and checks clean.
+		again, err := json.Marshal(resolved)
 		if err != nil {
-			return
+			t.Fatal(err)
 		}
-		CheckContrast(resolved)
+		if _, errs := ParseTheme(schema, again, builtins); len(errs) > 0 {
+			t.Fatalf("an accepted theme, resolved, is refused: %v", errs)
+		}
 	})
 }
 

@@ -7,6 +7,7 @@
 package bundle
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -71,7 +72,7 @@ func Build(o Options) ([]File, error) {
 		LegalComments: api.LegalCommentsEndOfFile,
 		Write:         o.Write,
 		LogLevel:      api.LogLevelSilent,
-		Plugins:       []api.Plugin{schemas},
+		Plugins:       []api.Plugin{schemas, themes},
 	}
 	if o.Minify {
 		opts.MinifyWhitespace = true
@@ -117,6 +118,33 @@ var schemas = api.Plugin{
 			out, err := jsonschema.StripAnnotations(src)
 			if err != nil {
 				return api.OnLoadResult{}, fmt.Errorf("%s: %w", args.Path, err)
+			}
+			text := string(out)
+			return api.OnLoadResult{Contents: &text, Loader: api.LoaderJSON}, nil
+		})
+	},
+}
+
+// themes loads each built-in theme (themes/*.json) without what only a
+// person reads: its "$schema", for editors, and its description. The tools
+// check the files themselves (tools/internal/formats).
+var themes = api.Plugin{
+	Name: "themes",
+	Setup: func(b api.PluginBuild) {
+		b.OnLoad(api.OnLoadOptions{Filter: `[\\/]themes[\\/][^\\/]+\.json$`}, func(args api.OnLoadArgs) (api.OnLoadResult, error) {
+			src, err := os.ReadFile(args.Path)
+			if err != nil {
+				return api.OnLoadResult{}, err
+			}
+			var theme map[string]json.RawMessage
+			if err := json.Unmarshal(src, &theme); err != nil {
+				return api.OnLoadResult{}, fmt.Errorf("%s: %w", args.Path, err)
+			}
+			delete(theme, "$schema")
+			delete(theme, "description")
+			out, err := json.Marshal(theme)
+			if err != nil {
+				return api.OnLoadResult{}, err
 			}
 			text := string(out)
 			return api.OnLoadResult{Contents: &text, Loader: api.LoaderJSON}, nil

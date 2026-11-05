@@ -1,0 +1,477 @@
+{
+ "$comment": "Cases for both theme checkers -- the reference in Go (tools/internal/formats, ParseTheme) and Clack's own in the browser (src/theme.ts) -- so the two cannot drift apart. Each of \"cases\" applies its edits to schema/examples/theme-annotated.json, read without its comments (a JSON Pointer to the value to set; null removes it; \"\" replaces the whole document), and says where the errors must be: one place, a list of places, or null for a theme that must be accepted. A refused case must have an error at each place and nowhere else. A theme is checked against the schema, then resolved onto the built-in it extends, then for contrast in each scheme it is shown in, each step only if the one before passed; a contrast error is at the place of the colour that falls short, in the theme as resolved. Each of \"raw\" is a whole file -- its text, its bytes in base64, or a file in the repository -- for what only shows in the text, and says whether it is accepted and, if not, where its errors are.",
+ "cases": [
+  {
+   "name": "the example as it is",
+   "set": {},
+   "error": null
+  },
+  {
+   "name": "a url() colour",
+   "set": {
+    "/colors/light/canvas": "url(https://example.com/x.png)"
+   },
+   "error": "/colors/light/canvas"
+  },
+  {
+   "name": "a CSS keyword colour",
+   "set": {
+    "/colors/light/canvas": "red"
+   },
+   "error": "/colors/light/canvas"
+  },
+  {
+   "name": "a colour with a comment",
+   "set": {
+    "/colors/light/canvas": "#fff/**/"
+   },
+   "error": "/colors/light/canvas"
+  },
+  {
+   "name": "a legacy rgb() colour",
+   "set": {
+    "/colors/light/canvas": "rgb(0, 0, 0)"
+   },
+   "error": "/colors/light/canvas"
+  },
+  {
+   "name": "a channel above 255",
+   "set": {
+    "/colors/light/canvas": "rgb(256 0 0)"
+   },
+   "error": "/colors/light/canvas"
+  },
+  {
+   "name": "var() in a colour",
+   "set": {
+    "/colors/light/canvas": "var(--x)"
+   },
+   "error": "/colors/light/canvas"
+  },
+  {
+   "name": "an unknown role",
+   "set": {
+    "/colors/light/glow": "#fff"
+   },
+   "error": "/colors/light/glow"
+  },
+  {
+   "name": "an x- role",
+   "set": {
+    "/colors/light/x-glow": "#fff"
+   },
+   "error": "/colors/light/x-glow"
+  },
+  {
+   "name": "a third scheme",
+   "set": {
+    "/colors/sepia": {}
+   },
+   "error": "/colors/sepia"
+  },
+  {
+   "name": "CSS smuggled in",
+   "set": {
+    "/css": "body { display: none }"
+   },
+   "error": "/css"
+  },
+  {
+   "name": "an x- property, ignored",
+   "set": {
+    "/x-other": [
+     1,
+     {
+      "css": "body { display: none }"
+     }
+    ]
+   },
+   "error": null
+  },
+  {
+   "name": "extends a URL",
+   "set": {
+    "/extends": "https://example.com/theme.json"
+   },
+   "error": "/extends"
+  },
+  {
+   "name": "extends base",
+   "set": {
+    "/extends": "base"
+   },
+   "error": null
+  },
+  {
+   "name": "extends nothing",
+   "set": {
+    "/extends": null
+   },
+   "error": null
+  },
+  {
+   "name": "extends contact-sheet",
+   "set": {
+    "/extends": "contact-sheet"
+   },
+   "error": null
+  },
+  {
+   "name": "a font to fetch",
+   "set": {
+    "/fonts": {
+     "serif": "https://fonts.example.com/x.woff2"
+    }
+   },
+   "error": "/fonts/serif"
+  },
+  {
+   "name": "a negative length",
+   "set": {
+    "/index": {
+     "gap": "-4px"
+    }
+   },
+   "error": "/index/gap"
+  },
+  {
+   "name": "a calc() length",
+   "set": {
+    "/index": {
+     "gap": "calc(100vw - 1px)"
+    }
+   },
+   "error": "/index/gap"
+  },
+  {
+   "name": "a length with no unit",
+   "set": {
+    "/index": {
+     "gap": "8"
+    }
+   },
+   "error": "/index/gap"
+  },
+  {
+   "name": "a fluid length",
+   "set": {
+    "/index": {
+     "rowHeight": {
+      "min": "100px",
+      "ideal": "20cqi",
+      "max": "300px"
+     }
+    }
+   },
+   "error": null
+  },
+  {
+   "name": "an incomplete clamp",
+   "set": {
+    "/index": {
+     "rowHeight": {
+      "min": "1px"
+     }
+    }
+   },
+   "error": "/index/rowHeight"
+  },
+  {
+   "name": "a huge caption",
+   "set": {
+    "/caption/size": "200px"
+   },
+   "error": "/caption/size"
+  },
+  {
+   "name": "a caption in rem",
+   "set": {
+    "/caption/size": "1.25rem"
+   },
+   "error": null
+  },
+  {
+   "name": "a weight between steps",
+   "set": {
+    "/header": {
+     "weight": 450
+    }
+   },
+   "error": "/header/weight"
+  },
+  {
+   "name": "wide tracking",
+   "set": {
+    "/caption/tracking": "0.5em"
+   },
+   "error": "/caption/tracking"
+  },
+  {
+   "name": "small controls, which Clack enlarges",
+   "set": {
+    "/controls": {
+     "size": "12px"
+    }
+   },
+   "error": null
+  },
+  {
+   "name": "a slow transition",
+   "set": {
+    "/transition": {
+     "duration": "10s"
+    }
+   },
+   "error": "/transition/duration"
+  },
+  {
+   "name": "an unknown layout",
+   "set": {
+    "/layout": {
+     "type": "carousel"
+    }
+   },
+   "error": "/layout/type"
+  },
+  {
+   "name": "the next format",
+   "set": {
+    "/format": "clack-theme/2"
+   },
+   "error": "/format"
+  },
+  {
+   "name": "no name",
+   "set": {
+    "/name": null
+   },
+   "error": ""
+  },
+  {
+   "name": "an empty name",
+   "set": {
+    "/name": ""
+   },
+   "error": "/name"
+  },
+  {
+   "name": "colours that are not an object",
+   "set": {
+    "/colors": "#fff"
+   },
+   "error": "/colors"
+  },
+  {
+   "name": "a scheme's colours empty",
+   "set": {
+    "/colors/light": {}
+   },
+   "error": null
+  },
+  {
+   "name": "a forced scheme's other colours",
+   "set": {
+    "/scheme": "dark"
+   },
+   "error": "/colors"
+  },
+  {
+   "name": "a forced scheme with its own colours only",
+   "set": {
+    "/scheme": "light",
+    "/colors/dark": null
+   },
+   "error": null
+  },
+  {
+   "name": "an inherited forced scheme's other colours",
+   "set": {
+    "/extends": "darkroom"
+   },
+   "error": "/colors/light"
+  },
+  {
+   "name": "an inherited forced scheme, its own colours only",
+   "set": {
+    "/extends": "darkroom",
+    "/colors/light": null
+   },
+   "error": null
+  },
+  {
+   "name": "an inherited forced scheme, unforced",
+   "set": {
+    "/extends": "darkroom",
+    "/scheme": "auto"
+   },
+   "error": null
+  },
+  {
+   "name": "muted text too light",
+   "set": {
+    "/colors/light/muted": "#999999"
+   },
+   "error": "/colors/light/muted"
+  },
+  {
+   "name": "a dark canvas as light as its text",
+   "set": {
+    "/colors/dark/canvas": "#ececec"
+   },
+   "error": [
+    "/colors/dark/text",
+    "/colors/dark/muted",
+    "/colors/dark/accent",
+    "/colors/dark/control",
+    "/colors/dark/controlActive"
+   ]
+  },
+  {
+   "name": "a translucent canvas",
+   "set": {
+    "/colors/light/canvas": "#ffffff80"
+   },
+   "error": "/colors/light/canvas"
+  },
+  {
+   "name": "translucent text that falls short",
+   "set": {
+    "/colors/light/text": "rgb(29 29 31 / 0.3)"
+   },
+   "error": "/colors/light/text"
+  },
+  {
+   "name": "translucent text that is enough",
+   "set": {
+    "/colors/light/text": "rgb(29 29 31 / 90%)"
+   },
+   "error": null
+  },
+  {
+   "name": "a whole document that is a list",
+   "set": {
+    "": []
+   },
+   "error": ""
+  }
+ ],
+ "raw": [
+  {
+   "name": "the annotated example",
+   "file": "schema/examples/theme-annotated.json",
+   "accepted": true
+  },
+  {
+   "name": "a minimal theme",
+   "text": "{\"format\":\"clack-theme/1\",\"name\":\"Mini\"}",
+   "accepted": true
+  },
+  {
+   "name": "comments everywhere outside strings",
+   "text": "/*a*/{//b\n\"format\"/*c*/:\"clack-theme/1\",//d\r\n\"name\":\"N\"}//e",
+   "accepted": true
+  },
+  {
+   "name": "a comment's markers inside a string",
+   "text": "{\"format\":\"clack-theme/1\",\"name\":\"a // b /* c */ d\"}",
+   "accepted": true
+  },
+  {
+   "name": "an escaped quote before a comment's markers",
+   "text": "{\"format\":\"clack-theme/1\",\"name\":\"a \\\" // b\"}",
+   "accepted": true
+  },
+  {
+   "name": "a block comment never closed",
+   "text": "{\"format\":\"clack-theme/1\",\"name\":\"N\"} /* end",
+   "accepted": false,
+   "error": ""
+  },
+  {
+   "name": "a string never closed",
+   "text": "{\"format\":\"clack-theme/1\",\"name\":\"N",
+   "accepted": false,
+   "error": ""
+  },
+  {
+   "name": "a trailing comma",
+   "text": "{\"format\":\"clack-theme/1\",\"name\":\"N\",}",
+   "accepted": false,
+   "error": ""
+  },
+  {
+   "name": "single quotes",
+   "text": "{'format':'clack-theme/1','name':'N'}",
+   "accepted": false,
+   "error": ""
+  },
+  {
+   "name": "a slash alone",
+   "text": "{\"format\":\"clack-theme/1\",\"name\":\"N\"} /",
+   "accepted": false,
+   "error": ""
+  },
+  {
+   "name": "only comments",
+   "text": "// nothing\n/* at all */",
+   "accepted": false,
+   "error": ""
+  },
+  {
+   "name": "a byte-order mark",
+   "text": "﻿{\"format\":\"clack-theme/1\",\"name\":\"Mini\"}",
+   "accepted": false,
+   "error": ""
+  },
+  {
+   "name": "bytes that are not UTF-8, in a comment",
+   "bytes": "eyJmb3JtYXQiOiJjbGFjay10aGVtZS8xIiwibmFtZSI6Ik4ifSAvLyD/",
+   "accepted": false,
+   "error": ""
+  },
+  {
+   "name": "a lone surrogate escape in a string",
+   "text": "{\"format\":\"clack-theme/1\",\"name\":\"\\ud800\"}",
+   "accepted": false,
+   "error": ""
+  },
+  {
+   "name": "a lone surrogate escape in a comment",
+   "text": "{\"format\":\"clack-theme/1\",\"name\":\"N\"} // \"\\ud800\"",
+   "accepted": true
+  },
+  {
+   "name": "a pair of surrogate escapes",
+   "text": "{\"format\":\"clack-theme/1\",\"name\":\"\\ud83d\\udcf7\"}",
+   "accepted": true
+  },
+  {
+   "name": "a number too large to hold",
+   "text": "{\"format\":\"clack-theme/1\",\"name\":\"N\",\"x-big\":1e400}",
+   "accepted": false,
+   "error": "/x-big"
+  },
+  {
+   "name": "nesting 64 deep",
+   "text": "{\"format\":\"clack-theme/1\",\"name\":\"N\",\"x-deep\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[0]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}",
+   "accepted": true
+  },
+  {
+   "name": "nesting 65 deep",
+   "text": "{\"format\":\"clack-theme/1\",\"name\":\"N\",\"x-deep\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[0]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}",
+   "accepted": false,
+   "error": "/x-deep/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0/0"
+  },
+  {
+   "name": "a key named __proto__",
+   "text": "{\"format\":\"clack-theme/1\",\"name\":\"N\",\"__proto__\":{\"scheme\":\"dark\"}}",
+   "accepted": false,
+   "error": "/__proto__"
+  },
+  {
+   "name": "a repeated key",
+   "text": "{\"format\":\"clack-theme/1\",\"name\":\"N\",\"scheme\":\"sepia\",\"scheme\":\"dark\"}",
+   "accepted": true
+  }
+ ]
+}

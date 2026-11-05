@@ -406,6 +406,10 @@ side with the version before.
 - Sizing modes and the full-size view with zoom and pan.
 - Auto-play with pause control, visibility and reduced-motion handling.
 - Metadata display (hidden by default), theme loading and validation, the five themes.
+  *(Theme loading and validation done: the `theme` attribute takes a built-in theme or a
+  theme file, which is checked as the tools check it, against the same shared cases
+  (`test/fixtures/themes.json`), and compiled into custom properties; what the show draws of
+  a theme so far is in `docs/themes.md`.)*
 - The index, `<clack-index>`: justified and contact-sheet layouts, paired with a show,
   sections, paging, enhancing the host's layout in place.
 - Title slides: a slide type that introduces a part of a show (a day of a trip), for

@@ -113,3 +113,27 @@ export const s: unknown = schema;
 		t.Error("a schema the validator refuses was bundled")
 	}
 }
+
+func TestThemesArriveWithoutWhatOnlyAPersonReads(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "themes"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, dir, "themes/a.json", `{"$schema": "../schema/x.json", "name": "A", "description": "only words", "scheme": "dark"}`)
+	entry := write(t, dir, "a.ts", `import theme from "./themes/a.json";
+export const s: unknown = theme;
+`)
+	files, err := Build(Options{Entry: entry, Outfile: filepath.Join(dir, "out.js"), Minify: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var js string
+	for _, f := range files {
+		if filepath.Base(f.Path) == "out.js" {
+			js = string(f.Contents)
+		}
+	}
+	if strings.Contains(js, "only words") || strings.Contains(js, "schema/x.json") || !strings.Contains(js, `scheme:"dark"`) {
+		t.Errorf("the theme is not stripped as expected:\n%s", js)
+	}
+}

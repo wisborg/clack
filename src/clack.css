@@ -5,41 +5,13 @@
  *
  * Every value a theme can change is a custom property on :host, named after
  * its token (docs/themes.md): --clack-canvas is colors.*.canvas, and so on.
- * The defaults here are base's (themes/base.json); a theme compiles to the
- * same properties, and a host page can set them on the element too.
+ * None is set here: the theme sets every one -- base, from themes/base.json,
+ * if the page names none -- in a stylesheet adopted before this one
+ * (src/theme.ts compile). A host page can set them on the element too. The
+ * layout's choices arrive as data attributes on .show.
  */
 
 :host {
-  color-scheme: light dark;
-  --clack-canvas: light-dark(#f3f3f1, #1b1b1b);
-  --clack-surface: light-dark(#ffffff, #232323);
-  --clack-text: light-dark(#1d1d1f, #ececec);
-  --clack-muted: light-dark(#6e6e73, #9a9a9d);
-  --clack-hairline: light-dark(rgb(0 0 0 / 0.1), rgb(255 255 255 / 0.1));
-  --clack-accent: light-dark(#1d1d1f, #ececec);
-  --clack-control: light-dark(rgb(0 0 0 / 0.55), rgb(255 255 255 / 0.6));
-  --clack-control-active: light-dark(rgb(0 0 0 / 0.9), #ffffff);
-
-  --clack-serif: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
-  --clack-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-
-  --clack-padding-inline: clamp(16px, 3.4cqi, 48px);
-  --clack-padding-top: clamp(16px, 2cqi, 28px);
-  --clack-padding-bottom: clamp(12px, 1.4cqi, 20px);
-  --clack-shadow:
-    0 1px 2px light-dark(rgb(0 0 0 / 0.06), rgb(0 0 0 / 0.5)),
-    0 14px 36px light-dark(rgb(0 0 0 / 0.14), rgb(0 0 0 / 0.55));
-
-  --clack-caption-font: var(--clack-serif);
-  --clack-caption-size: 17px;
-  --clack-caption-weight: 400;
-  --clack-caption-style: normal;
-  --clack-caption-tracking: 0;
-  --clack-caption-case: none;
-
-  --clack-control-size: 40px;
-  --clack-transition: crossfade;
-  --clack-transition-duration: 700ms;
   --clack-ease: cubic-bezier(0.2, 0, 0, 1);
 
   display: block;
@@ -250,7 +222,7 @@
 }
 
 .credit {
-  display: block;
+  display: var(--clack-caption-credit);
   margin-top: 2px;
   font-size: 12.5px;
   letter-spacing: 0.01em;

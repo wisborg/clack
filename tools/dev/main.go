@@ -318,6 +318,13 @@ func cmdTest(ctx context.Context, args []string) error {
 	for _, f := range files {
 		served["/"+filepath.Base(f.Path)] = f.Contents
 	}
+	// The example theme as a file, comments and all, for the shared theme
+	// cases (test/fixtures/themes.json), which edit it.
+	example, err := os.ReadFile("schema/examples/theme-annotated.json")
+	if err != nil {
+		return err
+	}
+	served["/examples/theme-annotated.json"] = example
 	srv, err := browsertest.Serve(served)
 	if err != nil {
 		return err
