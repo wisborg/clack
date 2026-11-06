@@ -5,26 +5,37 @@ import type { ClackShow } from "../src/clack";
 import { builtinTheme, compile, contrast, maxThemeBytes, parseColor, readTheme, readThemeBytes, stripComments, ThemeError } from "../src/theme";
 import fixture from "./fixtures/themes.json";
 import { assert, assertEqual, assertThrows, sleep, test } from "./harness";
-import { echo, imageLog, makeShow, places, quietly, random, resetImageLog, setPointer, waitFor } from "./util";
+import { comparePlaces, echo, imageLog, makeShow, places, quietly, random, resetImageLog, setPointer, waitFor } from "./util";
 
 const builtinNames = ["base", "gallery", "darkroom", "mat", "minimal", "contact-sheet"];
 
+/** A file in the repository, as the test server serves it (tools/dev, /repo/). */
+async function repoFile(path: string): Promise<string> {
+  const response = await fetch(`/repo/${path}`);
+  assert(response.ok, `${path}: ${response.status}`);
+  return response.text();
+}
+
 /** The example theme's text, as the tools read it: comments and all. */
 async function exampleText(): Promise<string> {
-  const response = await fetch("/examples/theme-annotated.json");
-  assert(response.ok, `the example theme: ${response.status}`);
-  return response.text();
+  return repoFile("schema/examples/theme-annotated.json");
+}
+
+/** A theme's problems: none if it is accepted. */
+function problemsOf(read: () => unknown): { path: string; message: string }[] {
+  try {
+    read();
+    return [];
+  } catch (e) {
+    if (e instanceof ThemeError) return e.problems;
+    throw e;
+  }
 }
 
 /** Where a theme's problems are, or null if it is accepted. */
 function placesOf(read: () => unknown): string[] | null {
-  try {
-    read();
-    return null;
-  } catch (e) {
-    if (e instanceof ThemeError) return e.problems.map((p) => p.path);
-    throw e;
-  }
+  const problems = problemsOf(read);
+  return problems.length > 0 ? problems.map((p) => p.path) : null;
 }
 
 test("the shared theme cases get the verdicts the Go reference gives", async () => {
@@ -33,14 +44,8 @@ test("the shared theme cases get the verdicts the Go reference gives", async () 
   for (const c of fixture.cases) {
     let doc = JSON.parse(stripComments(text)) as unknown;
     for (const [pointer, value] of Object.entries(c.set)) doc = setPointer(doc, pointer, value);
-    const want: string[] | null = c.error === null ? null : Array.isArray(c.error) ? c.error : [c.error];
-    const got = placesOf(() => readThemeBytes(new TextEncoder().encode(JSON.stringify(doc))));
-    const all = new Set(got);
-    if (want === null && got !== null) failures.push(`${c.name}: refused at ${got.join(", ")}`);
-    else if (want !== null && got === null) failures.push(`${c.name}: accepted`);
-    else if (want !== null && ([...all].some((p) => !want.includes(p)) || want.some((p) => !all.has(p)))) {
-      failures.push(`${c.name}: errors at ${[...all].join(", ")}, want ${want.join(", ")}`);
-    }
+    const wrong = comparePlaces(c.name, c.error, problemsOf(() => readThemeBytes(new TextEncoder().encode(JSON.stringify(doc)))));
+    if (wrong) failures.push(wrong);
   }
   for (const r of fixture.raw as { name: string; text?: string; bytes?: string; file?: string; accepted: boolean; error?: string }[]) {
     const bytes =
@@ -48,7 +53,7 @@ test("the shared theme cases get the verdicts the Go reference gives", async () 
         ? new TextEncoder().encode(r.text)
         : r.bytes !== undefined
           ? Uint8Array.from(atob(r.bytes), (ch) => ch.charCodeAt(0))
-          : new TextEncoder().encode(text); // the one file the cases name: the example
+          : new TextEncoder().encode(await repoFile(r.file!));
     const got = placesOf(() => readThemeBytes(bytes));
     if ((got === null) !== r.accepted) failures.push(`raw ${r.name}: accepted ${got === null}, want ${r.accepted}`);
     if (r.error !== undefined && got?.some((p) => p !== r.error)) failures.push(`raw ${r.name}: errors at ${got.join(", ")}, want only ${JSON.stringify(r.error)}`);
@@ -225,12 +230,13 @@ test("a word that is not a built-in theme's name is not fetched, and space aroun
   assertEqual(box(show).dataset["layout"], "gallery", "base, for nothing but spaces");
   const before = performance.getEntriesByType("resource").length;
   await quietly(async (errors) => {
-    for (const word of ["Darkroom", "galery", "contact_sheet"]) show.theme = word;
-    assertEqual(errors.length, 3, `each said: ${errors.join(" | ")}`);
+    const words = ["Darkroom", "galery", "contact_sheet", "Mørk", "dark room", "harbour?v=2"];
+    for (const word of words) show.theme = word;
+    assertEqual(errors.length, words.length, `each said: ${errors.join(" | ")}`);
   });
   await sleep(100);
   const fetched = performance.getEntriesByType("resource").slice(before).map((e) => e.name);
-  assert(!fetched.some((u) => /Darkroom|galery|contact_sheet/.test(u)), `fetched: ${fetched.join(" ")}`);
+  assert(!fetched.some((u) => /Darkroom|galery|contact_sheet|M%C3%B8rk|dark%20room|harbour/.test(u)), `fetched: ${fetched.join(" ")}`);
   assertEqual(box(show).dataset["layout"], "gallery", "base kept");
 });
 
@@ -278,4 +284,23 @@ test("a 0 without a unit, as a theme may write it, still makes valid CSS", async
   assert(parseFloat(padding.paddingLeft) > 0 && parseFloat(padding.paddingBottom) > 0, `the rest kept: ${padding.padding}`);
   // (The show's own is the page's: the tests set it short on every show.)
   assertEqual(new Map(compile(readTheme(zero)).properties).get("--clack-transition-duration"), "0s", "no transition");
+});
+
+test("a theme file is fetched only once its show is in the page", async () => {
+  await resetImageLog();
+  const url = echo(JSON.stringify({ format: "clack-theme/1", name: "Later", extends: "mat" }), { path: "later.json" });
+  const show = document.createElement("clack-show") as ClackShow;
+  show.theme = url;
+  await sleep(200);
+  assertEqual(await fetchesOf("later.json"), 0, "not while it is out of the page");
+  makeShow([{}]).replaceWith(show);
+  await waitFor(() => box(show).dataset["layout"] === "matted", "the theme, once it is in");
+  assertEqual(await fetchesOf("later.json"), 1, "fetched then");
+});
+
+test("past 1,000 problems, a theme's earliest 1,000 are kept", () => {
+  const many = Object.fromEntries(Array.from({ length: 1500 }, (_, i) => [`k${String(i).padStart(4, "0")}`, 1]));
+  const problems = problemsOf(() => readTheme(JSON.stringify({ format: "clack-theme/1", name: "N", ...many })));
+  assertEqual(problems.length, 1000, "how many");
+  assertEqual(problems[0]!.path, "/k0000", "the earliest first");
 });

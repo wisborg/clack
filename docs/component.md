@@ -170,21 +170,26 @@ The element is 3:2 unless the page gives it a height.
 ## Styling
 
 A theme ([`themes.md`](themes.md)) says how the show looks. The `theme` attribute names a
-built-in one, taken up at once, or the URL of a theme file. A single word is always a name:
-one that is not a built-in theme's (`Darkroom`, `galery`) is refused with a message in the
-console, and never fetched, so a file needs a `.`, a `/` or a scheme in its URL
-(`harbour.json`, `./harbour`). Spaces around the value are ignored.
+built-in one, taken up at once, or the URL of a theme file. A value with no `.`, `/` or `:`
+in it is always a name: one that is not a built-in theme's (`Darkroom`, `galery`, `dark
+room`) is refused with a message in the console, and never fetched, so a theme file's URL
+needs one of them (`harbour.json`, `./harbour`). Spaces around the value are ignored.
 
-A theme file is fetched as a manifest is — served as JSON, cookies sent to the page's own
-origin only — and checked whole before anything of it is used; until it is here the show
-keeps the theme it had, and if it cannot be had or is refused, the show keeps that theme for
-good and the console says why, each problem by its place in the file. A file is fetched once
-for the page, however many shows use it and however its URL is spelt; setting `theme` again
-to one that failed fetches it again. (No event says so yet.)
+A theme file is fetched as a manifest is — once the show is in the page, served as JSON,
+cookies sent to the page's own origin only — and checked whole before anything of it is
+used; until it is here the show keeps the theme it had, and if it cannot be had or is
+refused, the show keeps that theme for good and the console says why, each problem by its
+place in the file. The last few files asked for are kept, so one is fetched once however many
+shows use it and however its URL is spelt; a file that has changed is seen at a new URL
+(`harbour.json?v=2`) or when the page is loaded again. Setting `theme` again to one that
+failed fetches it again. (No event says so yet.)
 
 Every token of a theme becomes a custom property on the element, named after it —
 `--clack-canvas`, `--clack-text`, `--clack-transition-duration`, and so on (`compile` in
 `src/theme.ts` names them all). A page can set them on `clack-show` too, and its value wins
-over the theme's. `color-scheme` on the element forces light or dark. Parts
+over the theme's. With a theme that follows the visitor's light or dark setting (`scheme:
+"auto"`, as most do), `color-scheme` on the element forces one; a theme that forces a scheme
+itself, such as `darkroom`, has only that scheme's colours, so `color-scheme` changes
+nothing of it but the browser's own controls. Parts
 for `::part()`: `show`, `stage`, `slide`, `photo`, `below`, `caption`, `controls`,
 `button`, `previous`, `next`, `counter`, `missing`.

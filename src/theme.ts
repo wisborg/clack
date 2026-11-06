@@ -21,8 +21,8 @@ import darkroom from "../themes/darkroom.json";
 import gallery from "../themes/gallery.json";
 import mat from "../themes/mat.json";
 import minimal from "../themes/minimal.json";
-import { checkJSON, decodeUTF8, fetchJSON, hasLoneSurrogate, isObject, loneSurrogateProblem, parseJSON, type Obj } from "./json";
-import { describeProblems, Schema, sortProblems, type Problem } from "./schema";
+import { checkJSON, decodeUTF8, fetchJSON, hasLoneSurrogate, isObject, loneSurrogateProblem, maxProblems, parseJSON, RefusedError, type Obj } from "./json";
+import { Schema, sortProblems, type Problem } from "./schema";
 
 /** The built-in themes, by the name a page or a theme gives them. base is what every theme starts from. */
 const builtins = new Map<string, Obj>([
@@ -47,15 +47,10 @@ export const isBuiltin = (name: string): boolean => builtins.has(name);
 export const maxThemeBytes = 64 * 1024;
 
 /** A theme that was refused, with every problem found. */
-export class ThemeError extends Error {
-  readonly problems: Problem[];
-
+export class ThemeError extends RefusedError {
   constructor(problems: Problem[]) {
-    const shown = describeProblems(problems.slice(0, 5)).map((l) => l.trim());
-    if (problems.length > 5) shown.push(`and ${problems.length - 5} more`);
-    super(`Clack: the theme was refused: ${shown.join("; ")}`);
+    super("theme", problems);
     this.name = "ThemeError";
-    this.problems = problems;
   }
 }
 
@@ -125,12 +120,12 @@ export function readTheme(text: string): Obj {
   }
   // In the text, with its comments gone, as the tools look (formats.Parse).
   if (hasLoneSurrogate(stripped)) throw new ThemeError([loneSurrogateProblem]);
+  // Nesting and numbers; lone surrogates are found in the text, above.
   const shape: Problem[] = [];
-  const lone: Problem[] = [];
-  checkJSON(doc, "", 1, shape, lone);
-  if (lone.length > 0) throw new ThemeError(lone);
+  checkJSON(doc, "", 1, shape);
   if (shape.length > 0) throw new ThemeError(sortProblems(shape));
-  const problems = (compiledSchema ??= new Schema(themeSchema)).validate(doc);
+  // The earliest maxProblems, by place, as for a manifest.
+  const problems = (compiledSchema ??= new Schema(themeSchema)).validate(doc).slice(0, maxProblems);
   if (problems.length > 0) throw new ThemeError(problems);
   const resolved = resolve(doc as Obj);
   const contrast = checkContrast(resolved);
@@ -152,8 +147,9 @@ const own = new Set(["$schema", "name", "description", "author", "extends"]);
  * to base (formats.Resolve): objects merge key by key, and any other value
  * replaces the one beneath it. A theme shown in one scheme only keeps only
  * that scheme's colours, and is refused if it sets the other's itself.
- * Only for a theme that has passed the schema, whose keys are all its own
- * but its extensions (x-), which are left out.
+ * Only for a theme that has passed the schema, so every key is the
+ * format's own but the theme's extensions (x-), which it keeps -- as the
+ * tools do -- and inherits none of.
  */
 function resolve(theme: Obj): Obj {
   const out = chain(theme, 0);
@@ -184,12 +180,20 @@ function chain(theme: Obj, depth: number): Obj {
   return merge(inherited, theme);
 }
 
-/** over merged onto under, as a new value sharing nothing with either; extensions (x-) left out. */
+/**
+ * over merged onto under, as a new value sharing nothing with either -- but
+ * an extension's (x-) value, kept as it is: Clack never reads one, and it
+ * may hold any key at all, "__proto__" among them, which a copy made by
+ * assignment would turn into a prototype.
+ */
 function merge(under: Obj, over: Obj): Obj {
   const out: Obj = {};
   for (const k of Object.keys(under)) out[k] = clone(under[k]);
   for (const k of Object.keys(over)) {
-    if (k.startsWith("x-")) continue;
+    if (k.startsWith("x-")) {
+      out[k] = over[k];
+      continue;
+    }
     const a = out[k];
     const b = over[k];
     out[k] = isObject(a) && isObject(b) ? merge(a, b) : clone(b);

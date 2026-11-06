@@ -4,7 +4,7 @@
  * checking its shape -- nesting, numbers, Unicode -- before any schema is
  * consulted, as the tools do (tools/internal/formats).
  */
-import { escape, type Problem } from "./schema";
+import { describeProblems, escape, type Problem } from "./schema";
 
 /**
  * How deeply a manifest's or a theme's values may nest -- far beyond any
@@ -21,6 +21,37 @@ export const maxDepth = 64;
  * earliest it found); below it, they name the same.
  */
 export const maxProblems = 1000;
+
+/**
+ * A file -- a manifest or a theme -- that was refused, with every problem
+ * found (up to maxProblems): the first five in its message.
+ */
+export class RefusedError extends Error {
+  readonly problems: Problem[];
+
+  constructor(what: string, problems: Problem[]) {
+    const shown = describeProblems(problems.slice(0, 5)).map((l) => l.trim());
+    if (problems.length > 5) shown.push(`and ${problems.length - 5} more`);
+    super(`Clack: the ${what} was refused: ${shown.join("; ")}`);
+    this.problems = problems;
+  }
+}
+
+/**
+ * What the console is told of a file that could not be used: refused, with
+ * every problem by its place (saying so if checking stopped at
+ * maxProblems), or not had at all, and why. then says what the show does
+ * about it.
+ */
+export function reportFailure(what: string, url: string, e: unknown, then: string): void {
+  if (e instanceof RefusedError) {
+    const n = e.problems.length;
+    const many = n >= maxProblems ? `${n} or more problems (checking stops there)` : `${n} problem${n === 1 ? "" : "s"}`;
+    console.error(`Clack: the ${what} ${url} was refused, for ${many}${then}:\n${describeProblems(e.problems, 100).join("\n")}`);
+  } else {
+    console.error(`Clack: the ${what} ${url} could not be loaded${then}:`, e);
+  }
+}
 
 export type Obj = Record<string, unknown>;
 
@@ -42,7 +73,7 @@ export const isObject = (v: unknown): v is Obj => typeof v === "object" && v !==
  * own stack -- each container and how far through it -- so no document can
  * exhaust the call stack, and spells out a path only for a problem.
  */
-export function checkJSON(v: unknown, path: string, depth: number, out: Problem[], lone: Problem[], skip?: unknown): void {
+export function checkJSON(v: unknown, path: string, depth: number, out: Problem[], lone?: Problem[], skip?: unknown): void {
   interface Frame {
     c: object;
     keys: string[] | null; // null for an array, walked by index
@@ -62,7 +93,7 @@ export function checkJSON(v: unknown, path: string, depth: number, out: Problem[
   // Into lone, not out: like the tools, which find it before anything else
   // can be checked, a lone surrogate is then the only problem reported.
   const surrogate = (where: () => string): void => {
-    if (lone.length === 0) lone.push({ path: "", message: `has a string that is not well-formed Unicode (a lone surrogate), at ${where() || "(the whole file)"}` });
+    if (lone?.length === 0) lone.push({ path: "", message: `has a string that is not well-formed Unicode (a lone surrogate), at ${where() || "(the whole file)"}` });
   };
   const enter = (c: object, key: string | number, d: number): void => {
     frames.push({ c, keys: Array.isArray(c) ? null : Object.keys(c), i: 0, key, depth: d });
@@ -109,6 +140,11 @@ const loneSurrogate = /\p{Cs}/u;
  * Unescaped, a lone surrogate cannot reach the text: UTF-8 cannot hold one.
  */
 export function hasLoneSurrogate(text: string): boolean {
+  // Text given from script, not decoded from bytes, may hold one unescaped.
+  if (loneSurrogate.test(text)) return true;
+  // Most files have no escape of a surrogate at all: one native search,
+  // not a walk of every character.
+  if (!/\\u[dD][89a-fA-F]/.test(text)) return false;
   const unit = (at: number): number => (/^[0-9a-fA-F]{4}$/.test(text.slice(at, at + 4)) ? parseInt(text.slice(at, at + 4), 16) : -1);
   let inString = false;
   for (let i = 0; i < text.length; i++) {

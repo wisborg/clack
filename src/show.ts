@@ -11,12 +11,12 @@ import css from "./clack.css";
 import { icon } from "./icons";
 import { photoKey, Photos, type Photo } from "./images";
 import { canStep, drawnWidth, preloadOrder, step } from "./nav";
-import { describeProblems, load, ManifestError, type Manifest } from "./manifest";
-import { maxProblems } from "./json";
+import { load, type Manifest } from "./manifest";
+import { reportFailure } from "./json";
 import { readThumbHash } from "./rules";
 import { applyLang, fromInput, readMarkup, resolveHTTP, type Keyed, type Slide, type SlideInput } from "./slides";
 import { listen } from "./swipe";
-import { builtinNames, builtinTheme, compile, isBuiltin, loadTheme, ThemeError, type Compiled } from "./theme";
+import { builtinNames, builtinTheme, compile, isBuiltin, loadTheme, type Compiled } from "./theme";
 import { draw } from "./thumbhash";
 
 export const tagName = "clack-show";
@@ -118,19 +118,30 @@ function lookOf({ properties, choices }: Compiled): Look {
 }
 
 /**
- * The looks of theme files, by URL, each fetched once for the page and
- * shared by every show that asks for it -- and forgotten if it fails, so
- * asking again fetches it again. Not cancelled when a show stops wanting
- * it: another may want it still, and a theme file is small.
+ * The looks of the theme files asked for last, by URL, so a file is fetched
+ * once however many shows ask for it -- and forgotten if it fails, so
+ * asking again fetches it again. Only the last few are kept: a page that
+ * previews many themes, or a new version of one at a new URL, does not
+ * collect them all. A fetch is not cancelled when a show stops wanting it:
+ * another may want it still, and a theme file is small.
  */
 const themeFiles = new Map<string, Promise<Look>>();
+const themeFilesKept = 8;
 
 function themeFile(url: string): Promise<Look> {
   let look = themeFiles.get(url);
-  if (!look) {
+  if (look) {
+    themeFiles.delete(url); // to the end: asked for last
+  } else {
     look = loadTheme(url, new AbortController().signal).then((t) => lookOf(compile(t)));
-    themeFiles.set(url, look);
-    look.catch(() => themeFiles.delete(url));
+    look.catch(() => {
+      if (themeFiles.get(url) === look) themeFiles.delete(url);
+    });
+  }
+  themeFiles.set(url, look);
+  for (const oldest of themeFiles.keys()) {
+    if (themeFiles.size <= themeFilesKept) break;
+    themeFiles.delete(oldest);
   }
   return look;
 }
@@ -198,8 +209,12 @@ export class ClackShow extends HTMLElement {
   readonly #live: HTMLDivElement;
   /** The show's outermost box, which carries the theme's layout choices. */
   readonly #box: HTMLDivElement;
-  /** The theme asked for (a built-in's name, or a theme file's URL, resolved), and whether it failed. */
-  #theme: { asked: string; failed: boolean } = { asked: "", failed: false };
+  /**
+   * The theme asked for (a built-in's name, or a theme file's URL,
+   * resolved), whether it failed, and the file still to be fetched, if it
+   * is one and the show has not been in the page since it was asked for.
+   */
+  #theme: { asked: string; failed: boolean; file: string | null } = { asked: "", failed: false, file: null };
 
   #slides: Keyed[] = [];
   readonly #indexById = new Map<string, number>();
@@ -360,6 +375,7 @@ export class ClackShow extends HTMLElement {
     // the show was out of the page and not watching it.
     if (this.#showing.from === "markup") this.#showing = { from: "none" };
     this.#ready = true;
+    this.#fetchTheme();
     this.#render();
   }
 
@@ -592,13 +608,7 @@ export class ClackShow extends HTMLElement {
    * renders, and the page's error event after that.
    */
   #failed(url: string, e: unknown): void {
-    if (e instanceof ManifestError) {
-      const n = e.problems.length;
-      const many = n >= maxProblems ? `${n} or more problems (checking stops there)` : `${n} problem${n === 1 ? "" : "s"}`;
-      console.error(`Clack: the manifest ${url} was refused, for ${many}:\n${describeProblems(e.problems, 100).join("\n")}`);
-    } else {
-      console.error(`Clack: the manifest ${url} could not be loaded:`, e);
-    }
+    reportFailure("manifest", url, e, "");
     this.#manifest = { state: "failed" };
     this.#owedError = true;
   }
@@ -617,19 +627,21 @@ export class ClackShow extends HTMLElement {
    * Takes up the theme asked for: a built-in at once, by its name; a theme
    * file once it has been fetched and checked, the show keeping the theme
    * it has until then -- and keeping it, if the file cannot be had or is
-   * refused, which is said to the console. A word that is not a built-in's
-   * name is not fetched as a file: it is a misspelt name far more often
-   * than a file without a dot or a slash. The same theme asked for again
+   * refused, which is said to the console. A value with no dot, slash or
+   * colon is a name, and one that is not a built-in's is not fetched as a
+   * file: it is a misspelt name far more often than a file without a dot.
+   * The same theme asked for again
    * -- the same name, or a URL that resolves the same, against the page's
    * address now -- does nothing, unless it failed: asking again is how a
    * page retries.
    */
   #setTheme(value: string): void {
     const given = value.trim() || "base";
-    const url = isBuiltin(given) || /^[\w-]+$/.test(given) ? null : resolveHTTP(given, document.baseURI);
+    // A name, unless it has what only a URL has: a dot, a slash or a colon.
+    const url = isBuiltin(given) || !/[./:]/.test(given) ? null : resolveHTTP(given, document.baseURI);
     const asked = typeof url === "string" ? url : given;
     if (asked === this.#theme.asked && !this.#theme.failed) return;
-    const mine = (this.#theme = { asked, failed: false });
+    this.#theme = { asked, failed: false, file: typeof url === "string" ? url : null };
     if (isBuiltin(asked)) {
       this.#look(builtinLook(asked));
     } else if (url === null) {
@@ -637,26 +649,34 @@ export class ClackShow extends HTMLElement {
     } else if (typeof url !== "string") {
       this.#themeFailed(asked, new Error(`it is not an http(s) URL (${url.problem})`));
     } else {
-      themeFile(url).then(
-        (look) => {
-          if (this.#theme === mine) this.#look(look);
-        },
-        (e: unknown) => {
-          if (this.#theme === mine) this.#themeFailed(url, e);
-        },
-      );
+      this.#fetchTheme();
     }
+  }
+
+  /**
+   * Fetches the theme file asked for, if there is one still to fetch --
+   * only once the show is in the page, as its manifest is: a show made
+   * and never shown asks for nothing.
+   */
+  #fetchTheme(): void {
+    const theme = this.#theme;
+    const url = theme.file;
+    if (!this.#ready || url === null) return;
+    theme.file = null;
+    themeFile(url).then(
+      (look) => {
+        if (this.#theme === theme) this.#look(look);
+      },
+      (e: unknown) => {
+        if (this.#theme === theme) this.#themeFailed(url, e);
+      },
+    );
   }
 
   /** The theme asked for could not be had, or was refused: said to the console, the show keeping the theme it has. */
   #themeFailed(name: string, e: unknown): void {
     this.#theme.failed = true;
-    if (e instanceof ThemeError) {
-      const n = e.problems.length;
-      console.error(`Clack: the theme ${name} was refused, for ${n} problem${n === 1 ? "" : "s"}; the show keeps the theme it had:\n${describeProblems(e.problems, 100).join("\n")}`);
-    } else {
-      console.error(`Clack: the theme ${name} could not be used; the show keeps the theme it had:`, e);
-    }
+    reportFailure("theme", name, e, "; the show keeps the theme it had");
   }
 
   /** Shows the show in a look: its stylesheet before Clack's own, which no theme can override, and its choices on the show's box. */

@@ -9,7 +9,7 @@
  * schema in Go (tools/internal/formats), and both are held to the same
  * cases (test/fixtures/manifests.json).
  */
-import { checkJSON, decodeUTF8, fetchJSON, hasLoneSurrogate, isObject, loneSurrogateProblem, maxProblems, parseJSON, yieldToPage } from "./json";
+import { checkJSON, decodeUTF8, fetchJSON, hasLoneSurrogate, isObject, loneSurrogateProblem, maxProblems, parseJSON, RefusedError, yieldToPage } from "./json";
 import { checkSlideRules, rules } from "./rules";
 import { describeProblems, sortProblems, type Problem } from "./schema";
 import { convert, resolveHTTP, type Keyed, type SlideInput } from "./slides";
@@ -27,15 +27,10 @@ export interface Manifest {
 }
 
 /** A manifest that was refused, with every problem found. */
-export class ManifestError extends Error {
-  readonly problems: Problem[];
-
+export class ManifestError extends RefusedError {
   constructor(problems: Problem[]) {
-    const shown = describeProblems(problems.slice(0, 5)).map((l) => l.trim());
-    if (problems.length > 5) shown.push(`and ${problems.length - 5} more`);
-    super(`Clack: the manifest was refused: ${shown.join("; ")}`);
+    super("manifest", problems);
     this.name = "ManifestError";
-    this.problems = problems;
   }
 }
 

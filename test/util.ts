@@ -174,3 +174,21 @@ export async function quietly(fn: (errors: string[]) => Promise<void>): Promise<
   }
   return errors;
 }
+
+/**
+ * A shared case's verdict against what was wanted (the same contract as
+ * the tools' comparePlaces, in tools/internal/formats): error is null for a
+ * file that must be accepted, else one place or a list of places, and a
+ * refused file must have an error at each and nowhere else. Returns what
+ * is wrong, or null.
+ */
+export function comparePlaces(name: string, error: string | readonly string[] | null, got: readonly { path: string; message: string }[]): string | null {
+  const want = error === null ? null : typeof error === "string" ? [error] : error;
+  const places = new Set(got.map((p) => p.path));
+  if (want === null) return got.length > 0 ? `${name}: refused: ${got.map((p) => `${p.path}: ${p.message}`).join("; ")}` : null;
+  if (got.length === 0) return `${name}: accepted`;
+  if ([...places].some((p) => !want.includes(p)) || want.some((p) => !places.has(p))) {
+    return `${name}: errors at ${[...places].join(", ")}, want ${want.join(", ")}`;
+  }
+  return null;
+}

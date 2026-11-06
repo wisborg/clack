@@ -362,6 +362,11 @@
    "accepted": true
   },
   {
+   "name": "a built-in theme, as a file",
+   "file": "themes/darkroom.json",
+   "accepted": true
+  },
+  {
    "name": "a minimal theme",
    "text": "{\"format\":\"clack-theme/1\",\"name\":\"Mini\"}",
    "accepted": true

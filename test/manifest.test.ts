@@ -6,7 +6,7 @@ import fixture from "./fixtures/manifests.json";
 import patternCases from "./fixtures/patterns.json";
 import manifestSchemaForTest from "../schema/manifest-1.schema.json";
 import { assert, assertEqual, fixture as fixtureEl, sleep, test } from "./harness";
-import { echo, figure, img, imageLog, places, quietly, random, resetImageLog, setPointer, settledOn, waitFor } from "./util";
+import { comparePlaces, echo, figure, img, imageLog, places, quietly, random, resetImageLog, setPointer, settledOn, waitFor } from "./util";
 
 /** A deep copy of the example manifest, through JSON as a fetched one would come. */
 function exampleCopy(): unknown {
@@ -20,8 +20,6 @@ test("the shared manifest cases get the verdicts the Go reference gives", () => 
     for (const [pointer, value] of Object.entries(c.set)) {
       doc = setPointer(doc, pointer, value);
     }
-    // error is null, one place, or a list of places.
-    const want: string[] | null = c.error === null ? null : Array.isArray(c.error) ? c.error : [c.error];
     // Through JSON text, as from the network: a "__proto__" key stays a key.
     // JSON.stringify writes -0 as 0, so -0 is carried through as a marker
     // and put back in the text, to reach the checker as it would.
@@ -34,14 +32,8 @@ test("the shared manifest cases get the verdicts the Go reference gives", () => 
     } catch (e) {
       problems = e instanceof ManifestError ? e.problems : [{ path: "", message: String(e) }];
     }
-    const got = new Set(problems.map((p) => p.path));
-    if (want === null && problems.length > 0) {
-      failures.push(`${c.name}: refused: ${problems.map((p) => `${p.path}: ${p.message}`).join("; ")}`);
-    } else if (want !== null && problems.length === 0) {
-      failures.push(`${c.name}: accepted`);
-    } else if (want !== null && ([...got].some((p) => !want.includes(p)) || want.some((p) => !got.has(p)))) {
-      failures.push(`${c.name}: errors at ${[...got].join(", ")}, want ${want.join(", ")}`);
-    }
+    const wrong = comparePlaces(c.name, c.error, problems);
+    if (wrong) failures.push(wrong);
   }
   // Whole files, as bytes: decoded and parsed as load() does.
   for (const r of fixture.raw) {
