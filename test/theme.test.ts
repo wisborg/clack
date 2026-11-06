@@ -2,10 +2,10 @@
 // ParseTheme), from the shared cases; what a theme compiles to; and the
 // theme attribute, with built-in themes and theme files.
 import type { ClackShow } from "../src/clack";
-import { builtinTheme, compile, contrast, maxThemeBytes, parseColor, readTheme, readThemeBytes, stripComments, ThemeError } from "../src/theme";
+import { builtinTheme, compile, contrast, parseColor, readTheme, readThemeBytes, stripComments, ThemeError } from "../src/theme";
 import fixture from "./fixtures/themes.json";
-import { assert, assertEqual, assertThrows, sleep, test } from "./harness";
-import { comparePlaces, echo, imageLog, makeShow, places, quietly, random, resetImageLog, setPointer, waitFor } from "./util";
+import { assert, assertEqual, assertThrows, skip, sleep, test } from "./harness";
+import { checkRaw, comparePlaces, echo, figures, imageLog, makeShow, places, quietly, random, resetImageLog, setPointer, settledOn, waitFor } from "./util";
 
 const builtinNames = ["base", "gallery", "darkroom", "mat", "minimal", "contact-sheet"];
 
@@ -32,11 +32,6 @@ function problemsOf(read: () => unknown): { path: string; message: string }[] {
   }
 }
 
-/** Where a theme's problems are, or null if it is accepted. */
-function placesOf(read: () => unknown): string[] | null {
-  const problems = problemsOf(read);
-  return problems.length > 0 ? problems.map((p) => p.path) : null;
-}
 
 test("the shared theme cases get the verdicts the Go reference gives", async () => {
   const text = await exampleText();
@@ -47,25 +42,22 @@ test("the shared theme cases get the verdicts the Go reference gives", async () 
     const wrong = comparePlaces(c.name, c.error, problemsOf(() => readThemeBytes(new TextEncoder().encode(JSON.stringify(doc)))));
     if (wrong) failures.push(wrong);
   }
-  for (const r of fixture.raw as { name: string; text?: string; bytes?: string; file?: string; accepted: boolean; error?: string }[]) {
-    const bytes =
+  type Raw = { name: string; text?: string; bytes?: string; file?: string; padTo?: number; accepted: boolean; error?: string; why?: string };
+  for (const r of fixture.raw as Raw[]) {
+    let bytes =
       r.text !== undefined
         ? new TextEncoder().encode(r.text)
         : r.bytes !== undefined
           ? Uint8Array.from(atob(r.bytes), (ch) => ch.charCodeAt(0))
           : new TextEncoder().encode(await repoFile(r.file!));
-    const got = placesOf(() => readThemeBytes(bytes));
-    if ((got === null) !== r.accepted) failures.push(`raw ${r.name}: accepted ${got === null}, want ${r.accepted}`);
-    if (r.error !== undefined && got?.some((p) => p !== r.error)) failures.push(`raw ${r.name}: errors at ${got.join(", ")}, want only ${JSON.stringify(r.error)}`);
+    if (r.padTo !== undefined && r.padTo > bytes.length) {
+      const padded = new Uint8Array(r.padTo).fill(0x20);
+      padded.set(bytes);
+      bytes = padded;
+    }
+    failures.push(...checkRaw(r.name, r, problemsOf(() => readThemeBytes(bytes))));
   }
   assert(failures.length === 0, failures.join("\n"));
-});
-
-test("a theme as large as the tools allow is read, and one byte more is not", () => {
-  const theme = '{"format":"clack-theme/1","name":"N"}';
-  const at = (n: number): Uint8Array => new TextEncoder().encode(theme + " ".repeat(n - theme.length));
-  assertEqual(placesOf(() => readThemeBytes(at(maxThemeBytes))), null, "the most");
-  assertEqual(placesOf(() => readThemeBytes(at(maxThemeBytes + 1)))?.join(), "", "one byte more");
 });
 
 test("comments are taken out without moving anything else", () => {
@@ -108,6 +100,9 @@ test("every built-in theme compiles to values CSS takes, every one of them", () 
   }
   const darkroom = new Map(compile(builtinTheme("darkroom")).properties);
   assertEqual(darkroom.get("color-scheme"), "dark", "darkroom forces dark");
+  assert(!darkroom.get("--clack-shadow")!.includes("light-dark"), "and its shadow is dark's alone");
+  const mat = new Map(compile(builtinTheme("mat")).properties);
+  assert(mat.get("--clack-shadow") === "none" || mat.get("--clack-shadow")!.includes("light-dark"), "a theme in both schemes: a shadow for each");
   assertEqual(darkroom.get("--clack-canvas"), "#0b0b0b", "in dark only, its own colour");
   const gallery = new Map(compile(builtinTheme("gallery")).properties);
   assertEqual(gallery.get("color-scheme"), "light dark", "gallery follows the visitor");
@@ -245,8 +240,9 @@ test("a theme file is fetched once for the page, however it is spelt and however
   const shared = JSON.stringify({ format: "clack-theme/1", name: "Shared", extends: "mat" });
   const url = echo(shared, { path: "shared.json", delay: 200 });
   const shows = [makeShow([{}], { theme: url }), makeShow([{}], { theme: url })];
-  // The same file, spelt another way: the same once resolved, so nothing to do.
+  // The same file, spelt another way, or with a fragment: the same file, so nothing to do.
   shows[0]!.theme = url.replace("/echo/", "/echo/./");
+  shows[1]!.theme = `${url}#v1`;
   await waitFor(() => shows.every((s) => box(s).dataset["layout"] === "matted"), "both shows in the shared theme");
   shows.push(makeShow([{}], { theme: url }));
   await waitFor(() => box(shows[2]!).dataset["layout"] === "matted", "a third, later");
@@ -303,4 +299,39 @@ test("past 1,000 problems, a theme's earliest 1,000 are kept", () => {
   const problems = problemsOf(() => readTheme(JSON.stringify({ format: "clack-theme/1", name: "N", ...many })));
   assertEqual(problems.length, 1000, "how many");
   assertEqual(problems[0]!.path, "/k0000", "the earliest first");
+});
+
+test("a sheet the page adopted into the shadow root outlasts a change of theme", () => {
+  const show = makeShow([{}]);
+  const mine = new CSSStyleSheet();
+  mine.replaceSync(":host { outline: 3px solid rgb(1, 2, 3); }");
+  show.shadowRoot!.adoptedStyleSheets = [...show.shadowRoot!.adoptedStyleSheets, mine];
+  show.theme = "mat";
+  show.theme = "darkroom";
+  assert(show.shadowRoot!.adoptedStyleSheets.includes(mine), "the page's sheet is still there");
+  assertEqual(getComputedStyle(show).outlineColor, "rgb(1, 2, 3)", "and applied");
+  assertEqual(box(show).dataset["layout"], "stage", "with darkroom's");
+});
+
+test("a theme that is not one says so only once its show is in the page", async () => {
+  await quietly(async (errors) => {
+    const show = document.createElement("clack-show") as ClackShow;
+    show.theme = "galery";
+    await sleep(50);
+    assertEqual(errors.length, 0, "nothing said for a show out of the page");
+    makeShow([{}]).replaceWith(show);
+    assertEqual(errors.length, 1, `said once it is in: ${errors.join(" | ")}`);
+  });
+});
+
+test("a transition lasts as long as CSS works out the token's time, calc() and all", async () => {
+  if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing animates in a hidden page");
+  const show = makeShow([{}, {}]);
+  show.style.setProperty("--clack-transition-duration", "calc(2 * 150ms)");
+  await settledOn(show, "1 of 2");
+  await sleep(300); // slide 2, preloaded
+  const leaving = figures(show)[0]!;
+  void show.next();
+  await waitFor(() => leaving.getAnimations().length > 0, "the old photo to animate");
+  assertEqual(leaving.getAnimations()[0]!.effect!.getTiming().duration, 300, "300ms");
 });

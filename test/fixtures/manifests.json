@@ -1,5 +1,5 @@
 {
-  "$comment": "Cases for both manifest checkers -- the reference in Go (tools/internal/formats) and Clack's own in the browser (src/manifest.ts) -- so the two cannot drift apart. Each of \"cases\" applies its edits to schema/examples/manifest.json (a JSON Pointer to the value to set; null removes it; \"\" replaces the whole document) and says where the errors must be: one place, a list of places, or null for a manifest that must be accepted. A refused case must have an error at each place and nowhere else. Each of \"raw\" is a whole file, as base64 bytes, for what only shows in the bytes, and says only whether it is accepted. A raw case may also say where its one error must be (\"error\"), which both must report.",
+  "$comment": "Cases for both manifest checkers -- the reference in Go (tools/internal/formats) and Clack's own in the browser (src/manifest.ts) -- so the two cannot drift apart. Each of \"cases\" applies its edits to schema/examples/manifest.json (a JSON Pointer to the value to set; null removes it; \"\" replaces the whole document) and says where the errors must be: one place, a list of places, or null for a manifest that must be accepted. A refused case must have an error at each place and nowhere else. Each of \"raw\" is a whole file, as base64 bytes, for what only shows in the bytes, and says only whether it is accepted. A raw case may also say where its one error must be (\"error\"), which both must report. And it may say why (\"why\"): words that both checkers' messages for it must hold.",
   "cases": [
     {
       "name": "the example as it is",
@@ -623,6 +623,7 @@
     },
     {
       "name": "Latin-1 in a string",
+      "why": "UTF-8",
       "bytes": "eyJmb3JtYXQiOiJjbGFjay1tYW5pZmVzdC8xIiwidGl0bGUiOiJL+GJlbmhhdm4iLCJzbGlkZXMiOltdfQ==",
       "accepted": false
     },
@@ -658,18 +659,21 @@
     },
     {
       "name": "a lone high surrogate in a key",
+      "why": "lone surrogate",
       "bytes": "eyJmb3JtYXQiOiJjbGFjay1tYW5pZmVzdC8xIiwic2xpZGVzIjpbXSwieC1cdWQ4MDAiOjF9",
       "accepted": false,
       "error": ""
     },
     {
       "name": "a lone low surrogate in a value",
+      "why": "lone surrogate",
       "bytes": "eyJmb3JtYXQiOiJjbGFjay1tYW5pZmVzdC8xIiwidGl0bGUiOiJcdWRjMDAiLCJzbGlkZXMiOltdfQ==",
       "accepted": false,
       "error": ""
     },
     {
       "name": "two keys Go would merge",
+      "why": "lone surrogate",
       "bytes": "eyJmb3JtYXQiOiJjbGFjay1tYW5pZmVzdC8xIiwic2xpZGVzIjpbXSwieC1cdWQ4MDAiOjFlOTk5LCJ4LVx1ZGMwMCI6MH0=",
       "accepted": false,
       "error": ""
@@ -692,12 +696,14 @@
     },
     {
       "name": "a lone surrogate escape nested too deep",
+      "why": "lone surrogate",
       "bytes": "eyJmb3JtYXQiOiJjbGFjay1tYW5pZmVzdC8xIiwic2xpZGVzIjpbXSwieC1kIjpbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbW1tbIlx1ZDgwMCJdXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dfQ==",
       "accepted": false,
       "error": ""
     },
     {
       "name": "a lone surrogate escape in a value a repeated key replaces",
+      "why": "lone surrogate",
       "bytes": "eyJmb3JtYXQiOiJjbGFjay1tYW5pZmVzdC8xIiwidGl0bGUiOiJcdWQ4MDAiLCJ0aXRsZSI6IlQiLCJzbGlkZXMiOltdfQ==",
       "accepted": false,
       "error": ""

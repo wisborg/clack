@@ -6,7 +6,7 @@ import fixture from "./fixtures/manifests.json";
 import patternCases from "./fixtures/patterns.json";
 import manifestSchemaForTest from "../schema/manifest-1.schema.json";
 import { assert, assertEqual, fixture as fixtureEl, sleep, test } from "./harness";
-import { comparePlaces, echo, figure, img, imageLog, places, quietly, random, resetImageLog, setPointer, settledOn, waitFor } from "./util";
+import { checkRaw, comparePlaces, echo, figure, img, imageLog, places, quietly, random, resetImageLog, setPointer, settledOn, waitFor } from "./util";
 
 /** A deep copy of the example manifest, through JSON as a fetched one would come. */
 function exampleCopy(): unknown {
@@ -36,21 +36,15 @@ test("the shared manifest cases get the verdicts the Go reference gives", () => 
     if (wrong) failures.push(wrong);
   }
   // Whole files, as bytes: decoded and parsed as load() does.
-  for (const r of fixture.raw) {
+  for (const r of fixture.raw as { name: string; bytes: string; accepted: boolean; error?: string; why?: string }[]) {
     const bytes = Uint8Array.from(atob(r.bytes), (ch) => ch.charCodeAt(0));
-    let accepted = true;
-    let why = "";
-    let places: string[] = [];
+    let problems: { path: string; message: string }[] = [];
     try {
       parse(decode(bytes), "https://example.com/m.json");
     } catch (e) {
-      accepted = false;
-      why = String(e);
-      places = e instanceof ManifestError ? e.problems.map((p) => p.path) : [""];
+      problems = e instanceof ManifestError ? e.problems : [{ path: "", message: String(e) }];
     }
-    if (accepted !== r.accepted) failures.push(`raw ${r.name}: accepted ${accepted}, want ${r.accepted} ${why}`);
-    const want = (r as { error?: string }).error;
-    if (want !== undefined && places.some((p) => p !== want)) failures.push(`raw ${r.name}: errors at ${places.join(", ")}, want only ${JSON.stringify(want)}`);
+    failures.push(...checkRaw(r.name, r, problems));
   }
   assert(failures.length === 0, failures.join("\n"));
 });

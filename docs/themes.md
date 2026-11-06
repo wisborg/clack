@@ -207,7 +207,8 @@ places, for every one.
 ## What Clack draws of a theme, so far
 
 Every token is checked and compiled, but the show does not yet draw all of them. It does
-draw the colours (all but the mat, frame, label and film roles), the scheme, the padding,
+draw the colours `canvas`, `surface`, `text`, `muted`, `hairline`, `accent`, `control` and
+`controlActive` (not yet `mat`, `frame`, the label's three or the film's three), the scheme, the padding,
 the shadow, the caption's type and whether it shows the credit, the controls' size, and the
 transition's duration, or `none`. The layouts but `gallery`, the mat and frame, the caption
 card, the header, floating controls and their reveal, the progress line, the `slide`

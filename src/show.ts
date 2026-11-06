@@ -127,13 +127,16 @@ function lookOf({ properties, choices }: Compiled): Look {
  */
 const themeFiles = new Map<string, Promise<Look>>();
 const themeFilesKept = 8;
+/** How long a theme file may take to arrive, in ms: far more than a few kilobytes ever need. */
+const themeFileTimeout = 30_000;
 
 function themeFile(url: string): Promise<Look> {
   let look = themeFiles.get(url);
   if (look) {
     themeFiles.delete(url); // to the end: asked for last
   } else {
-    look = loadTheme(url, new AbortController().signal).then((t) => lookOf(compile(t)));
+    // A server that never answers fails it in the end, so it can be asked for again.
+    look = loadTheme(url, AbortSignal.timeout(themeFileTimeout)).then((t) => lookOf(compile(t)));
     look.catch(() => {
       if (themeFiles.get(url) === look) themeFiles.delete(url);
     });
@@ -209,12 +212,14 @@ export class ClackShow extends HTMLElement {
   readonly #live: HTMLDivElement;
   /** The show's outermost box, which carries the theme's layout choices. */
   readonly #box: HTMLDivElement;
+  /** The theme's stylesheet, adopted now. */
+  #sheet: CSSStyleSheet | null = null;
   /**
    * The theme asked for (a built-in's name, or a theme file's URL,
-   * resolved), whether it failed, and the file still to be fetched, if it
-   * is one and the show has not been in the page since it was asked for.
+   * resolved), whether it failed, and what is still to be done about it
+   * once the show is in the page: a file to fetch, or why there is none.
    */
-  #theme: { asked: string; failed: boolean; file: string | null } = { asked: "", failed: false, file: null };
+  #theme: { asked: string; failed: boolean; pending: { url: string } | { error: Error } | null } = { asked: "", failed: false, pending: null };
 
   #slides: Keyed[] = [];
   readonly #indexById = new Map<string, number>();
@@ -375,7 +380,7 @@ export class ClackShow extends HTMLElement {
     // the show was out of the page and not watching it.
     if (this.#showing.from === "markup") this.#showing = { from: "none" };
     this.#ready = true;
-    this.#fetchTheme();
+    this.#takeUpTheme();
     this.#render();
   }
 
@@ -638,37 +643,46 @@ export class ClackShow extends HTMLElement {
   #setTheme(value: string): void {
     const given = value.trim() || "base";
     // A name, unless it has what only a URL has: a dot, a slash or a colon.
-    const url = isBuiltin(given) || !/[./:]/.test(given) ? null : resolveHTTP(given, document.baseURI);
+    // A URL is one file whatever its fragment says.
+    const resolved = isBuiltin(given) || !/[./:]/.test(given) ? null : resolveHTTP(given, document.baseURI);
+    const url = typeof resolved === "string" ? resolved.replace(/#.*$/s, "") : resolved;
     const asked = typeof url === "string" ? url : given;
     if (asked === this.#theme.asked && !this.#theme.failed) return;
-    this.#theme = { asked, failed: false, file: typeof url === "string" ? url : null };
     if (isBuiltin(asked)) {
+      this.#theme = { asked, failed: false, pending: null };
       this.#look(builtinLook(asked));
-    } else if (url === null) {
-      this.#themeFailed(asked, new Error(`it is not a built-in theme (they are ${builtinNames.join(", ")}), nor a URL`));
-    } else if (typeof url !== "string") {
-      this.#themeFailed(asked, new Error(`it is not an http(s) URL (${url.problem})`));
-    } else {
-      this.#fetchTheme();
+      return;
     }
+    const pending =
+      url === null
+        ? { error: new Error(`it is not a built-in theme (they are ${builtinNames.join(", ")}), nor a URL`) }
+        : typeof url === "string"
+          ? { url }
+          : { error: new Error(`it is not an http(s) URL (${url.problem})`) };
+    this.#theme = { asked, failed: false, pending };
+    this.#takeUpTheme();
   }
 
   /**
-   * Fetches the theme file asked for, if there is one still to fetch --
-   * only once the show is in the page, as its manifest is: a show made
-   * and never shown asks for nothing.
+   * Fetches the theme file asked for, or says why there is none to fetch --
+   * only once the show is in the page, as for its manifest: a show made and
+   * never shown asks for nothing, and says nothing.
    */
-  #fetchTheme(): void {
+  #takeUpTheme(): void {
     const theme = this.#theme;
-    const url = theme.file;
-    if (!this.#ready || url === null) return;
-    theme.file = null;
-    themeFile(url).then(
+    const pending = theme.pending;
+    if (!this.#ready || pending === null) return;
+    theme.pending = null;
+    if ("error" in pending) {
+      this.#themeFailed(theme.asked, pending.error);
+      return;
+    }
+    themeFile(pending.url).then(
       (look) => {
         if (this.#theme === theme) this.#look(look);
       },
       (e: unknown) => {
-        if (this.#theme === theme) this.#themeFailed(url, e);
+        if (this.#theme === theme) this.#themeFailed(pending.url, e);
       },
     );
   }
@@ -679,9 +693,16 @@ export class ClackShow extends HTMLElement {
     reportFailure("theme", name, e, "; the show keeps the theme it had");
   }
 
-  /** Shows the show in a look: its stylesheet before Clack's own, which no theme can override, and its choices on the show's box. */
+  /**
+   * Shows the show in a look: its stylesheet before Clack's own, which no
+   * theme can override, and its choices on the show's box. Any sheet the
+   * page has adopted into the shadow root itself is kept, after Clack's.
+   */
   #look({ sheet, choices }: Look): void {
-    this.shadowRoot!.adoptedStyleSheets = [sheet, styles()];
+    const root = this.shadowRoot!;
+    const pages = root.adoptedStyleSheets.filter((s) => s !== this.#sheet && s !== styles());
+    root.adoptedStyleSheets = [sheet, styles(), ...pages];
+    this.#sheet = sheet;
     for (const [name, value] of Object.entries(choices)) this.#box.dataset[name] = value;
   }
 
@@ -1091,10 +1112,11 @@ export class ClackShow extends HTMLElement {
     if (style.getPropertyValue("--clack-transition").trim() === "none") {
       return 0;
     }
-    const value = style.getPropertyValue("--clack-transition-duration").trim();
-    // A page may set it too, and 0 needs no unit there.
-    const m = /^([0-9.]+)(ms|s)$/.exec(value === "0" ? "0s" : value);
-    let ms = m ? Number(m[1]) * (m[2] === "s" ? 1000 : 1) : 700;
+    // As CSS reads the token -- a theme's, or any time the page sets,
+    // calc() and all -- from a property that takes a time and is otherwise
+    // unused (see .live in clack.css): computed, it is always seconds.
+    // A value that is not a time leaves it at CSS's initial 0s.
+    let ms = parseFloat(getComputedStyle(this.#live).animationDuration) * 1000;
     if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
       ms = Math.min(ms, 200);
     }

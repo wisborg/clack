@@ -132,49 +132,42 @@ const escapeStep = (key: string | number): string => (typeof key === "number" ? 
 const loneSurrogate = /\p{Cs}/u;
 
 /**
- * Whether JSON text holds a \u escape, in a string, that is half of a
- * surrogate pair without its other half (formats.loneSurrogate). Looked for
- * in the text, as the tools look for it, and not in the parsed value: the
- * walk of that stops at a value nested too deep, or once enough problems
- * are found, and never sees a value that a repeated key replaced.
- * Unescaped, a lone surrogate cannot reach the text: UTF-8 cannot hold one.
+ * Where JSON text holds a \u escape that is half of a surrogate pair
+ * without its other half (formats.loneSurrogate), or -1. Looked for in the
+ * text, as the tools look for it, and not in the parsed value: the walk of
+ * that stops at a value nested too deep, or once enough problems are
+ * found, and never sees a value that a repeated key replaced.
+ *
+ * Only for text that parsed as JSON, with any comments gone: then every
+ * backslash is in a string, and one starts an escape unless the
+ * backslashes just before it pair it off. So the search is native -- for
+ * each \u escape of a surrogate, not for every character -- which matters
+ * in a manifest of many megabytes with an emoji written as a pair.
+ * (Unescaped, a lone surrogate cannot come from bytes: UTF-8 cannot hold
+ * one. Text given from script can hold one, which the caller looks for.)
  */
-export function hasLoneSurrogate(text: string): boolean {
-  // Text given from script, not decoded from bytes, may hold one unescaped.
-  if (loneSurrogate.test(text)) return true;
-  // Most files have no escape of a surrogate at all: one native search,
-  // not a walk of every character.
-  if (!/\\u[dD][89a-fA-F]/.test(text)) return false;
-  const unit = (at: number): number => (/^[0-9a-fA-F]{4}$/.test(text.slice(at, at + 4)) ? parseInt(text.slice(at, at + 4), 16) : -1);
-  let inString = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (!inString) {
-      if (c === '"') inString = true;
-    } else if (c === '"') {
-      inString = false;
-    } else if (c === "\\" && i + 1 < text.length) {
-      if (text[i + 1] !== "u") {
-        i++; // a two-character escape
-        continue;
-      }
-      const u = unit(i + 2);
-      if (u < 0) return false; // not JSON: the parser says so
-      if (u >= 0xdc00 && u <= 0xdfff) return true; // a low half with no high half before it
-      if (u >= 0xd800 && u <= 0xdbff) {
-        const low = text[i + 6] === "\\" && text[i + 7] === "u" ? unit(i + 8) : -1;
-        if (low < 0xdc00 || low > 0xdfff) return true; // a high half with no low half after it
-        i += 11;
-      } else {
-        i += 5;
-      }
-    }
+export function loneSurrogateAt(text: string): number {
+  const escape = /\\u([dD][89a-fA-F][0-9a-fA-F]{2})/g;
+  for (let m = escape.exec(text); m; m = escape.exec(text)) {
+    let slashes = 0;
+    while (text[m.index - 1 - slashes] === "\\") slashes++;
+    if (slashes % 2 === 1) continue; // "\\u...": a backslash, then letters
+    const unit = parseInt(m[1]!, 16);
+    if (unit >= 0xdc00) return m.index; // a low half with no high half before it
+    const low = /^\\u[dD][c-fC-F][0-9a-fA-F]{2}/.test(text.slice(m.index + 6, m.index + 12));
+    if (!low) return m.index; // a high half with no low half after it
+    escape.lastIndex = m.index + 12; // the pair, whole
   }
-  return false;
+  return -1;
 }
 
-/** The problem a lone surrogate is, reported against the whole file. */
-export const loneSurrogateProblem: Problem = { path: "", message: "has a string that is not well-formed Unicode (a lone surrogate escape)" };
+/** The problem a lone surrogate at index in text is, reported against the whole file, with where it is. */
+export function loneSurrogateProblem(text: string, index: number): Problem {
+  const before = text.slice(0, index);
+  const line = before.split("\n").length;
+  const column = index - before.lastIndexOf("\n");
+  return { path: "", message: `has a string that is not well-formed Unicode (a lone surrogate escape, at line ${line}, column ${column})` };
+}
 
 /**
  * Parses JSON, throwing only a SyntaxError: a parser may give up on a

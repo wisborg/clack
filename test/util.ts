@@ -192,3 +192,18 @@ export function comparePlaces(name: string, error: string | readonly string[] | 
   }
   return null;
 }
+
+/**
+ * A raw shared case's verdict against what was wanted (the tools'
+ * checkRaw): accepted or not; if it gives one, every problem at its one
+ * place; and if it says why, some problem saying so. Returns what is
+ * wrong, if anything.
+ */
+export function checkRaw(name: string, want: { accepted: boolean; error?: string; why?: string }, got: readonly { path: string; message: string }[]): string[] {
+  const out: string[] = [];
+  const said = got.map((p) => `${p.path}: ${p.message}`).join("; ");
+  if ((got.length === 0) !== want.accepted) out.push(`raw ${name}: accepted ${got.length === 0}, want ${want.accepted} ${said}`);
+  if (want.error !== undefined && got.some((p) => p.path !== want.error)) out.push(`raw ${name}: errors at ${got.map((p) => p.path).join(", ")}, want only ${JSON.stringify(want.error)}`);
+  if (want.why !== undefined && !got.some((p) => p.message.includes(want.why!))) out.push(`raw ${name}: nothing says ${JSON.stringify(want.why)}: ${said}`);
+  return out;
+}

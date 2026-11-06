@@ -1,5 +1,5 @@
 {
- "$comment": "Cases for both theme checkers -- the reference in Go (tools/internal/formats, ParseTheme) and Clack's own in the browser (src/theme.ts) -- so the two cannot drift apart. Each of \"cases\" applies its edits to schema/examples/theme-annotated.json, read without its comments (a JSON Pointer to the value to set; null removes it; \"\" replaces the whole document), and says where the errors must be: one place, a list of places, or null for a theme that must be accepted. A refused case must have an error at each place and nowhere else. A theme is checked against the schema, then resolved onto the built-in it extends, then for contrast in each scheme it is shown in, each step only if the one before passed; a contrast error is at the place of the colour that falls short, in the theme as resolved. Each of \"raw\" is a whole file -- its text, its bytes in base64, or a file in the repository -- for what only shows in the text, and says whether it is accepted and, if not, where its errors are.",
+ "$comment": "Cases for both theme checkers -- the reference in Go (tools/internal/formats, ParseTheme) and Clack's own in the browser (src/theme.ts) -- so the two cannot drift apart. Each of \"cases\" applies its edits to schema/examples/theme-annotated.json, read without its comments (a JSON Pointer to the value to set; null removes it; \"\" replaces the whole document), and says where the errors must be: one place, a list of places, or null for a theme that must be accepted. A refused case must have an error at each place and nowhere else. A theme is checked against the schema, then resolved onto the built-in it extends, then for contrast in each scheme it is shown in, each step only if the one before passed; a contrast error is at the place of the colour that falls short, in the theme as resolved. Each of \"raw\" is a whole file -- its text, its bytes in base64, or a file in the repository -- for what only shows in the text, and says whether it is accepted and, if not, where its errors are. A raw case may give padTo, the size in bytes its text is made up to with spaces at the end, and why, words that both checkers' messages for it must hold.",
  "cases": [
   {
    "name": "the example as it is",
@@ -390,13 +390,15 @@
    "name": "a block comment never closed",
    "text": "{\"format\":\"clack-theme/1\",\"name\":\"N\"} /* end",
    "accepted": false,
-   "error": ""
+   "error": "",
+   "why": "not closed"
   },
   {
    "name": "a string never closed",
    "text": "{\"format\":\"clack-theme/1\",\"name\":\"N",
    "accepted": false,
-   "error": ""
+   "error": "",
+   "why": "not closed"
   },
   {
    "name": "a trailing comma",
@@ -432,13 +434,15 @@
    "name": "bytes that are not UTF-8, in a comment",
    "bytes": "eyJmb3JtYXQiOiJjbGFjay10aGVtZS8xIiwibmFtZSI6Ik4ifSAvLyD/",
    "accepted": false,
-   "error": ""
+   "error": "",
+   "why": "UTF-8"
   },
   {
    "name": "a lone surrogate escape in a string",
    "text": "{\"format\":\"clack-theme/1\",\"name\":\"\\ud800\"}",
    "accepted": false,
-   "error": ""
+   "error": "",
+   "why": "lone surrogate"
   },
   {
    "name": "a lone surrogate escape in a comment",
@@ -482,19 +486,36 @@
    "name": "a lone surrogate escape nested too deep",
    "text": "{\"format\":\"clack-theme/1\",\"name\":\"N\",\"x-d\":[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[\"\\ud800\"]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]}",
    "accepted": false,
-   "error": ""
+   "error": "",
+   "why": "lone surrogate"
   },
   {
    "name": "a lone surrogate escape in a value a repeated key replaces",
    "text": "{\"format\":\"clack-theme/1\",\"name\":\"\\ud800\",\"name\":\"N\"}",
    "accepted": false,
-   "error": ""
+   "error": "",
+   "why": "lone surrogate"
   },
   {
    "name": "a lone surrogate escape after many numbers too large",
    "text": "{\"format\":\"clack-theme/1\",\"name\":\"N\",\"x-n\":[1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999,1e999],\"x-s\":\"\\udc00\"}",
    "accepted": false,
-   "error": ""
+   "error": "",
+   "why": "lone surrogate"
+  },
+  {
+   "name": "as large as a theme may be",
+   "text": "{\"format\":\"clack-theme/1\",\"name\":\"Mini\"}",
+   "padTo": 65536,
+   "accepted": true
+  },
+  {
+   "name": "one byte larger",
+   "text": "{\"format\":\"clack-theme/1\",\"name\":\"Mini\"}",
+   "padTo": 65537,
+   "accepted": false,
+   "error": "",
+   "why": "larger than"
   }
  ]
 }

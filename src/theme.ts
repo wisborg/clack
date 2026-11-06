@@ -21,7 +21,7 @@ import darkroom from "../themes/darkroom.json";
 import gallery from "../themes/gallery.json";
 import mat from "../themes/mat.json";
 import minimal from "../themes/minimal.json";
-import { checkJSON, decodeUTF8, fetchJSON, hasLoneSurrogate, isObject, loneSurrogateProblem, maxProblems, parseJSON, RefusedError, type Obj } from "./json";
+import { checkJSON, decodeUTF8, fetchJSON, isObject, loneSurrogateAt, loneSurrogateProblem, maxProblems, parseJSON, RefusedError, type Obj } from "./json";
 import { Schema, sortProblems, type Problem } from "./schema";
 
 /** The built-in themes, by the name a page or a theme gives them. base is what every theme starts from. */
@@ -118,8 +118,12 @@ export function readTheme(text: string): Obj {
   } catch (e) {
     throw new ThemeError([{ path: "", message: `is not JSON: ${(e as Error).message}` }]);
   }
-  // In the text, with its comments gone, as the tools look (formats.Parse).
-  if (hasLoneSurrogate(stripped)) throw new ThemeError([loneSurrogateProblem]);
+  // In the text, with its comments gone, as the tools look (formats.Parse);
+  // and one unescaped, which text given from script may hold.
+  const lone = loneSurrogateAt(stripped);
+  if (lone >= 0) throw new ThemeError([loneSurrogateProblem(stripped, lone)]);
+  const raw = stripped.search(/\p{Cs}/u);
+  if (raw >= 0) throw new ThemeError([loneSurrogateProblem(stripped, raw)]);
   // Nesting and numbers; lone surrogates are found in the text, above.
   const shape: Problem[] = [];
   checkJSON(doc, "", 1, shape);
@@ -325,9 +329,22 @@ const systemFonts: Record<string, string> = {
   mono: 'ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
 };
 
-/** The soft shadow under a photo, tuned for each scheme. */
-const softShadow =
-  "0 1px 2px light-dark(rgb(0 0 0 / 0.06), rgb(0 0 0 / 0.5)), 0 14px 36px light-dark(rgb(0 0 0 / 0.14), rgb(0 0 0 / 0.55))";
+/**
+ * The soft shadow under a photo, tuned for each scheme: its two layers'
+ * opacities in light and in dark. A theme shown in one scheme gets that
+ * scheme's, as it gets only that scheme's colours.
+ */
+function softShadow(schemes: readonly string[]): string {
+  const [near, far] = [
+    [0.06, 0.5],
+    [0.14, 0.55],
+  ].map(([light, dark]) => {
+    const one = (a: number): string => `rgb(0 0 0 / ${a})`;
+    if (schemes.length === 2) return `light-dark(${one(light!)}, ${one(dark!)})`;
+    return one(schemes[0] === "dark" ? dark! : light!);
+  });
+  return `0 1px 2px ${near}, 0 14px 36px ${far}`;
+}
 
 /** camelCase as kebab-case: controlActive, control-active. */
 const kebab = (s: string): string => s.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
@@ -360,7 +377,7 @@ export function compile(t: Obj): Compiled {
 
   for (const family of ["serif", "sans", "mono"]) set(family, systemFonts[family]);
   for (const side of ["inline", "top", "bottom"]) set(`padding-${side}`, length(get(`layout.padding.${side}`)));
-  set("shadow", get("layout.shadow") === "soft" ? softShadow : "none");
+  set("shadow", get("layout.shadow") === "soft" ? softShadow(schemes) : "none");
   set("mat-width", length(get("layout.mat.width")));
   set("frame-width", length(get("layout.frame.width")));
   for (const part of ["caption", "header"]) {

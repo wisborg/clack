@@ -295,8 +295,10 @@ func TestSharedThemeCases(t *testing.T) {
 			Text     *string `json:"text"`
 			Bytes    []byte  `json:"bytes"` // base64, as encoding/json reads []byte
 			File     string  `json:"file"`
+			PadTo    int     `json:"padTo"`
 			Accepted bool    `json:"accepted"`
 			Error    *string `json:"error"`
+			Why      string  `json:"why"`
 		} `json:"raw"`
 	}
 	if err := json.Unmarshal(raw, &fixture); err != nil {
@@ -345,17 +347,31 @@ func TestSharedThemeCases(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		_, errs := ParseTheme(themeSchema, data, all)
-		if accepted := len(errs) == 0; accepted != c.Accepted {
-			t.Errorf("raw %s: accepted %v, want %v: %v", c.Name, accepted, c.Accepted, errs)
+		if c.PadTo > len(data) {
+			data = append(data, bytes.Repeat([]byte(" "), c.PadTo-len(data))...)
 		}
-		if c.Error != nil {
-			for _, e := range errs {
-				if errorPath(e) != *c.Error {
-					t.Errorf("raw %s: an error at %q, want only %q: %v", c.Name, errorPath(e), *c.Error, e)
-				}
+		_, errs := ParseTheme(themeSchema, data, all)
+		checkRaw(t, "raw "+c.Name, c.Accepted, c.Error, c.Why, errs)
+	}
+}
+
+// checkRaw checks a raw case's verdict: accepted or not, every error at
+// the one place it gives (if it gives one), and some error saying why (if
+// it says) in the words both checkers use.
+func checkRaw(t *testing.T, name string, accepted bool, place *string, why string, errs []error) {
+	t.Helper()
+	if got := len(errs) == 0; got != accepted {
+		t.Errorf("%s: accepted %v, want %v: %v", name, got, accepted, errs)
+	}
+	if place != nil {
+		for _, e := range errs {
+			if errorPath(e) != *place {
+				t.Errorf("%s: an error at %q, want only %q: %v", name, errorPath(e), *place, e)
 			}
 		}
+	}
+	if why != "" && !slices.ContainsFunc(errs, func(e error) bool { return strings.Contains(e.Error(), why) }) {
+		t.Errorf("%s: no error says %q: %v", name, why, errs)
 	}
 }
 
@@ -383,18 +399,6 @@ func comparePlaces(t *testing.T, name string, want []string, errs []error) {
 				t.Errorf("%s: no error at %q: %v", name, p, errs)
 			}
 		}
-	}
-}
-
-func TestThemeLimits(t *testing.T) {
-	themeSchema, _ := schemas(t)
-	all := builtins(t, themeSchema)
-	big := append([]byte(`{"format":"clack-theme/1","name":"N"}`), bytes.Repeat([]byte(" "), MaxThemeBytes)...)
-	if _, errs := ParseTheme(themeSchema, big, all); len(errs) != 1 || errorPath(errs[0]) != "" || !strings.Contains(errs[0].Error(), "larger") {
-		t.Errorf("a theme over %d bytes: %v", MaxThemeBytes, errs)
-	}
-	if _, errs := ParseTheme(themeSchema, big[:MaxThemeBytes], all); len(errs) > 0 {
-		t.Errorf("a theme of exactly %d bytes: %v", MaxThemeBytes, errs)
 	}
 }
 
@@ -798,6 +802,7 @@ func TestSharedManifestCases(t *testing.T) {
 			Bytes    []byte  `json:"bytes"` // base64, as encoding/json reads []byte
 			Accepted bool    `json:"accepted"`
 			Error    *string `json:"error"`
+			Why      string  `json:"why"`
 		} `json:"raw"`
 	}
 	if err := json.Unmarshal(raw, &fixture); err != nil {
@@ -843,16 +848,7 @@ func TestSharedManifestCases(t *testing.T) {
 		if doc != nil {
 			errs = append(errs, CheckManifest(doc)...)
 		}
-		if accepted := len(errs) == 0; accepted != c.Accepted {
-			t.Errorf("raw %s: accepted %v, want %v: %v", c.Name, accepted, c.Accepted, errs)
-		}
-		if c.Error != nil {
-			for _, e := range errs {
-				if errorPath(e) != *c.Error {
-					t.Errorf("raw %s: an error at %q, want only %q: %v", c.Name, errorPath(e), *c.Error, e)
-				}
-			}
-		}
+		checkRaw(t, "raw "+c.Name, c.Accepted, c.Error, c.Why, errs)
 	}
 }
 
