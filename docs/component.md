@@ -200,4 +200,5 @@ styles, inside the element, so a page chooses them with a theme, not with CSS. W
 itself, such as `darkroom`, has only that scheme's colours, so `color-scheme` changes
 nothing of it but the browser's own controls. Parts
 for `::part()`: `show`, `header`, `stage`, `slide`, `photo`, `below`, `caption`, `controls`,
-`button`, `previous`, `next`, `counter`, `missing`.
+`button`, `previous`, `next`, `counter`, `missing`. The stage stacks the photos among
+themselves, so a `z-index` given to `slide`, `photo` or `missing` counts only within it.

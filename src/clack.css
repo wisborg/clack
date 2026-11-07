@@ -35,9 +35,6 @@
    definite here and the ratio steps aside. */
 .show {
   box-sizing: border-box;
-  /* Its layers (the header and caption over the stage, the focus ring
-     over the photo) are stacked among themselves, not among the page's. */
-  isolation: isolate;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   width: 100%;
@@ -57,10 +54,9 @@
    Only with a title, and only if the theme shows it. */
 .header {
   grid-row: 1;
-  /* Over any shadow the stage casts, though it comes first: the stage is
-     positioned, and would otherwise be painted after it. */
+  /* Over any shadow the stage casts: positioned, as the stage is, and
+     after it (it comes after it in the show, though it is drawn above). */
   position: relative;
-  z-index: 1;
   display: flex;
   justify-content: space-between;
   align-items: baseline;
@@ -110,6 +106,9 @@
   min-height: 0;
   container-type: size;
   touch-action: pan-y pinch-zoom;
+  /* Its layers -- the photos, and the focus ring over them -- stacked
+     among themselves, not among the page's. */
+  isolation: isolate;
   user-select: none;
   -webkit-user-select: none;
 }
@@ -279,10 +278,9 @@
 
 .below {
   grid-row: 3;
-  /* Over a shadow falling from the photo or its frame: the stage is
-     positioned, as each slide is. */
+  /* Over a shadow falling from the photo or its frame: positioned, as
+     the stage is, and after it. */
   position: relative;
-  z-index: 1;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -304,17 +302,28 @@
   letter-spacing: var(--clack-caption-tracking);
   text-transform: var(--clack-caption-case);
   line-height: 1.35;
-  /* A line each, title and credit, even with nothing to say: a photo's
-     size is worked out before its caption replaces the last, and a
-     caption of another height would make the stage another height, and
-     the photo be fetched again. (Only one that runs onto more lines
-     still does.) */
+}
+
+/* In a show where some slide has a title, or a credit, a line for it on
+   every slide, even with nothing to say: a photo's size is worked out
+   before its caption replaces the last, and a caption of another height
+   would make the stage another height, and the photo be fetched again.
+   (Only one that runs onto more lines still does.) A show with none
+   keeps no line for them. */
+.show[data-titles="true"] .title {
   min-height: 1.35em;
+}
+
+.show[data-credits="true"] .credit {
+  min-height: 1.5em;
+}
+
+.show:not([data-credits="true"]) .credit {
+  display: none;
 }
 
 .credit {
   display: var(--clack-caption-credit);
-  min-height: 1.5em;
   margin-top: 2px;
   font-size: 12.5px;
   letter-spacing: 0.01em;

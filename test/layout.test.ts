@@ -29,7 +29,7 @@ function matShow(show: ClackShow, theme = true): ClackShow {
 
 /** A manifest of n photos, titled, served at a path of its own. */
 function titled(title: string, n: number, path: string): string {
-  const slides = Array.from({ length: n }, (_, i) => ({ id: `p${i}`, alt: `photo ${i + 1}`, width: 300, height: 200, sources: [{ url: img(300, 200), width: 300 }] }));
+  const slides = Array.from({ length: n }, (_, i) => ({ id: `p${i}`, alt: `${title} ${i + 1}`, width: 300, height: 200, sources: [{ url: img(300, 200), width: 300 }] }));
   return echo(JSON.stringify({ format: "clack-manifest/1", title, slides }), { path });
 }
 
@@ -391,16 +391,19 @@ test("a show hidden and shown again asks for a photo at its size, not as if it h
   await settledOn(show, "1 of 6");
   show.hidden = true;
   await sleep(100); // observed with no size
-  let done: Promise<boolean> | undefined;
+  // Narrower now than when it was last laid out.
+  show.style.width = "400px";
   const set = await sizesSet(async () => {
     show.hidden = false;
-    done = show.goTo(5); // in the same task: not yet observed again
-    await done;
+    await show.goTo(5); // in the same task: not yet observed again
     await settledOn(show, "6 of 6");
   });
   const last = [...set].find(([img]) => img.alt === "photo 6");
   assert(last, "the last photo was asked for");
-  assert(!last[1].includes("100vw"), `its sizes: ${last[1].join(", then ")}`);
+  // Set once, to the width it is drawn at now, not as it was (459px), to
+  // a pixel: an engine's layout may round it either way.
+  const drawn = part(show, ".slide img").getBoundingClientRect().width;
+  assert(last[1].length === 1 && Math.abs(parseFloat(last[1][0]!) - drawn) <= 1, `its sizes: ${last[1].join(", then ")}, drawn at ${drawn}px`);
 });
 
 test("a title that wraps onto another line is counted in the next photo's size", async () => {
@@ -597,7 +600,8 @@ test("a narrowed frame is never narrowed away", async () => {
   await settledOn(show, "1 of 1");
   await waitFor(() => parseFloat(getComputedStyle(part(show, ".slide .mount")).paddingTop) < 80, "narrowed");
   // A device pixel: half a CSS pixel on a screen of twice the density.
-  assertEqual(getComputedStyle(part(show, ".slide .mount")).borderTopWidth, `${1 / devicePixelRatio}px`, "a pixel, at least");
+  const border = parseFloat(getComputedStyle(part(show, ".slide .mount")).borderTopWidth);
+  assert(Math.abs(border - 1 / devicePixelRatio) < 0.01, `a pixel, at least: ${border}px`);
 });
 
 test("a theme file already here, set before Clack loads with slides, is the one the first photo is asked for in", async () => {
@@ -634,3 +638,81 @@ test("a stage the page gives padding, counted in its width, is measured by the r
     document.adoptedStyleSheets = document.adoptedStyleSheets.filter((s) => s !== page);
   }
 });
+
+test("a page's own animation of its slides does not keep the show cut off at its sides", async () => {
+  const page = new CSSStyleSheet();
+  page.replaceSync("@keyframes clack-test-breathe { to { opacity: 0.98; } } clack-show.breathing::part(slide) { animation: clack-test-breathe 10s infinite; }");
+  document.adoptedStyleSheets = [...document.adoptedStyleSheets, page];
+  try {
+    const show = makeShow([{}, {}], { class: "breathing" });
+    await settledOn(show, "1 of 2");
+    const p = pointer(show);
+    const x = p.left + p.width * 0.5;
+    await letGoSlowly(p, x, 40); // too short, and slow: back it springs
+    await waitFor(() => getComputedStyle(box(show)).overflowX === "visible", "nothing cut off once it is back");
+  } finally {
+    document.adoptedStyleSheets = document.adoptedStyleSheets.filter((s) => s !== page);
+  }
+});
+
+test("a photo caught again as it springs back follows the finger", async () => {
+  const show = makeShow([{}, {}]);
+  await settledOn(show, "1 of 2");
+  const p = pointer(show);
+  const x = p.left + p.width * 0.5;
+  await letGoSlowly(p, x, 40);
+  const figure = figures(show)[0]!;
+  assert(figure.getAnimations().length > 0, "springing back");
+  p.send("pointerdown", x);
+  p.send("pointermove", x - 30);
+  p.send("pointermove", x - 60);
+  assertEqual(figure.getAnimations().length, 0, "the spring back let go of");
+  assertEqual(new DOMMatrix(getComputedStyle(figure).transform).m41, -60, "where the finger is");
+  p.send("pointerup", x - 60, { buttons: 0 });
+});
+
+test("a show with no credit keeps no line for one", async () => {
+  const show = makeShow([{ title: "One" }, { title: "Two" }]);
+  await settledOn(show, "1 of 2");
+  assertEqual(getComputedStyle(part(show, ".credit")).display, "none", "no credit line");
+  const credited = makeShow([{ title: "One", credit: "Someone" }, { title: "Two" }]);
+  await settledOn(credited, "1 of 2");
+  await credited.next();
+  await settledOn(credited, "2 of 2");
+  assert(part(credited, ".credit").getBoundingClientRect().height > 0, "but one where some slide has a credit, for every slide");
+});
+
+test("a manifest arriving does not give the markup's photos, about to go, sizes of its own", async () => {
+  const show = makeShow([{}, {}, {}]);
+  await settledOn(show, "1 of 3");
+  await sleep(200); // the markup's neighbours preloaded
+  const markup = new Set(figures(show).map((f) => f.querySelector("img")!));
+  const set = await sizesSet(async () => {
+    show.src = titled("Arriving", 2, "arriving.json");
+    await waitFor(() => part(show, ".header-title").textContent === "Arriving", "the manifest");
+    await settledOn(show, "1 of 2");
+  });
+  // The markup's photos are "photo 1" and on; the manifest's, "Arriving 1" and on.
+  const resized = [...set.keys()].filter((img) => markup.has(img) || img.alt.startsWith("photo"));
+  assertEqual(resized.map((img) => img.alt).join(", "), "", "none of the markup's photos given new sizes");
+});
+
+test("a frame of a fraction of a pixel is drawn, and counted, as the browser draws it: rounded down", async () => {
+  const show = makeShow([{}], { theme: matted("10px", "9.6px") });
+  await waitFor(() => box(show).dataset["layout"] === "matted", "the theme");
+  await settledOn(show, "1 of 1");
+  const want = Math.floor(9.6 * devicePixelRatio) / devicePixelRatio;
+  const border = parseFloat(getComputedStyle(part(show, ".slide .mount")).borderTopWidth);
+  assert(Math.abs(border - want) < 0.01, `${border}px, want ${want}px`);
+  assertEqual(part(show, ".stage").style.getPropertyValue("--clack-frame-inset"), `${want}px`, "counted as drawn");
+});
+
+/** A drag of the photo by `by` px leftwards, held still before it is let go: too slow to be a flick. */
+async function letGoSlowly(p: ReturnType<typeof pointer>, x: number, by: number): Promise<void> {
+  p.send("pointerdown", x);
+  p.send("pointermove", x - by / 2);
+  p.send("pointermove", x - by);
+  await sleep(150);
+  p.send("pointermove", x - by);
+  p.send("pointerup", x - by, { buttons: 0 });
+}

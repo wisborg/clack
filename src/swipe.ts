@@ -15,8 +15,18 @@ export interface SwipeHandlers {
 /** How far a pointer moves before it is a swipe or a scroll. */
 const slop = 8;
 
-/** Starts listening on target; returns the function that stops. */
-export function listen(target: HTMLElement, handlers: SwipeHandlers): () => void {
+/** A gesture being listened for: stop listening, or cancel the one under way. */
+export interface Swipes {
+  stop(): void;
+  /**
+   * Ends the gesture under way, if any, without its end: the rest of it is
+   * not heard -- as when what it was dragging has gone.
+   */
+  cancel(): void;
+}
+
+/** Starts listening on target. */
+export function listen(target: HTMLElement, handlers: SwipeHandlers): Swipes {
   let id: number | null = null;
   let startX = 0;
   let startY = 0;
@@ -52,8 +62,10 @@ export function listen(target: HTMLElement, handlers: SwipeHandlers): () => void
       return;
     }
     // A mouse whose button was let go of where this element did not hear it
-    // (when it could not be captured) has ended its gesture.
+    // (when it could not be captured) has ended its gesture: a swipe of it
+    // springs back, as a cancelled one does.
     if (e.pointerType === "mouse" && e.buttons === 0) {
+      if (swiping) handlers.end(0);
       reset();
       return;
     }
@@ -118,13 +130,16 @@ export function listen(target: HTMLElement, handlers: SwipeHandlers): () => void
   target.addEventListener("pointercancel", up);
   target.addEventListener("lostpointercapture", up);
   target.addEventListener("click", click, { capture: true });
-  return () => {
-    target.removeEventListener("pointerdown", down);
-    target.removeEventListener("pointermove", move);
-    target.removeEventListener("pointerup", upCapture, { capture: true });
-    target.removeEventListener("pointerup", up);
-    target.removeEventListener("pointercancel", up);
-    target.removeEventListener("lostpointercapture", up);
-    target.removeEventListener("click", click, { capture: true });
+  return {
+    stop() {
+      target.removeEventListener("pointerdown", down);
+      target.removeEventListener("pointermove", move);
+      target.removeEventListener("pointerup", upCapture, { capture: true });
+      target.removeEventListener("pointerup", up);
+      target.removeEventListener("pointercancel", up);
+      target.removeEventListener("lostpointercapture", up);
+      target.removeEventListener("click", click, { capture: true });
+    },
+    cancel: reset,
   };
 }
