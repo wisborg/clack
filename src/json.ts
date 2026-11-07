@@ -61,14 +61,10 @@ export const isObject = (v: unknown): v is Obj => typeof v === "object" && v !==
 /**
  * What is wrong with a parsed value before any schema is consulted, added
  * to out: values nested more than maxDepth deep; numbers too large to be
- * held (JSON.parse makes them Infinity); and strings, names included, that
- * are not well-formed Unicode -- a lone surrogate, which the tools' decoder
- * would turn into U+FFFD, merging names that differ here. That last is
- * reported once, against the whole file, as the tools report it (they find
- * it in the raw text, before any path exists); the message says where.
- * Only for a value given from script: in one parsed from text, look in
- * the text instead (loneSurrogateIn), which this walk would miss in a
- * value nested too deep, past maxProblems, or replaced by a repeated key.
+ * held (JSON.parse makes them Infinity). Not lone surrogates: those are
+ * looked for in the text (loneSurrogateIn), where none can hide -- in a
+ * value nested too deep for this walk, past maxProblems, or replaced by a
+ * repeated key.
  *
  * v sits at path, depth deep in its document; skip, if v holds it, is left
  * for a later call. The walk is depth first, in the document's order, so
@@ -76,7 +72,7 @@ export const isObject = (v: unknown): v is Obj => typeof v === "object" && v !==
  * own stack -- each container and how far through it -- so no document can
  * exhaust the call stack, and spells out a path only for a problem.
  */
-export function checkJSON(v: unknown, path: string, depth: number, out: Problem[], lone?: Problem[], skip?: unknown): void {
+export function checkJSON(v: unknown, path: string, depth: number, out: Problem[], skip?: unknown): void {
   interface Frame {
     c: object;
     keys: string[] | null; // null for an array, walked by index
@@ -93,17 +89,11 @@ export function checkJSON(v: unknown, path: string, depth: number, out: Problem[
   const report = (where: string, message: string): void => {
     if (out.length < maxProblems) out.push({ path: where, message });
   };
-  // Into lone, not out: like the tools, which find it before anything else
-  // can be checked, a lone surrogate is then the only problem reported.
-  const surrogate = (where: () => string): void => {
-    if (lone?.length === 0) lone.push({ path: "", message: `has a string that is not well-formed Unicode (a lone surrogate), at ${where() || "(the whole file)"}` });
-  };
   const enter = (c: object, key: string | number, d: number): void => {
     frames.push({ c, keys: Array.isArray(c) ? null : Object.keys(c), i: 0, key, depth: d });
   };
   // The value itself.
   if (typeof v === "number" && !Number.isFinite(v)) report(path, "is a number too large to hold");
-  if (typeof v === "string" && loneSurrogate.test(v)) surrogate(() => path);
   if (typeof v !== "object" || v === null || v === skip) return;
   if (depth > maxDepth) return report(path, `nests more than ${maxDepth} deep`);
   enter(v, "", depth);
@@ -116,12 +106,9 @@ export function checkJSON(v: unknown, path: string, depth: number, out: Problem[
     }
     const key: string | number = f.keys ? f.keys[f.i]! : f.i;
     f.i++;
-    if (typeof key === "string" && loneSurrogate.test(key)) surrogate(() => pathTo(key));
     const x: unknown = (f.c as Record<string | number, unknown>)[key];
     if (typeof x === "number") {
       if (!Number.isFinite(x)) report(pathTo(key), "is a number too large to hold");
-    } else if (typeof x === "string") {
-      if (loneSurrogate.test(x)) surrogate(() => pathTo(key));
     } else if (typeof x === "object" && x !== null && x !== skip) {
       if (f.depth + 1 > maxDepth) report(pathTo(key), `nests more than ${maxDepth} deep`);
       else enter(x, key, f.depth + 1);
@@ -164,17 +151,20 @@ function loneSurrogateEscapeAt(text: string): number {
 
 /**
  * The problem a lone surrogate in JSON text is, if it holds one: escaped
- * (loneSurrogateEscapeAt), or written as itself -- which text from bytes
- * cannot be, as UTF-8 cannot hold one, but text given from script can.
- * Reported against the whole file, as the tools report it, saying where.
+ * (loneSurrogateEscapeAt) -- or, in text given from script, written as
+ * itself. Text decoded from bytes cannot hold one so (UTF-8 cannot), and
+ * is not searched for it again: a manifest can be many megabytes. A lone
+ * surrogate is the one problem reported, against the whole file, as the
+ * tools report it (they find it before anything else can be checked); the
+ * message says where.
  */
-export function loneSurrogateIn(text: string): Problem | null {
+export function loneSurrogateIn(text: string, fromScript: boolean): Problem | null {
   const escaped = loneSurrogateEscapeAt(text);
-  const index = escaped >= 0 ? escaped : text.search(loneSurrogate);
+  const index = escaped >= 0 ? escaped : fromScript ? text.search(loneSurrogate) : -1;
   if (index < 0) return null;
-  const before = text.slice(0, index);
-  const line = before.split("\n").length;
-  const column = index - before.lastIndexOf("\n");
+  let line = 1;
+  for (let at = text.indexOf("\n"); at >= 0 && at < index; at = text.indexOf("\n", at + 1)) line++;
+  const column = index - text.lastIndexOf("\n", index - 1);
   const what = escaped >= 0 ? "a lone surrogate escape" : "a lone surrogate";
   return { path: "", message: `has a string that is not well-formed Unicode (${what}, at line ${line}, column ${column})` };
 }

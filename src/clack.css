@@ -44,7 +44,10 @@
 }
 
 /* The stage: the photos, stacked in one cell so one can fade over another.
-   A size container, so a photo is fitted to the space the grid gave it. */
+   A size container, so a photo is fitted to the space the grid gave it --
+   and so a theme's length used inside it would have cqi of the stage, not
+   of the show, as the schema says: use them outside it, or on it, whose own
+   properties see the show (docs/themes.md, the end). */
 .stage {
   position: relative;
   display: grid;
@@ -73,9 +76,6 @@
   min-width: 0;
   min-height: 0;
   transform: translateX(var(--clack-drag, 0px));
-  /* The crossfade's length, which script plays (#duration): read from
-     here as a time, so CSS works it out from whatever the token says. */
-  animation-duration: var(--clack-transition-duration);
 }
 
 /* Contained: the whole photo, as large as the frame allows, in its own
@@ -316,6 +316,16 @@
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
+}
+
+/* The crossfade's length, which script plays (#duration), read here as a
+   time a second longer: so CSS works out whatever the token says, calc()
+   and all, and one it cannot read -- which leaves the initial 0s -- is told
+   from 0s. On an element of its own, with no part, so that nothing of the
+   page's, nor any animation of Clack's, changes it. */
+.timing {
+  display: none;
+  animation-duration: calc(var(--clack-transition-duration) + 1s);
 }
 
 @media (prefers-reduced-motion: reduce) {

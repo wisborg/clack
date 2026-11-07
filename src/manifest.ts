@@ -37,10 +37,11 @@ export class ManifestError extends RefusedError {
 /**
  * Checks a parsed manifest against the format, returning its problems, in
  * order of place -- at most maxProblems of them; none means it is valid.
- * It never throws, whatever it is given.
+ * It never throws, whatever it is given. Not for lone surrogates, which
+ * parse() and load() find in the text before any of this.
  */
 export function check(doc: unknown): Problem[] {
-  return runToEnd(checking(doc));
+  return runToEnd(checking(doc, null));
 }
 
 /**
@@ -50,10 +51,10 @@ export function check(doc: unknown): Problem[] {
  * are not looked at: the manifest is refused for their number already.
  * Checking stops once maxProblems are found; the verdict is settled.
  * loneInText is the lone surrogate found in the text the manifest was
- * parsed from, or null for none; left out for a manifest given from
- * script, which has no text, and is looked for in the value instead.
+ * parsed from (loneSurrogateIn), or null for none: it is looked for there,
+ * not in the parsed value.
  */
-function* checking(doc: unknown, loneInText?: Problem | null): Generator<void, Problem[]> {
+function* checking(doc: unknown, loneInText: Problem | null): Generator<void, Problem[]> {
   const all = isObject(doc) && Array.isArray(doc["slides"]) ? (doc["slides"] as unknown[]) : null;
   const { top, slide, maxSlides } = rules();
   // More slides than a manifest may hold settle the verdict, alone and at
@@ -67,13 +68,11 @@ function* checking(doc: unknown, loneInText?: Problem | null): Generator<void, P
 
   // Shape first: a value too deep or too large is all that is reported.
   const shape: Problem[] = [];
-  const lone: Problem[] | undefined = loneInText === undefined ? [] : undefined;
-  checkJSON(doc, "", 1, shape, lone, all ?? undefined);
+  checkJSON(doc, "", 1, shape, all ?? undefined);
   for (let i = 0; slides && i < slides.length && !full(shape); i++) {
-    checkJSON(slides[i], `/slides/${i}`, 3, shape, lone);
+    checkJSON(slides[i], `/slides/${i}`, 3, shape);
     yield;
   }
-  if (lone && lone.length > 0) return lone;
   if (shape.length > 0) return sortProblems(shape);
 
   const problems = top.validate(doc, false);
@@ -112,7 +111,7 @@ function runToEnd<T>(steps: Generator<void, T>): T {
  */
 export function parse(text: string, base: string): Manifest {
   const doc = parseJSON(text);
-  return runToEnd(reading(doc, base, loneSurrogateIn(text)));
+  return runToEnd(reading(doc, base, loneSurrogateIn(text, true)));
 }
 
 /**
@@ -204,7 +203,7 @@ export async function load(url: string, signal: AbortSignal): Promise<Manifest> 
   // The page's turn between the parse and the search of the text.
   await yieldToPage();
   signal.throwIfAborted();
-  const lone = loneSurrogateIn(text);
+  const lone = loneSurrogateIn(text, false);
   text = null;
   // Then read as parse() reads any manifest -- one way in, which the tests
   // exercise too -- with the page given a turn every few milliseconds, and

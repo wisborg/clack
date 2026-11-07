@@ -101,7 +101,7 @@ export function readThemeBytes(bytes: Uint8Array): Obj {
   if (bytes.byteLength > maxThemeBytes) throw new ThemeError([{ path: "", message: `is larger than ${maxThemeBytes} bytes` }]);
   const text = decodeUTF8(bytes);
   if (text === null) throw new ThemeError([{ path: "", message: "is not UTF-8" }]);
-  return readTheme(text);
+  return reading(text, false);
 }
 
 /**
@@ -110,6 +110,11 @@ export function readThemeBytes(bytes: Uint8Array): Obj {
  * its place. Each step is taken only if the one before it passed.
  */
 export function readTheme(text: string): Obj {
+  return reading(text, true);
+}
+
+/** readTheme, for text given from script or decoded from bytes. */
+function reading(text: string, fromScript: boolean): Obj {
   let doc: unknown;
   let stripped: string;
   try {
@@ -119,7 +124,7 @@ export function readTheme(text: string): Obj {
     throw new ThemeError([{ path: "", message: `is not JSON: ${(e as Error).message}` }]);
   }
   // In the text, with its comments gone, as the tools look (formats.Parse).
-  const lone = loneSurrogateIn(stripped);
+  const lone = loneSurrogateIn(stripped, fromScript);
   if (lone) throw new ThemeError([lone]);
   // Nesting and numbers; lone surrogates are found in the text, above.
   const shape: Problem[] = [];
@@ -202,7 +207,9 @@ function merge(under: Obj, over: Obj): Obj {
   return out;
 }
 
-const clone = (v: unknown): unknown => (isObject(v) ? merge({}, v) : Array.isArray(v) ? v.map(clone) : v);
+// An object copied, so no theme's resolution changes another's. No array
+// needs it: the schema allows them only under x- names, kept by reference.
+const clone = (v: unknown): unknown => (isObject(v) ? merge({}, v) : v);
 
 /** The colour schemes a resolved theme is shown in. */
 function schemesOf(resolved: Obj): ("light" | "dark")[] {

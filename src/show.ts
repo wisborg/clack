@@ -171,11 +171,11 @@ function builtinLook(name: string): Look {
 
 /**
  * The crossfade's length in ms, from the theme's as CSS computes it (NaN
- * when it is not a time): 700 if it is not one, at most 200 when motion is
- * reduced, and never more than 3 s.
+ * when it is not a time): 700 if it is not one, or is less than none; at
+ * most 200 when motion is reduced, and never more than 3 s.
  */
 export function crossfade(ms: number, reduced: boolean): number {
-  const given = Number.isFinite(ms) ? ms : 700;
+  const given = ms >= 0 ? ms : 700;
   return Math.min(given, reduced ? 200 : 3000);
 }
 
@@ -228,6 +228,8 @@ export class ClackShow extends HTMLElement {
   readonly #previous: HTMLButtonElement;
   readonly #next: HTMLButtonElement;
   readonly #live: HTMLDivElement;
+  /** Unseen, and no part: where the crossfade's length is read (#duration). */
+  readonly #timing: HTMLDivElement;
   /** The show's outermost box, which carries the theme's layout choices. */
   readonly #box: HTMLDivElement;
   /**
@@ -345,7 +347,8 @@ export class ClackShow extends HTMLElement {
     this.#live.ariaAtomic = "true";
 
     show.append(this.#stage, below);
-    root.append(show, this.#live, this.#nameBox);
+    this.#timing = el("div", "timing");
+    root.append(show, this.#live, this.#nameBox, this.#timing);
 
     this.addEventListener("keydown", (e) => this.#onKey(e));
   }
@@ -700,9 +703,14 @@ export class ClackShow extends HTMLElement {
       },
       (e: unknown) => {
         if (this.#theme !== theme) return;
-        // Said once the show is back in the page, if it left meanwhile.
-        if (this.#ready) this.#themeFailed(pending.url, e);
-        else theme.pending = { error: e };
+        if (this.#ready) {
+          this.#themeFailed(pending.url, e);
+        } else {
+          // Said once the show is back in the page, if it left meanwhile;
+          // failed already, so asking again meanwhile fetches it again.
+          theme.failed = true;
+          theme.pending = { error: e };
+        }
       },
     );
   }
@@ -1054,7 +1062,7 @@ export class ClackShow extends HTMLElement {
       this.#announce(index + 1, this.#slides.length, slide);
     }
 
-    const duration = old ? this.#duration(figure) : 0;
+    const duration = old ? this.#duration() : 0;
     if (old && duration > 0) {
       const timing: KeyframeAnimationOptions = { duration, easing: "cubic-bezier(0.4, 0, 0.2, 1)" };
       const outgoing: Keyframe[] = how.swipe
@@ -1123,7 +1131,7 @@ export class ClackShow extends HTMLElement {
    * and an engine may not run animations in a hidden page at all, which
    * would leave the old slide in place until the page is shown again.
    */
-  #duration(figure: HTMLElement): number {
+  #duration(): number {
     if (document.visibilityState === "hidden") {
       return 0;
     }
@@ -1132,11 +1140,12 @@ export class ClackShow extends HTMLElement {
       return 0;
     }
     // As CSS reads the token -- a theme's, or any time the page sets,
-    // calc() and all -- from the slide coming in, whose animation-duration
-    // is this crossfade's (see .slide in clack.css): computed, it is always
-    // seconds. A value that is not a time leaves it at CSS's initial 0s,
-    // and a show out of the page has no computed style at all.
-    const ms = parseFloat(getComputedStyle(figure).animationDuration) * 1000;
+    // calc() and all -- a second longer (see .timing in clack.css), so that
+    // one that is not a time, which leaves CSS's initial 0s (or auto, in
+    // an engine that has it), is told from 0s; computed, it is always
+    // seconds. A show out of the page has no computed style at all.
+    const s = parseFloat(getComputedStyle(this.#timing).animationDuration);
+    const ms = s > 0 ? Math.round(s * 1000) - 1000 : NaN;
     return crossfade(ms, matchMedia("(prefers-reduced-motion: reduce)").matches);
   }
 

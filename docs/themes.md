@@ -215,3 +215,9 @@ the shadow, the caption's type and whether it shows the credit, the controls' si
 transition's duration, or `none`. The layouts but `gallery`, the mat and frame, the caption
 card, the header, floating controls and their reveal, the progress line, the `slide`
 transition (a crossfade until then), the details panel and the index are still to come.
+
+For whoever draws them: a token is a length only where it is used, so a `cqi` in one used
+inside the stage — a size container of its own, so photos fit it — would be of the stage's
+width, not the show's. Use a theme's lengths outside the stage, or on the stage element
+itself, whose own properties still see the show; the mat's and frame's widths are the
+first that will need this.
