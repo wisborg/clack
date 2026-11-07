@@ -308,7 +308,7 @@ export class ClackShow extends HTMLElement {
   readonly #previous: HTMLButtonElement;
   readonly #next: HTMLButtonElement;
   readonly #live: HTMLDivElement;
-  /** Unseen, and no part: where what the theme's tokens come to is read (#geometry, #duration). */
+  /** Unseen, and no part: where what the theme's tokens come to is read (#measure, #duration). */
   readonly #probe: HTMLDivElement;
   /** The line above the stage, and its two parts: the show's title, and how many photos it has. */
   readonly #header: HTMLDivElement;
@@ -393,6 +393,8 @@ export class ClackShow extends HTMLElement {
   #swipes: Swipes | null = null;
   /** Stops listening for the screen's pixel ratio to change (#watchRatio). */
   #unwatchRatio: (() => void) | null = null;
+  /** Where the photo was, springing back, when a drag caught it again: where the drag starts from. */
+  #caught = 0;
   /** The photo springing back after a drag that went nowhere, while it does. */
   #springing: Animation | null = null;
   /**
@@ -883,11 +885,9 @@ export class ClackShow extends HTMLElement {
     this.#showing = { from: "manifest", manifest: m };
     this.#mutations.disconnect();
     // The title first, so the slides' photos are asked for with the
-    // header it brings; but the photos are given their sizes again only
-    // once the slides are set, so that those about to be let go are not.
-    this.#setTitle(m.title, m.lang, false);
+    // header it brings (see #name).
+    this.#setTitle(m.title, m.lang);
     this.#setSlides(m.slides);
-    this.#relayout();
   }
 
   /** The markup's slides, followed as the markup changes. */
@@ -934,19 +934,19 @@ export class ClackShow extends HTMLElement {
    * language goes with each slide -- see Keyed.lang.) A title of nothing
    * but spaces is none.
    */
-  #setTitle(title: string, lang: string | null, relayout = true): void {
+  #setTitle(title: string, lang: string | null): void {
     this.#showTitle = title.trim() ? title : "";
     this.#showLang = lang;
     this.#nameBox.textContent = this.#showTitle;
     applyLang(this.#nameBox, lang);
-    this.#name(relayout);
+    this.#name();
   }
 
   /**
    * Names the show: its label, else the manifest's title, else "Photos";
    * and shows the manifest's title, if it has one, in the header.
    */
-  #name(relayout = true): void {
+  #name(): void {
     const label = this.getAttribute("label")?.trim() ?? "";
     const byElement = "ariaLabelledByElements" in this.#internals;
     const internals = this.#internals as ElementInternals & { ariaLabelledByElements: Element[] | null };
@@ -959,12 +959,13 @@ export class ClackShow extends HTMLElement {
     // the page's name for the show, for screen readers, not shown.
     const title = this.#showTitle;
     applyLang(this.#headerTitle, this.#showLang);
-    if (this.#headerTitle.textContent !== title) {
-      this.#headerTitle.textContent = title;
-      this.#header.hidden = !title;
-      // The header shown, hidden, or of another height: the stage with it.
-      if (relayout) this.#relayout();
-    }
+    // The header shown, hidden, or of another height makes the stage
+    // another height; the photos are not given new sizes here, but when
+    // the stage is next observed, before anything paints: by then any
+    // slides that came with the title are set, and the photos about to be
+    // let go are gone. A photo asked for meanwhile is measured as it is.
+    this.#headerTitle.textContent = title;
+    this.#header.hidden = !title;
   }
 
   /**
@@ -1299,6 +1300,8 @@ export class ClackShow extends HTMLElement {
 
   /** Ends every running transition at once, at its end. */
   #finishTransitions(): void {
+    // The spring back too: the photo where it was going, in place.
+    this.#springing?.finish();
     for (const r of [...this.#running]) {
       for (const a of r.animations) {
         a.finish();
@@ -1411,20 +1414,27 @@ export class ClackShow extends HTMLElement {
     if (!figure || this.#shown < 0) {
       return;
     }
+    // Caught again as it springs back: it follows the finger from where it
+    // was caught, not from where it is going.
+    const springing = this.#springing;
+    if (springing) {
+      this.#caught = new DOMMatrix(getComputedStyle(figure).transform).m41;
+      this.#springing = null;
+      springing.cancel();
+    }
     this.#finishTransitions();
-    // Caught again as it springs back: it follows the finger from here.
-    this.#springing?.cancel();
     // Where there is nowhere to go, the photo resists.
     const delta = (dx < 0 ? 1 : -1) * (this.#rtl() ? -1 : 1);
     const free = canStep(this.#from(), this.#slides.length, delta, this.loop);
     // Cut off at the show's sides while it moves, so it never widens the
     // page; only then, so nothing else at the sides is (#settleMoving).
     this.#box.classList.add("moving");
-    figure.style.setProperty("--clack-drag", `${free ? dx : dx * 0.25}px`);
+    figure.style.setProperty("--clack-drag", `${this.#caught + (free ? dx : dx * 0.25)}px`);
   }
 
   /** Ends a drag of figure's photo: back in place, and nothing cut off once nothing moves. */
   #endDrag(figure = this.#figure): void {
+    this.#caught = 0;
     figure?.style.removeProperty("--clack-drag");
     this.#settleMoving();
   }
@@ -1447,6 +1457,7 @@ export class ClackShow extends HTMLElement {
       return;
     }
     const offset = parseFloat(figure.style.getPropertyValue("--clack-drag")) || 0;
+    this.#caught = 0; // the gesture's own: its next starts afresh
     const delta = ((outcome === -1 ? 1 : -1) * (this.#rtl() ? -1 : 1)) as 1 | -1;
     const from = this.#from();
     const go = outcome !== 0 && canStep(from, this.#slides.length, delta, this.loop);
@@ -1550,7 +1561,7 @@ export class ClackShow extends HTMLElement {
     let geometry: Geometry | null | undefined;
     return (i) => {
       if (geometry === undefined) geometry = this.#layOut() ?? this.#lastGeometry;
-      return this.#sizes(i, geometry);
+      return this.#sizes(i, geometry) ?? "100vw";
     };
   }
 
@@ -1586,7 +1597,9 @@ export class ClackShow extends HTMLElement {
       mat = Math.max(0, probe.width - 1);
       const asked = Math.max(0, probe.height - 1);
       const dpr = devicePixelRatio || 1;
-      const device = (f: number): number => (asked > 0 ? Math.max(1, Math.floor(f * dpr)) / dpr : 0);
+      // Rounded down, but not past a sixteenth of a device pixel: what is
+      // laid out is a hair short of a whole one where it should be one.
+      const device = (f: number): number => (asked > 0 ? Math.max(1, Math.floor(f * dpr + 1 / 16)) / dpr : 0);
       frame = device(asked);
       const most = Math.min(stage.width, stage.height) / 6;
       if (mat + frame > most) {
@@ -1610,12 +1623,14 @@ export class ClackShow extends HTMLElement {
 
   /**
    * What the `sizes` of slide i's photo should say, laid out so: the width
-   * it is drawn at; the window's width if there is no telling (no layout
-   * yet, or no such slide).
+   * it is drawn at; the window's width before there was any layout. Null
+   * for a photo whose slide has gone: it is about to be let go, and keeps
+   * the sizes it has.
    */
-  #sizes(i: number, geometry: Geometry | null): string {
+  #sizes(i: number, geometry: Geometry | null): string | null {
     const slide = this.#slides[i];
-    if (!geometry || !slide) return "100vw";
+    if (!slide) return null;
+    if (!geometry) return "100vw";
     const { stage, mat, frame } = geometry;
     const fit = this.getAttribute("fit") === "cover" ? "cover" : "contain";
     // The room the mount leaves the photo, if the layout has one.

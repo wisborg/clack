@@ -663,12 +663,19 @@ test("a photo caught again as it springs back follows the finger", async () => {
   await letGoSlowly(p, x, 40);
   const figure = figures(show)[0]!;
   assert(figure.getAnimations().length > 0, "springing back");
+  await sleep(40); // part of the way back
+  const caught = new DOMMatrix(getComputedStyle(figure).transform).m41;
+  assert(caught < -1, `caught on its way back: at ${caught}px`);
   p.send("pointerdown", x);
   p.send("pointermove", x - 30);
   p.send("pointermove", x - 60);
   assertEqual(figure.getAnimations().length, 0, "the spring back let go of");
-  assertEqual(new DOMMatrix(getComputedStyle(figure).transform).m41, -60, "where the finger is");
+  const now = new DOMMatrix(getComputedStyle(figure).transform).m41;
+  assert(Math.abs(now - (caught - 60)) < 1, `followed from where it was caught, ${caught}px: at ${now}px`);
+  await sleep(150);
+  p.send("pointermove", x - 60);
   p.send("pointerup", x - 60, { buttons: 0 });
+  await sleep(300);
 });
 
 test("a show with no credit keeps no line for one", async () => {
@@ -716,3 +723,35 @@ async function letGoSlowly(p: ReturnType<typeof pointer>, x: number, by: number)
   p.send("pointermove", x - by);
   p.send("pointerup", x - by, { buttons: 0 });
 }
+
+test("a drag cut short still keeps the click its release makes from the page", async () => {
+  const show = makeShow([]);
+  const slide = (id: string) => ({ id, alt: id, width: 300, height: 200, sources: [{ url: img(300, 200), width: 300 }] });
+  show.slides = [slide("a"), slide("b")];
+  await settledOn(show, "1 of 2");
+  let clicks = 0;
+  show.addEventListener("click", () => clicks++);
+  const p = pointer(show);
+  const x = p.left + p.width * 0.8;
+  p.send("pointerdown", x);
+  p.send("pointermove", x - 40);
+  p.send("pointermove", x - 80);
+  show.slides = [slide("b")]; // "a", dragged, gone
+  p.send("pointerup", x - 80, { buttons: 0 });
+  p.stage.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true, cancelable: true }));
+  assertEqual(clicks, 0, "the release's click kept back");
+});
+
+test("a show going back from a manifest to its markup does not give the manifest's photos new sizes", async () => {
+  const show = makeShow([{}, {}]);
+  show.src = titled("Leaving", 3, "leaving.json");
+  await waitFor(() => part(show, ".header-title").textContent === "Leaving", "the manifest");
+  await settledOn(show, "1 of 3");
+  await sleep(200); // its neighbours preloaded
+  const set = await sizesSet(async () => {
+    show.removeAttribute("src");
+    await settledOn(show, "1 of 2");
+  });
+  const resized = [...set.keys()].filter((img) => img.alt.startsWith("Leaving"));
+  assertEqual(resized.map((img) => img.alt).join(", "), "", "none of the manifest's photos given new sizes");
+});

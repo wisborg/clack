@@ -20,7 +20,8 @@ export interface Swipes {
   stop(): void;
   /**
    * Ends the gesture under way, if any, without its end: the rest of it is
-   * not heard -- as when what it was dragging has gone.
+   * not heard -- as when what it was dragging has gone -- though the click
+   * its release makes is still kept from the page, as a swipe's is.
    */
   cancel(): void;
 }
@@ -31,12 +32,15 @@ export function listen(target: HTMLElement, handlers: SwipeHandlers): Swipes {
   let startX = 0;
   let startY = 0;
   let swiping = false;
+  // Cancelled (Swipes.cancel): followed to its end, but no longer heard.
+  let muted = false;
   // Recent positions, for the speed at the moment of release.
   let samples: { x: number; t: number }[] = [];
 
   const reset = (): void => {
     id = null;
     swiping = false;
+    muted = false;
     samples = [];
   };
 
@@ -65,10 +69,11 @@ export function listen(target: HTMLElement, handlers: SwipeHandlers): Swipes {
     // (when it could not be captured) has ended its gesture: a swipe of it
     // springs back, as a cancelled one does.
     if (e.pointerType === "mouse" && e.buttons === 0) {
-      if (swiping) handlers.end(0);
+      if (swiping && !muted) handlers.end(0);
       reset();
       return;
     }
+    if (muted) return;
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
     if (!swiping) {
@@ -94,7 +99,7 @@ export function listen(target: HTMLElement, handlers: SwipeHandlers): Swipes {
     if (e.pointerId !== id) {
       return;
     }
-    if (swiping) {
+    if (swiping && !muted) {
       const dx = e.clientX - startX;
       const first = samples[0]!;
       const elapsed = e.timeStamp - first.t;
@@ -140,6 +145,10 @@ export function listen(target: HTMLElement, handlers: SwipeHandlers): Swipes {
       target.removeEventListener("lostpointercapture", up);
       target.removeEventListener("click", click, { capture: true });
     },
-    cancel: reset,
+    // Not forgotten at once: followed to its end, still holding the
+    // pointer, so that the click its release makes is still its own.
+    cancel() {
+      if (id !== null) muted = true;
+    },
   };
 }

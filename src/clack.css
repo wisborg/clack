@@ -97,7 +97,7 @@
 .stage {
   grid-row: 2;
   /* The mat and the frame the mount puts around a photo, each side, set
-     by the show in px (#geometry); none but in matted. Set here, so a
+     by the show in px (#layOut); none but in matted. Set here, so a
      page's value on the element does not reach in. */
   --clack-mat-inset: 0px;
   --clack-frame-inset: 0px;
@@ -412,7 +412,7 @@
   white-space: nowrap;
 }
 
-/* Where the show reads what the theme's tokens come to (#geometry,
+/* Where the show reads what the theme's tokens come to (#measure,
    #duration): unseen, and with no part, so that nothing of the page's,
    nor any animation of Clack's, changes it. Outside the stage, so that cqi
    in a token is of the show, as the schema says, not of the stage.
@@ -439,7 +439,7 @@
   top: 0;
   left: 0;
   /* A pixel more than each, so it always has a size, and so is always
-     observed (#geometry takes the pixel off again). */
+     observed (#measure takes the pixel off again). */
   width: calc(var(--clack-mat-width) + 1px);
   height: calc(var(--clack-frame-width) + 1px);
   visibility: hidden;

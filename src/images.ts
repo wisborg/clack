@@ -122,11 +122,14 @@ export class Photos {
     return this.#photos.get(key);
   }
 
-  /** Sets the size every photo is drawn at; the browser fetches more pixels only if it needs them. */
-  resize(sizes: (key: string) => string): void {
+  /**
+   * Sets the size every photo is drawn at; the browser fetches more pixels
+   * only if it needs them. A photo whose size is null keeps the one it has.
+   */
+  resize(sizes: (key: string) => string | null): void {
     for (const [key, photo] of this.#photos) {
       const s = sizes(key);
-      if (photo.img.sizes !== s) {
+      if (s !== null && photo.img.sizes !== s) {
         for (const source of photo.element.querySelectorAll("source")) {
           source.sizes = s;
         }
