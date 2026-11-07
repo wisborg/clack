@@ -132,13 +132,11 @@ function laidOut(e: Element): { width: number; height: number } {
   return { width: parseFloat(style.width) || 0, height: parseFloat(style.height) || 0 };
 }
 
-/**
- * The mat's width by the frame's, from the probe's box: each is a pixel
- * more there (see .probe in clack.css), so that it always has a size, and
- * is always observed.
- */
-function probed(box: { width: number; height: number }): { width: number; height: number } {
-  return { width: Math.max(0, box.width - 1), height: Math.max(0, box.height - 1) };
+/** Where the photos are drawn: the stage's size, and what the mount takes around a photo, each side. */
+interface Geometry {
+  stage: { width: number; height: number };
+  /** The mat and frame together, in px; 0 but in the matted layout. */
+  inset: number;
 }
 
 /** Content in the mount, which in the matted layout frames it (see clack.css). */
@@ -154,6 +152,8 @@ type ThemeState = { is: "shown" } | { is: "to-fetch"; url: string } | { is: "fet
 /** A theme file asked for: on its way, or here (or failed, and soon forgotten). */
 interface ThemeFile {
   compiled: Promise<Compiled>;
+  /** It, once it has arrived: to be taken up at once, not a turn later. */
+  value: Compiled | null;
   settled: boolean;
   /** Gives it the whole time to arrive again, from now: someone has asked for it now. */
   wait(): void;
@@ -177,7 +177,7 @@ const themeFilesKept = 8;
  */
 const themeFileTimeout = 30_000;
 
-function themeFile(url: string): Promise<Compiled> {
+function themeFile(url: string): ThemeFile {
   let file = themeFiles.get(url);
   if (file) {
     themeFiles.delete(url); // to the end: asked for last
@@ -187,6 +187,7 @@ function themeFile(url: string): Promise<Compiled> {
     const compiled = loadTheme(url, controller.signal).then(compile);
     const f: ThemeFile = {
       compiled,
+      value: null,
       settled: false,
       wait() {
         if (f.settled) return;
@@ -199,7 +200,10 @@ function themeFile(url: string): Promise<Compiled> {
       clearTimeout(timer);
       keepFewThemeFiles();
     };
-    compiled.then(settle, () => {
+    compiled.then((value) => {
+      f.value = value;
+      settle();
+    }, () => {
       if (themeFiles.get(url) === f) themeFiles.delete(url);
       settle();
     });
@@ -208,7 +212,7 @@ function themeFile(url: string): Promise<Compiled> {
   file.wait();
   themeFiles.set(url, file);
   keepFewThemeFiles();
-  return file.compiled;
+  return file;
 }
 
 /** Forgets the theme files that have arrived but were asked for longest ago, past themeFilesKept of them. */
@@ -299,7 +303,7 @@ export class ClackShow extends HTMLElement {
   readonly #previous: HTMLButtonElement;
   readonly #next: HTMLButtonElement;
   readonly #live: HTMLDivElement;
-  /** Unseen, and no part: where what the theme's tokens come to is read (#measure, #duration). */
+  /** Unseen, and no part: where what the theme's tokens come to is read (#geometry, #duration). */
   readonly #probe: HTMLDivElement;
   /** The line above the stage, and its two parts: the show's title, and how many photos it has. */
   readonly #header: HTMLDivElement;
@@ -307,8 +311,6 @@ export class ClackShow extends HTMLElement {
   readonly #headerCount: HTMLSpanElement;
   /** The manifest's language, for its title in the header. */
   #showLang: string | null = null;
-  /** What the mount adds around a photo on each side, in px (#measure). */
-  #inset = 0;
   /**
    * The theme's stylesheet, adopted now: held, so that it is known again.
    * Safari may let go of a sheet's script object that only a WeakSet holds
@@ -379,20 +381,17 @@ export class ClackShow extends HTMLElement {
   #pending: Promise<boolean> | null = null;
   #running: Running[] = [];
   /**
-   * The stage's size, as last observed, or read (#stageSize); null when
-   * it is not known -- before it is in the page, and after anything that
-   * may change it: a header shown or hidden, a theme, a move.
+   * Where the photos are drawn, as last worked out (#geometry); null when
+   * it is not known: before the show is in the page, while it is hidden,
+   * and after anything that may change it (#relayout).
    */
-  #frame: { width: number; height: number } | null = null;
+  #laidOut: Geometry | null = null;
+  /** The mount's sizes as last given to the CSS, so that they are given only when they change. */
+  #mountCSS = "";
 
   #stopSwipe: (() => void) | null = null;
-  /** The stage and the probe, both: one observer, so a change to both is taken in one go. */
-  readonly #resize = new ResizeObserver((entries) => this.#onResize(entries));
-  /**
-   * The mat's width by the frame's, in px, as the probe was last observed
-   * (see .probe in clack.css); null until it is, in the page.
-   */
-  #probeSize: { width: number; height: number } | null = null;
+  /** The stage and the probe: either changing size changes where the photos are drawn. */
+  readonly #resize = new ResizeObserver(() => this.#relayout());
   // Changes to the markup re-read the slides; the host's own attributes
   // (loop, fit, label) are not slides, and have their own callback.
   readonly #mutations = new MutationObserver((records) => {
@@ -456,7 +455,11 @@ export class ClackShow extends HTMLElement {
     this.#probe = el("div", "probe");
     this.#nameBox = el("span", "name");
     this.#nameBox.hidden = true;
-    root.append(show, this.#live, this.#nameBox, this.#probe);
+    // In a box of no size that clips it, so that however large the
+    // theme's mat, the probe never adds to what the page can scroll.
+    const probes = el("div", "probes");
+    probes.append(this.#probe);
+    root.append(show, this.#live, this.#nameBox, probes);
 
     this.addEventListener("keydown", (e) => this.#onKey(e));
   }
@@ -505,13 +508,10 @@ export class ClackShow extends HTMLElement {
         }
       }
     };
-    // The theme first, and measured in it, before slides from script may
-    // ask for a photo: so the first is asked for at the size it is drawn
-    // at, mount and all.
-    replay("theme");
-    this.#frame = null;
-    this.#measure();
-    for (const name of ["src", "slides", "loop"]) replay(name);
+    // The theme first, before slides from script may ask for a photo: so
+    // the first is asked for at the size it is drawn at in it, mount and
+    // all.
+    for (const name of ["theme", "src", "slides", "loop"]) replay(name);
     // The markup is read again on a reconnect, in case it changed while
     // the show was out of the page and not watching it.
     if (this.#showing.from === "markup") this.#showing = { from: "none" };
@@ -522,10 +522,9 @@ export class ClackShow extends HTMLElement {
 
   disconnectedCallback(): void {
     this.#ready = false;
-    // Measured afresh when it is back: it may be somewhere else, of
+    // Worked out afresh when it is back: it may be somewhere else, of
     // another size, and a theme may change meanwhile.
-    this.#probeSize = null;
-    this.#frame = null;
+    this.#laidOut = null;
     document.removeEventListener("visibilitychange", this.#onVisibility);
     // A manifest on its way is not dropped: there is no telling a move --
     // however long it takes -- from a removal, and a show that is moved must
@@ -821,12 +820,20 @@ export class ClackShow extends HTMLElement {
     }
     if (state.is !== "to-fetch") return;
     theme.state = { is: "fetching" };
-    themeFile(state.url).then(
-      (compiled) => {
-        if (this.#theme !== theme) return;
-        theme.state = { is: "shown" };
-        this.#look(compiled);
-      },
+    const file = themeFile(state.url);
+    const shown = (compiled: Compiled): void => {
+      if (this.#theme !== theme) return;
+      theme.state = { is: "shown" };
+      this.#look(compiled);
+    };
+    // One already here is taken up at once, as a built-in is: before any
+    // photo is asked for in the theme before it.
+    if (file.value) {
+      shown(file.value);
+      return;
+    }
+    file.compiled.then(
+      shown,
       (error: unknown) => {
         if (this.#theme !== theme) return;
         // Said now -- or once the show is back in the page, if it left
@@ -849,19 +856,8 @@ export class ClackShow extends HTMLElement {
     root.adoptedStyleSheets = [this.#sheet, styles(), ...pages];
     const { choices } = compiled;
     for (const [name, value] of Object.entries(choices)) this.#box.dataset[name] = value;
-    // Measured again once it is laid out in this theme -- whether or not
-    // the mat's size changed, as the layout may now mount photos or not.
-    // Observed afresh, which reports its size, with the stage's, in the
-    // next rendering of the page: the photos' sizes then change once, to
-    // what they are drawn at, not first to the new layout with the old
-    // theme's mat, or to the new mat on the old stage.
-    // The stage may change size too (each layout has its own air): read
-    // again if a photo is asked for before it is observed.
-    this.#frame = null;
-    if (this.#ready) {
-      this.#resize.unobserve(this.#probe);
-      this.#resize.observe(this.#probe);
-    }
+    // Its own air, its own mat, perhaps a mount where there was none.
+    this.#relayout();
   }
 
   #showManifest(m: Manifest): void {
@@ -938,13 +934,12 @@ export class ClackShow extends HTMLElement {
     this.#internals.ariaLabel = label || this.#showTitle || text.show;
     if (byElement) internals.ariaLabelledByElements = !label && this.#showTitle ? [this.#nameBox] : null;
     const title = label || this.#showTitle;
-    this.#headerTitle.textContent = title;
     applyLang(this.#headerTitle, label ? null : this.#showLang);
-    if (this.#header.hidden !== !title) {
+    if (this.#headerTitle.textContent !== title) {
+      this.#headerTitle.textContent = title;
       this.#header.hidden = !title;
-      // The stage is shorter, or taller: read again if a photo is asked
-      // for before it is observed.
-      this.#frame = null;
+      // The header shown, hidden, or of another height: the stage with it.
+      this.#relayout();
     }
   }
 
@@ -1223,12 +1218,14 @@ export class ClackShow extends HTMLElement {
         done: () => {
           old.remove();
           this.#running = this.#running.filter((r) => r !== running);
+          this.#settleMoving();
         },
       };
       this.#running.push(running);
       void Promise.all(animations.map((a) => a.finished)).then(running.done, running.done);
     } else {
       old?.remove();
+      this.#settleMoving();
     }
 
     this.dispatchEvent(
@@ -1381,7 +1378,17 @@ export class ClackShow extends HTMLElement {
     // Where there is nowhere to go, the photo resists.
     const delta = (dx < 0 ? 1 : -1) * (this.#rtl() ? -1 : 1);
     const free = canStep(this.#from(), this.#slides.length, delta, this.loop);
+    // Cut off at the show's sides while it moves, so it never widens the
+    // page; only then, so nothing else at the sides is (#settleMoving).
+    this.#box.classList.add("moving");
     figure.style.setProperty("--clack-drag", `${free ? dx : dx * 0.25}px`);
+  }
+
+  /** Stops cutting photos off at the show's sides once none is moved aside, or moving. */
+  #settleMoving(): void {
+    const figures = this.#stage.querySelectorAll<HTMLElement>(".slide");
+    const moving = Array.from(figures).some((f) => f.style.getPropertyValue("--clack-drag") || f.getAnimations().length > 0);
+    if (!moving) this.#box.classList.remove("moving");
   }
 
   #swiped(outcome: -1 | 0 | 1): void {
@@ -1413,40 +1420,62 @@ export class ClackShow extends HTMLElement {
   #springBack(figure: HTMLElement, offset: number): void {
     figure.style.removeProperty("--clack-drag");
     if (offset !== 0) {
-      figure.animate([{ transform: `translateX(${offset}px)` }, { transform: "translateX(0)" }], {
+      const back = figure.animate([{ transform: `translateX(${offset}px)` }, { transform: "translateX(0)" }], {
         duration: 220,
         easing: "cubic-bezier(0.2, 0, 0, 1)",
       });
+      void back.finished.then(
+        () => this.#settleMoving(),
+        () => this.#settleMoving(),
+      );
     }
+    this.#settleMoving();
   }
 
   // ---- Size -------------------------------------------------------------
 
   /**
-   * What the mount comes to around a photo, in px, from the theme's mat
-   * and frame as of the show (the probe's size: see .probe in clack.css),
-   * set on the stage for the CSS that draws it, and counted in the width
-   * each photo is drawn at; none but in the matted layout. The bevel,
-   * where there is one, is drawn in the mat's last 2px (clack.css).
+   * Something that may change where the photos are drawn has changed --
+   * the stage's size or the probe's (as observed), a theme, the header --
+   * and it is worked out again: at once, in the page, so that a photo
+   * asked for in the same task, and every photo's size, are in it.
+   */
+  #relayout(): void {
+    this.#laidOut = null;
+    if (!this.#ready) return;
+    this.#geometry();
+    this.#photos.resize((key) => this.#sizes(this.#indexByKey.get(key) ?? -1));
+  }
+
+  /**
+   * Where the photos are drawn: the stage's size, and what the mount comes
+   * to around a photo, in px, from the theme's mat and frame as of the
+   * show (the probe's size: see .probe in clack.css), set on the stage for
+   * the CSS that draws it; none but in the matted layout. The bevel, where
+   * there is one, is drawn in the mat's last 2px (clack.css).
    *
    * Never more than a sixth of the stage's shorter side, each side: on a
    * show too small for its mat -- the built-in one is of the window, not
    * the show -- the mat and frame are narrowed together, and the photo
    * keeps two thirds of the stage.
    *
-   * Worked out again whenever the mat, the frame or the stage changes
-   * size, and with every theme, from their sizes as observed (#onResize,
-   * #look) -- but for the first time in the page, before any photo is
-   * asked for, when the probe's is read, as the stage's is (#stageSize).
+   * Sizes are read as laid out, always the same way (laidOut), whether
+   * because something changed or because the observer said so, so that
+   * no photo's size is worked out from one reading and then another. Kept
+   * until something changes it (#relayout); not kept while the stage has
+   * no size -- out of the page, or hidden -- as it is not known then.
    */
-  #measure(): void {
+  #geometry(): Geometry {
+    if (this.#laidOut) return this.#laidOut;
+    const stage = laidOut(this.#stage);
     const box = this.#box.dataset;
     let mat = 0;
     let frame = 0;
     if (box["layout"] === "matted") {
-      this.#probeSize ??= probed(laidOut(this.#probe));
-      ({ width: mat, height: frame } = this.#probeSize);
-      const stage = this.#stageSize();
+      // A pixel more than each, there.
+      const probe = laidOut(this.#probe);
+      mat = Math.max(0, probe.width - 1);
+      frame = Math.max(0, probe.height - 1);
       const most = Math.min(stage.width, stage.height) / 6;
       if (most > 0 && mat + frame > most) {
         // In proportion, the frame rounded (below) and never past the most.
@@ -1458,48 +1487,24 @@ export class ClackShow extends HTMLElement {
       // frame drawn is the frame counted.
       frame = frame > 0 ? Math.max(1, Math.round(frame)) : 0;
     }
-    const inset = mat + frame;
-    this.#stage.style.setProperty("--clack-inset", `${inset}px`);
-    this.#stage.style.setProperty("--clack-mat-inset", `${mat}px`);
-    this.#inset = inset;
-  }
-
-  /**
-   * The stage or the probe has changed size, or both have (in one report,
-   * so the photos' sizes are not worked out from one before the other):
-   * the mount is worked out again, and every photo's size.
-   */
-  #onResize(entries: ResizeObserverEntry[]): void {
-    for (const { target, contentRect: box } of entries) {
-      if (target === this.#stage) this.#frame = { width: box.width, height: box.height };
-      else this.#probeSize = probed(box);
+    const css = `${mat}px ${frame}px`;
+    if (css !== this.#mountCSS) {
+      this.#mountCSS = css;
+      this.#stage.style.setProperty("--clack-mat-inset", `${mat}px`);
+      this.#stage.style.setProperty("--clack-frame-inset", `${frame}px`);
     }
-    this.#measure();
-    this.#photos.resize((key) => this.#sizes(this.#indexByKey.get(key) ?? -1));
-  }
-
-  /**
-   * The stage's size, as observed; until it is, as laid out, read the way
-   * the observer reports it -- its content box (the stage has no padding:
-   * clack.css), as CSS has it, untouched by any transform of the page's --
-   * or a photo's sizes would change once it is observed, and an engine may
-   * fetch the photo again.
-   */
-  #stageSize(): { width: number; height: number } {
-    if (this.#frame) return this.#frame;
-    const size = laidOut(this.#stage);
-    // Out of the page, it has none, and is not known.
-    if (size.width > 0) this.#frame = size;
-    return size;
+    const geometry = { stage, inset: mat + frame };
+    if (stage.width > 0 && stage.height > 0) this.#laidOut = geometry;
+    return geometry;
   }
 
   /** What the `sizes` of slide i's photo should say: the width it is drawn at. */
   #sizes(i: number): string {
-    const stage = this.#stageSize();
+    const { stage, inset } = this.#geometry();
     const slide = this.#slides[i];
     const fit = this.getAttribute("fit") === "cover" ? "cover" : "contain";
     // The room the mount leaves the photo, if the layout has one.
-    const room = (side: number): number => Math.max(0, side - 2 * this.#inset);
+    const room = (side: number): number => Math.max(0, side - 2 * inset);
     const w = slide ? drawnWidth(room(stage.width), room(stage.height), slide.width / slide.height, fit) : 0;
     return w > 0 ? `${w}px` : "100vw";
   }

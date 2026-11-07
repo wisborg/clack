@@ -1,8 +1,8 @@
 // The layouts a theme chooses (layout.type) and the header: what each
 // draws, and that the mat and frame are measured as the schema says.
 import type { ClackShow } from "../src/clack";
-import { assert, assertEqual, fixture, sleep, test } from "./harness";
-import { contentBox, echo, figures, img, imageLog, makeShow, part, resetImageLog, settledOn, showBox as box, waitFor } from "./util";
+import { assert, assertEqual, fixture, skip, sleep, test } from "./harness";
+import { contentBox, echo, figures, img, imageLog, makeShow, part, pointer, resetImageLog, settledOn, showBox as box, waitFor } from "./util";
 
 
 /** A theme file that extends mat, with these lengths for the mat and frame. */
@@ -302,7 +302,8 @@ test("a frame is drawn in whole pixels, and counted as drawn", async () => {
   await waitFor(() => box(show).dataset["layout"] === "matted", "the theme");
   await settledOn(show, "1 of 1");
   await waitFor(() => getComputedStyle(part(show, ".slide .mount")).borderTopWidth === "6px", "1% of 613px, as 6px");
-  assertEqual(part(show, ".stage").style.getPropertyValue("--clack-inset"), "16px", "counted as drawn: the 10px mat and the 6px frame");
+  const stage = part(show, ".stage").style;
+  assertEqual(`${stage.getPropertyValue("--clack-mat-inset")} ${stage.getPropertyValue("--clack-frame-inset")}`, "10px 6px", "counted as drawn: the 10px mat and the 6px frame");
   const room = contentBox(part(show, ".stage"));
   const photo = part(show, ".slide img").getBoundingClientRect();
   assert(near(photo.width, Math.min(room.width - 32, (room.height - 32) * 1.5)), `the photo, ${photo.width} wide, fills the room the 16px mount leaves in ${room.width}×${room.height}`);
@@ -321,4 +322,140 @@ test("a manifest's title of nothing but spaces is no title", async () => {
   const show = makeShow([], { src: echo(JSON.stringify(manifest), { path: "blank-title.json" }) });
   await settledOn(show, "1 of 1");
   assert(part(show, ".header").hidden, "no header");
+});
+
+/**
+ * Every value each photo's sizes was set to while during runs: a photo
+ * whose sizes changes after it is first set may be fetched twice.
+ */
+async function sizesSet(during: () => Promise<void>): Promise<Map<HTMLImageElement, string[]>> {
+  const proto = HTMLImageElement.prototype;
+  const own = Object.getOwnPropertyDescriptor(proto, "sizes")!;
+  const set: Map<HTMLImageElement, string[]> = new Map();
+  Object.defineProperty(proto, "sizes", {
+    ...own,
+    set(this: HTMLImageElement, value: string) {
+      const values = set.get(this) ?? [];
+      set.set(this, [...values, value]);
+      own.set!.call(this, value);
+    },
+  });
+  try {
+    await during();
+  } finally {
+    Object.defineProperty(proto, "sizes", own);
+  }
+  return set;
+}
+
+/** That each photo's sizes was set once, and to what it is drawn at, if it is on screen. */
+function assertSetOnce(set: Map<HTMLImageElement, string[]>, show: ClackShow): void {
+  assert(set.size > 0, "a photo was asked for");
+  for (const [img, values] of set) {
+    assertEqual(values.length, 1, `${img.alt}: sizes set ${values.join(", then ")}`);
+  }
+  const shown = part(show, ".slide img") as HTMLImageElement;
+  assertEqual(shown.sizes, `${Math.ceil(shown.getBoundingClientRect().width)}px`, "the photo on screen: sizes, as drawn");
+}
+
+test("a titled manifest in a narrowed mat: each photo's size is set once, header, mat and all", async () => {
+  let show: ClackShow | undefined;
+  const set = await sizesSet(async () => {
+    const manifest = { format: "clack-manifest/1", title: "Coastlines", slides: [{ id: "a", alt: "titled", width: 300, height: 200, sources: [{ url: img(300, 200), width: 300 }] }] };
+    show = makeShow([], { theme: "mat", src: echo(JSON.stringify(manifest), { path: "titled-mat.json", delay: 300 }) });
+    // A mat wide enough to be narrowed on this stage, as the window's may be.
+    show.style.setProperty("--clack-mat-width", "80px");
+    await settledOn(show, "1 of 1");
+    await sleep(100);
+  });
+  assertSetOnce(set, show!);
+});
+
+test("a second show in a theme file already here takes it up at once, and asks for its photo in it", async () => {
+  const theme = matted("30px", "5px");
+  const first = makeShow([{}], { theme });
+  await waitFor(() => box(first).dataset["layout"] === "matted", "the theme, for the first show");
+  let show: ClackShow | undefined;
+  const set = await sizesSet(async () => {
+    show = makeShow([{ width: 300, height: 200 }], { theme });
+    assertEqual(box(show).dataset["layout"], "matted", "taken up at once");
+    await settledOn(show, "1 of 1");
+    await sleep(100);
+  });
+  assertSetOnce(set, show!);
+});
+
+test("a show hidden and shown again asks for a photo at its size, not as if it had none", async () => {
+  const slides = Array.from({ length: 6 }, (_, i) => ({ id: `s${i}`, alt: `photo ${i + 1}`, width: 300, height: 200, sources: [{ url: img(300, 200), width: 300 }] }));
+  const show = makeShow([]);
+  show.slides = slides;
+  await settledOn(show, "1 of 6");
+  show.hidden = true;
+  await sleep(100); // observed with no size
+  let done: Promise<boolean> | undefined;
+  const set = await sizesSet(async () => {
+    show.hidden = false;
+    done = show.goTo(5); // in the same task: not yet observed again
+    await done;
+    await settledOn(show, "6 of 6");
+  });
+  const last = [...set].find(([img]) => img.alt === "photo 6");
+  assert(last, "the last photo was asked for");
+  assert(!last[1].includes("100vw"), `its sizes: ${last[1].join(", then ")}`);
+});
+
+test("a title that wraps onto another line is counted in the next photo's size", async () => {
+  const manifest = (title: string, alt: string) => ({ format: "clack-manifest/1", title, slides: [{ id: "a", alt, width: 300, height: 200, sources: [{ url: img(300, 200), width: 300 }] }] });
+  const show = makeShow([], { src: echo(JSON.stringify(manifest("Short", "first")), { path: "short-title.json" }) });
+  show.style.width = "320px";
+  await settledOn(show, "1 of 1");
+  let ready: Promise<void> | undefined;
+  const set = await sizesSet(async () => {
+    const long = "A long title that will not fit on one line of a narrow show, nor two";
+    show.src = echo(JSON.stringify(manifest(long, "second")), { path: "long-title.json" });
+    ready = waitFor(() => part(show, ".slide img").getAttribute("alt") === "second", "the second manifest's photo");
+    await ready;
+    await sleep(100);
+  });
+  assert(part(show, ".header").getBoundingClientRect().height > 40, "the title on more than one line");
+  assertSetOnce(set, show);
+});
+
+test("however large a theme's mat, the show does not widen what holds it", async () => {
+  const holder = document.createElement("div");
+  holder.style.width = "400px";
+  holder.style.overflow = "auto";
+  fixture().append(holder);
+  const show = makeShow([{}], { theme: matted("40vw", "40vh") });
+  holder.append(show); // from where makeShow put it
+  show.style.width = "400px";
+  await waitFor(() => box(show).dataset["layout"] === "matted", "the theme");
+  await settledOn(show, "1 of 1");
+  assert(holder.scrollWidth <= holder.clientWidth, `scrolls ${holder.scrollWidth} wide in ${holder.clientWidth}`);
+});
+
+test("a photo is cut off at the show's sides only while it is dragged or swiped", async () => {
+  const show = makeShow([{}, {}, {}]);
+  await settledOn(show, "1 of 3");
+  assertEqual(getComputedStyle(box(show)).overflowX, "visible", "at rest: nothing cut off");
+  const p = pointer(show);
+  const x = p.left + p.width * 0.8;
+  // As a swipe goes (pointer().swipe), but looked at before it is let go.
+  p.send("pointerdown", x);
+  for (let i = 1; i <= 8; i++) p.send("pointermove", x - (320 * i) / 8);
+  assertEqual(getComputedStyle(box(show)).overflowX, "clip", "while dragged");
+  p.send("pointerup", x - 320, { buttons: 0 });
+  await settledOn(show, "2 of 3");
+  await waitFor(() => getComputedStyle(box(show)).overflowX === "visible", "nothing cut off once it has moved on");
+});
+
+test("the stage's focus ring is drawn over the photo, inside the stage's edge", async () => {
+  const show = makeShow([{}], { theme: "minimal", fit: "cover" });
+  await settledOn(show, "1 of 1");
+  const stage = part(show, ".stage");
+  stage.focus({ focusVisible: true } as FocusOptions);
+  if (!stage.matches(":focus-visible")) skip("this engine does not show focus asked for from script");
+  const ring = getComputedStyle(stage, "::before");
+  assertEqual(`${ring.outlineStyle} ${ring.outlineOffset} ${ring.zIndex} ${ring.position}`, "solid -2px 1 absolute", "a ring of its own, inside the edge, over the slides");
+  assertEqual(getComputedStyle(stage).outlineStyle, "none", "not the stage's own, which the photo would cover");
 });

@@ -41,9 +41,12 @@
   height: 100%;
   aspect-ratio: 3 / 2;
   padding: var(--clack-padding-top) var(--clack-padding-inline) var(--clack-padding-bottom);
-  /* A photo swiped aside is cut off at the show's sides, never widening
-     the page; a shadow under one falls freely across the margins and below
-     it, onto the caption's space, as on a wall. */
+}
+
+/* A photo dragged or swiped aside is cut off at the show's sides, never
+   widening the page -- only while one moves (#settleMoving), so a shadow
+   or a focus ring at the sides is not cut off otherwise. */
+.show.moving {
   overflow-x: clip;
 }
 
@@ -94,11 +97,11 @@
    it (.probe), and come in as px. */
 .stage {
   grid-row: 2;
-  /* What the mount adds around a photo on each side, and the mat's share
-     of it, set by the show in px (#measure); none but in matted. Set
-     here, so a page's value on the element does not reach in. */
-  --clack-inset: 0px;
+  /* The mat and the frame the mount puts around a photo, each side, set
+     by the show in px (#geometry); none but in matted. Set here, so a
+     page's value on the element does not reach in. */
   --clack-mat-inset: 0px;
+  --clack-frame-inset: 0px;
   position: relative;
   display: grid;
   min-height: 0;
@@ -112,18 +115,23 @@
   outline: none;
 }
 
-/* Inside the stage's edge, not outside it: where the theme leaves no
-   margin (full-bleed), the show's sides would cut it off. Drawn over the
-   photo, as the stage paints its outline after its slides. */
-.stage:focus-visible {
+/* The focus ring: inside the stage's edge, where the theme may leave no
+   margin (full-bleed), and over the photos, which an outline of the
+   stage's own would be painted under. */
+.stage:focus-visible::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
   outline: 2px solid var(--clack-accent);
   outline-offset: -2px;
+  pointer-events: none;
 }
 
 .slide {
   /* The room a photo has: the stage, less the mount around it. */
-  --clack-room-w: calc(100cqw - 2 * var(--clack-inset));
-  --clack-room-h: calc(100cqh - 2 * var(--clack-inset));
+  --clack-room-w: calc(100cqw - 2 * (var(--clack-mat-inset) + var(--clack-frame-inset)));
+  --clack-room-h: calc(100cqh - 2 * (var(--clack-mat-inset) + var(--clack-frame-inset)));
   grid-area: 1 / 1;
   display: grid;
   place-items: center;
@@ -389,7 +397,7 @@
   white-space: nowrap;
 }
 
-/* Where the show reads what the theme's tokens come to (#measure,
+/* Where the show reads what the theme's tokens come to (#geometry,
    #duration): unseen, and with no part, so that nothing of the page's,
    nor any animation of Clack's, changes it. Outside the stage, so that cqi
    in a token is of the show, as the schema says, not of the stage.
@@ -400,12 +408,23 @@
      a second longer: so CSS works out whatever the token says, calc() and
      all, and one it cannot read -- which leaves the initial 0s -- is told
      from 0s. */
+/* Its box: of no size, and clipping it, so that however large the theme's
+   mat, the probe never adds to what the page can scroll. */
+.probes {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
 .probe {
   position: absolute;
   top: 0;
   left: 0;
   /* A pixel more than each, so it always has a size, and so is always
-     observed (#measure takes the pixel off again). */
+     observed (#geometry takes the pixel off again). */
   width: calc(var(--clack-mat-width) + 1px);
   height: calc(var(--clack-frame-width) + 1px);
   visibility: hidden;
@@ -449,7 +468,7 @@
 .show[data-layout="matted"] .mount {
   display: block;
   padding: var(--clack-mat-inset);
-  border: calc(var(--clack-inset) - var(--clack-mat-inset)) solid var(--clack-frame);
+  border: var(--clack-frame-inset) solid var(--clack-frame);
   background: var(--clack-mat);
   box-shadow:
     inset 0 0 0 1px rgb(0 0 0 / 0.35),

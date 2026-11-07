@@ -223,3 +223,27 @@ export function contentBox(e: Element): { width: number; height: number } {
 export function showBox(show: ClackShow): HTMLElement {
   return show.shadowRoot!.querySelector<HTMLElement>(".show")!;
 }
+
+/** Pointer events on the stage, as a mouse, pen or finger would send them. */
+export function pointer(show: ClackShow) {
+  const stage = part(show, ".stage");
+  const r = stage.getBoundingClientRect();
+  const y = r.top + r.height / 2;
+  return {
+    stage,
+    left: r.left,
+    width: r.width,
+    send(type: string, x: number, init: PointerEventInit = {}): void {
+      stage.dispatchEvent(
+        new PointerEvent(type, { pointerId: 1, pointerType: "mouse", isPrimary: true, button: 0, buttons: 1, clientX: x, clientY: y, bubbles: true, cancelable: true, composed: true, ...init }),
+      );
+    },
+    swipe(from: number, to: number): void {
+      this.send("pointerdown", from);
+      for (let i = 1; i <= 8; i++) {
+        this.send("pointermove", from + ((to - from) * i) / 8);
+      }
+      this.send("pointerup", to, { buttons: 0 });
+    },
+  };
+}

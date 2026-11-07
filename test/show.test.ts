@@ -1,7 +1,7 @@
 import type { ClackShow, SlideChangeDetail, SlideInput } from "../src/clack";
 import { tagName } from "../src/clack";
 import { assert, assertEqual, fixture, skip, sleep, test } from "./harness";
-import { contentBox, figure, figures, img, imageLog, makeShow, onScreen, part, resetImageLog, settledOn, waitFor } from "./util";
+import { contentBox, figure, figures, pointer, img, imageLog, makeShow, onScreen, part, resetImageLog, settledOn, waitFor } from "./util";
 
 const three = [{ title: "One", credit: "Me" }, { title: "Two" }, { title: "Three" }];
 
@@ -417,30 +417,6 @@ test("a property set before Clack is loaded is not lost", async () => {
   assertEqual(show.hasAttribute("loop"), true, "loop set before");
   await settledOn(show, "1 of 1");
 });
-
-/** Pointer events on the stage, as a mouse, pen or finger would send them. */
-function pointer(show: ClackShow) {
-  const stage = part(show, ".stage");
-  const r = stage.getBoundingClientRect();
-  const y = r.top + r.height / 2;
-  return {
-    stage,
-    left: r.left,
-    width: r.width,
-    send(type: string, x: number, init: PointerEventInit = {}): void {
-      stage.dispatchEvent(
-        new PointerEvent(type, { pointerId: 1, pointerType: "mouse", isPrimary: true, button: 0, buttons: 1, clientX: x, clientY: y, bubbles: true, cancelable: true, composed: true, ...init }),
-      );
-    },
-    swipe(from: number, to: number): void {
-      this.send("pointerdown", from);
-      for (let i = 1; i <= 8; i++) {
-        this.send("pointermove", from + ((to - from) * i) / 8);
-      }
-      this.send("pointerup", to, { buttons: 0 });
-    },
-  };
-}
 
 test("a mouse let go of outside the photo does not leave a drag behind", async () => {
   const show = makeShow(three);
