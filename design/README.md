@@ -11,7 +11,10 @@ go run ./tools/dev shots                       # every page, light and dark, des
 ```
 
 `demo/` holds pages made with the real component, built fresh by `serve` and `shots`
-(`go run ./tools/dev shots -set demo`), to compare with the mock-ups at the same sizes.
+(`go run ./tools/dev shots -set demo`), to compare with the mock-ups at the same sizes:
+`slideshow` from markup, and a page for each theme (`gallery`, `darkroom`, `mat`,
+`minimal`) from one manifest of the photographs, `coastlines.json`, which the tools check as
+they check the examples.
 
 `?scheme=light` or `?scheme=dark` forces a scheme; otherwise the page follows the system.
 Darkroom is dark by nature and ignores it.

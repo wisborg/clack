@@ -34,6 +34,7 @@ const text = {
   announceTitled: (n: number, count: number): [string, string] => [`Photo ${n} of ${count}: `, ""],
   announce: (n: number, count: number) => `Photo ${n} of ${count}`,
   failed: "This photo could not be loaded.",
+  photos: (count: number) => (count === 1 ? "1 photo" : `${count} photos`),
   noManifest: "The photos could not be loaded.",
 };
 
@@ -118,6 +119,16 @@ function themeSheet({ properties }: Compiled): CSSStyleSheet {
   const style = (sheet.cssRules[0] as CSSStyleRule).style;
   for (const [name, value] of properties) style.setProperty(name, value);
   return sheet;
+}
+
+/** The bevel at the mat's cut, in px: drawn by clack.css, as 2px shadows. */
+const bevelWidth = 2;
+
+/** Content in the mount, which in the matted layout frames it (see clack.css). */
+function mount(content: Element): HTMLElement {
+  const m = el("div", "mount");
+  m.append(content);
+  return m;
 }
 
 /** Where a show's theme is (#theme). */
@@ -266,8 +277,16 @@ export class ClackShow extends HTMLElement {
   readonly #previous: HTMLButtonElement;
   readonly #next: HTMLButtonElement;
   readonly #live: HTMLDivElement;
-  /** Unseen, and no part: where the crossfade's length is read (#duration). */
-  readonly #timing: HTMLDivElement;
+  /** Unseen, and no part: where what the theme's tokens come to is read (#measure, #duration). */
+  readonly #probe: HTMLDivElement;
+  /** The line above the stage, and its two parts: the show's title, and how many photos it has. */
+  readonly #header: HTMLDivElement;
+  readonly #headerTitle: HTMLSpanElement;
+  readonly #headerCount: HTMLSpanElement;
+  /** The manifest's language, for its title in the header. */
+  #showLang: string | null = null;
+  /** What the mount adds around a photo on each side, in px (#measure). */
+  #inset = 0;
   /** The show's outermost box, which carries the theme's layout choices. */
   readonly #box: HTMLDivElement;
   /**
@@ -333,6 +352,13 @@ export class ClackShow extends HTMLElement {
 
   #stopSwipe: (() => void) | null = null;
   readonly #resize = new ResizeObserver((entries) => this.#onResize(entries));
+  readonly #probed = new ResizeObserver((entries) => {
+    const size = entries[entries.length - 1]?.contentRect;
+    if (size) this.#probeSize = { width: size.width, height: size.height };
+    this.#measure();
+  });
+  /** The probe's size, as last observed: the mat's width by the frame's, in px. */
+  #probeSize = { width: 0, height: 0 };
   // Changes to the markup re-read the slides; the host's own attributes
   // (loop, fit, label) are not slides, and have their own callback.
   readonly #mutations = new MutationObserver((records) => {
@@ -384,9 +410,16 @@ export class ClackShow extends HTMLElement {
     this.#live.ariaLive = "polite";
     this.#live.ariaAtomic = "true";
 
-    show.append(this.#stage, below);
-    this.#timing = el("div", "timing");
-    root.append(show, this.#live, this.#nameBox, this.#timing);
+    // Not a <header>, which would be a landmark of the page's.
+    this.#header = el("div", "header", "header");
+    this.#headerTitle = el("span", "header-title");
+    this.#headerCount = el("span", "header-count");
+    this.#header.append(this.#headerTitle, this.#headerCount);
+    this.#header.hidden = true;
+
+    show.append(this.#header, this.#stage, below);
+    this.#probe = el("div", "probe");
+    root.append(show, this.#live, this.#nameBox, this.#probe);
 
     this.addEventListener("keydown", (e) => this.#onKey(e));
   }
@@ -414,6 +447,7 @@ export class ClackShow extends HTMLElement {
   connectedCallback(): void {
     document.addEventListener("visibilitychange", this.#onVisibility);
     this.#resize.observe(this.#stage);
+    this.#probed.observe(this.#probe);
     this.#stopSwipe = listen(this.#stage, {
       move: (dx) => this.#drag(dx),
       end: (outcome) => this.#swiped(outcome),
@@ -451,6 +485,7 @@ export class ClackShow extends HTMLElement {
     // back (#render does nothing out of the page); a show removed for good
     // downloads it once, and is collected with it.
     this.#resize.disconnect();
+    this.#probed.disconnect();
     this.#mutations.disconnect();
     this.#stopSwipe?.();
     this.#stopSwipe = null;
@@ -766,6 +801,8 @@ export class ClackShow extends HTMLElement {
     root.adoptedStyleSheets = [themeSheet(compiled), styles(), ...pages];
     const { choices } = compiled;
     for (const [name, value] of Object.entries(choices)) this.#box.dataset[name] = value;
+    // A new layout may mount photos or not, whether or not the mat's size changed.
+    if (this.#ready) this.#measure();
   }
 
   #showManifest(m: Manifest): void {
@@ -820,6 +857,7 @@ export class ClackShow extends HTMLElement {
    */
   #setTitle(title: string, lang: string | null): void {
     this.#showTitle = title;
+    this.#showLang = lang;
     this.#name();
     this.#nameBox.textContent = title;
     applyLang(this.#nameBox, lang);
@@ -835,6 +873,12 @@ export class ClackShow extends HTMLElement {
     // so the show is never left without a name.
     this.#internals.ariaLabel = label || this.#showTitle || text.show;
     if (byElement) internals.ariaLabelledByElements = !label && this.#showTitle ? [this.#nameBox] : null;
+    // The header shows the same title, if there is one: the page's, in the
+    // page's language, or the manifest's, in its own.
+    const title = label || this.#showTitle;
+    this.#headerTitle.textContent = title;
+    applyLang(this.#headerTitle, label ? null : this.#showLang);
+    this.#header.hidden = !title;
   }
 
   /**
@@ -1058,7 +1102,7 @@ export class ClackShow extends HTMLElement {
       figure.role = "group";
       figure.ariaRoleDescription = text.slide;
       figure.ariaBusy = "true";
-      figure.append(el("div", "fill"));
+      figure.append(mount(el("div", "fill")));
       this.#stage.append(figure);
       this.#figure = figure;
       this.#painted = "";
@@ -1075,7 +1119,7 @@ export class ClackShow extends HTMLElement {
     const hash = slide.thumbhash && (!photo || photo.state === "loading") ? slide.thumbhash : "";
     if (hash !== this.#painted) {
       const canvas = hash ? impression(hash) : null;
-      figure.firstElementChild!.replaceChildren(...(canvas ? [canvas] : []));
+      figure.querySelector(".fill")!.replaceChildren(...(canvas ? [canvas] : []));
       this.#painted = hash;
     }
   }
@@ -1140,9 +1184,9 @@ export class ClackShow extends HTMLElement {
       const why = el("span", "missing-why");
       why.textContent = text.failed;
       box.append(icon("photo-off"), what, why);
-      figure.append(box);
+      figure.append(mount(box));
     } else {
-      figure.append(photo.element);
+      figure.append(mount(photo.element));
     }
     // The photo's description is the manifest's text, in its language.
     const described = figure.querySelector("img, .missing-alt");
@@ -1171,7 +1215,7 @@ export class ClackShow extends HTMLElement {
       return 0;
     }
     // The tokens as .timing inherits them.
-    const style = getComputedStyle(this.#timing);
+    const style = getComputedStyle(this.#probe);
     if (style.getPropertyValue("--clack-transition").trim() === "none") {
       return 0;
     }
@@ -1205,6 +1249,7 @@ export class ClackShow extends HTMLElement {
     const count = this.#slides.length;
     const at = Math.max(this.#target, 0);
     this.#counter.textContent = count ? `${at + 1} / ${count}` : "";
+    this.#headerCount.textContent = count ? text.photos(count) : "";
     for (const [button, delta] of [[this.#previous, -1], [this.#next, 1]] as const) {
       // aria-disabled rather than disabled: a disabled button drops the
       // keyboard focus, and the visitor who pressed it would lose their place.
@@ -1310,6 +1355,34 @@ export class ClackShow extends HTMLElement {
 
   // ---- Size -------------------------------------------------------------
 
+  /**
+   * What the mount comes to around a photo, in px, from the theme's mat
+   * and frame as of the show (the probe's size: see .probe in clack.css),
+   * set on the stage for the CSS that draws it, and counted in the width
+   * each photo is drawn at. Worked out again whenever either changes size,
+   * and with every theme, for its layout; none but in the matted layout. The bevel, where there is
+   * one, is the mat's last 2px (see clack.css).
+   */
+  #measure(): void {
+    const box = this.#box.dataset;
+    let mat = 0;
+    let frame = 0;
+    if (box["layout"] === "matted") {
+      // As observed, not read here: Safari, asked for a style in the
+      // shadow tree just after its sheets are replaced, keeps the host's
+      // old theme. (Its layout size, too: no transform of the page's.)
+      mat = this.#probeSize.width + (box["bevel"] === "true" ? bevelWidth : 0);
+      frame = this.#probeSize.height;
+    }
+    const inset = mat + frame;
+    this.#stage.style.setProperty("--clack-inset", `${inset}px`);
+    this.#stage.style.setProperty("--clack-mat-inset", `${mat}px`);
+    if (inset !== this.#inset) {
+      this.#inset = inset;
+      this.#photos.resize((key) => this.#sizes(this.#indexByKey.get(key) ?? -1));
+    }
+  }
+
   #onResize(entries: ResizeObserverEntry[]): void {
     const box = entries[entries.length - 1]?.contentRect;
     if (!box) {
@@ -1322,12 +1395,17 @@ export class ClackShow extends HTMLElement {
   /** What the `sizes` of slide i's photo should say: the width it is drawn at. */
   #sizes(i: number): string {
     if (this.#frame.width === 0) {
+      // Not yet observed: its box, which is its content box, as observed
+      // -- the stage has no padding (clack.css), or a photo's sizes would
+      // change once observed, and an engine may fetch it again.
       const r = this.#stage.getBoundingClientRect();
       this.#frame = { width: r.width, height: r.height };
     }
     const slide = this.#slides[i];
     const fit = this.getAttribute("fit") === "cover" ? "cover" : "contain";
-    const w = slide ? drawnWidth(this.#frame.width, this.#frame.height, slide.width / slide.height, fit) : 0;
+    // The room the mount leaves the photo, if the layout has one.
+    const room = (side: number): number => Math.max(0, side - 2 * this.#inset);
+    const w = slide ? drawnWidth(room(this.#frame.width), room(this.#frame.height), slide.width / slide.height, fit) : 0;
     return w > 0 ? `${w}px` : "100vw";
   }
 }

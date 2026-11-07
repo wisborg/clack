@@ -209,15 +209,15 @@ places, for every one.
 ## What Clack draws of a theme, so far
 
 Every token is checked and compiled, but the show does not yet draw all of them. It does
-draw the colours `canvas`, `surface`, `text`, `muted`, `hairline`, `accent`, `control` and
-`controlActive` (not yet `mat`, `frame`, the label's three or the film's three), the scheme, the padding,
-the shadow, the caption's type and whether it shows the credit, the controls' size, and the
-transition's duration, or `none`. The layouts but `gallery`, the mat and frame, the caption
-card, the header, floating controls and their reveal, the progress line, the `slide`
-transition (a crossfade until then), the details panel and the index are still to come.
+draw the colours `canvas`, `surface`, `text`, `muted`, `hairline`, `accent`, `control`,
+`controlActive`, `mat` and `frame` (not yet the label's three or the film's three), the
+scheme, the padding, the four layouts, the shadow, the mat and its bevel, the frame, the
+header and its type, the caption's type and whether it shows the credit, the controls'
+size, and the transition's duration, or `none`. The caption card, floating controls and
+their reveal, the progress line, the `slide` transition (a crossfade until then), the
+details panel and the index are still to come; until floating controls are, `full-bleed`
+has its caption and controls beneath the photo.
 
-For whoever draws them: a token is a length only where it is used, so a `cqi` in one used
-inside the stage — a size container of its own, so photos fit it — would be of the stage's
-width, not the show's. Use a theme's lengths outside the stage, or on the stage element
-itself, whose own properties still see the show; the mat's and frame's widths are the
-first that will need this.
+In `matted`, the frame casts its own shadow, and `layout.shadow` is not drawn. The mat and
+the frame are measured as of the show, as the schema says — `cqi` in either is of the
+show's width — though the photo they surround is fitted to the stage within it.

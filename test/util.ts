@@ -207,3 +207,14 @@ export function checkRaw(name: string, want: { accepted: boolean; error?: string
   if (want.why !== undefined && !got.some((p) => p.message.includes(want.why!))) out.push(`raw ${name}: nothing says ${JSON.stringify(want.why)}: ${said}`);
   return out;
 }
+
+/** An element's content box: its size less its padding (and border). */
+export function contentBox(e: Element): { width: number; height: number } {
+  const r = e.getBoundingClientRect();
+  const st = getComputedStyle(e);
+  const px = (...names: string[]): number => names.reduce((sum, n) => sum + parseFloat(st.getPropertyValue(n)), 0);
+  return {
+    width: r.width - px("padding-left", "padding-right", "border-left-width", "border-right-width"),
+    height: r.height - px("padding-top", "padding-bottom", "border-top-width", "border-bottom-width"),
+  };
+}

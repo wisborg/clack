@@ -408,8 +408,9 @@ side with the version before.
 - Metadata display (hidden by default), theme loading and validation, the five themes.
   *(Theme loading and validation done: the `theme` attribute takes a built-in theme or a
   theme file, which is checked as the tools check it, against the same shared cases
-  (`test/fixtures/themes.json`), and compiled into custom properties; what the show draws of
-  a theme so far is in `docs/themes.md`.)*
+  (`test/fixtures/themes.json`), and compiled into custom properties. The four layouts and
+  the header are drawn, `design/demo/` showing each theme as the mock-ups do; what the show
+  draws of a theme so far is in `docs/themes.md`.)*
 - The index, `<clack-index>`: justified and contact-sheet layouts, paired with a show,
   sections, paging, enhancing the host's layout in place.
 - Title slides: a slide type that introduces a part of a show (a day of a trip), for

@@ -121,7 +121,7 @@ script neither the markup nor a manifest is read; `show.slides = null` goes back
 | attribute | |
 |---|---|
 | `src` | a manifest to show (see above) |
-| `label` | what the show is called, for screen readers (default: the manifest's title, or "Photos") |
+| `label` | what the show is called, for screen readers and in its header (default: the manifest's title, or "Photos", which is not shown) |
 | `loop` | the next of the last slide is the first, and the other way round |
 | `fit` | `contain` (default): the whole photo, as large as fits. `cover`: the frame filled, cropped |
 | `theme` | how the show looks: a built-in theme's name (`gallery`, `darkroom`, `mat`, `minimal`, `contact-sheet`, or `base`, which is what it is without one), or the URL of a theme file (see [Styling](#styling)) |
@@ -196,5 +196,5 @@ styles, inside the element, so a page chooses them with a theme, not with CSS. W
 "auto"`, as most do), `color-scheme` on the element forces one; a theme that forces a scheme
 itself, such as `darkroom`, has only that scheme's colours, so `color-scheme` changes
 nothing of it but the browser's own controls. Parts
-for `::part()`: `show`, `stage`, `slide`, `photo`, `below`, `caption`, `controls`,
+for `::part()`: `show`, `header`, `stage`, `slide`, `photo`, `below`, `caption`, `controls`,
 `button`, `previous`, `next`, `counter`, `missing`.

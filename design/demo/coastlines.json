@@ -1,0 +1,179 @@
+{
+  "$schema": "../../schema/manifest-1.schema.json",
+  "format": "clack-manifest/1",
+  "title": "Coastlines",
+  "description": "Summer along the coast. The photographs are public domain, from Wikimedia Commons.",
+  "lang": "en",
+  "slides": [
+    {
+      "id": "p01",
+      "alt": "An old car in the snow",
+      "width": 3635,
+      "height": 5301,
+      "sources": [
+        {
+          "url": "/photos/01.jpg",
+          "width": 3635,
+          "type": "image/jpeg"
+        }
+      ],
+      "description": {
+        "title": "An old car in the snow",
+        "credit": "Photo: Kristian Karlsson · CC0"
+      }
+    },
+    {
+      "id": "p02",
+      "alt": "Low tide under a grey sky",
+      "width": 3840,
+      "height": 2560,
+      "sources": [
+        {
+          "url": "/photos/02.jpg",
+          "width": 3840,
+          "type": "image/jpeg"
+        }
+      ],
+      "description": {
+        "title": "Low tide under a grey sky",
+        "credit": "Photo: Ruxandra Mateiu · CC0"
+      }
+    },
+    {
+      "id": "p03",
+      "alt": "Ridgeline above the valley",
+      "width": 3840,
+      "height": 2550,
+      "sources": [
+        {
+          "url": "/photos/03.jpg",
+          "width": 3840,
+          "type": "image/jpeg"
+        }
+      ],
+      "description": {
+        "title": "Ridgeline above the valley",
+        "credit": "Photo: Aleksandra Boguslawska · CC0"
+      }
+    },
+    {
+      "id": "p04",
+      "alt": "Cables of the bridge",
+      "width": 3800,
+      "height": 2850,
+      "sources": [
+        {
+          "url": "/photos/04.jpg",
+          "width": 3800,
+          "type": "image/jpeg"
+        }
+      ],
+      "description": {
+        "title": "Cables of the bridge",
+        "credit": "Photo: Piotr Kwiatkowski · CC0"
+      }
+    },
+    {
+      "id": "p05",
+      "alt": "Old pier at sunset",
+      "width": 3840,
+      "height": 2550,
+      "sources": [
+        {
+          "url": "/photos/05.jpg",
+          "width": 3840,
+          "type": "image/jpeg"
+        }
+      ],
+      "description": {
+        "title": "Old pier at sunset",
+        "credit": "Photo: Victoria Alexander · CC0"
+      }
+    },
+    {
+      "id": "p06",
+      "alt": "Houses above the harbour",
+      "width": 3840,
+      "height": 2561,
+      "sources": [
+        {
+          "url": "/photos/06.jpg",
+          "width": 3840,
+          "type": "image/jpeg"
+        }
+      ],
+      "description": {
+        "title": "Houses above the harbour",
+        "credit": "Photo: Jonas Lavoie-Levesque · CC0"
+      }
+    },
+    {
+      "id": "p07",
+      "alt": "A bale in the morning mist",
+      "width": 3840,
+      "height": 2880,
+      "sources": [
+        {
+          "url": "/photos/07.jpg",
+          "width": 3840,
+          "type": "image/jpeg"
+        }
+      ],
+      "description": {
+        "title": "A bale in the morning mist",
+        "credit": "Photo: Michal Kubíček · CC0"
+      }
+    },
+    {
+      "id": "p08",
+      "alt": "Pelicans on the jetty",
+      "width": 3840,
+      "height": 2550,
+      "sources": [
+        {
+          "url": "/photos/08.jpg",
+          "width": 3840,
+          "type": "image/jpeg"
+        }
+      ],
+      "description": {
+        "title": "Pelicans on the jetty",
+        "credit": "Photo: Yair Hazout · CC0"
+      }
+    },
+    {
+      "id": "p09",
+      "alt": "The road to the hill",
+      "width": 3840,
+      "height": 2562,
+      "sources": [
+        {
+          "url": "/photos/09.jpg",
+          "width": 3840,
+          "type": "image/jpeg"
+        }
+      ],
+      "description": {
+        "title": "The road to the hill",
+        "credit": "Photo: Jon Ottosson · CC0"
+      }
+    },
+    {
+      "id": "p10",
+      "alt": "Cliffs at golden hour",
+      "width": 3840,
+      "height": 2560,
+      "sources": [
+        {
+          "url": "/photos/10.jpg",
+          "width": 3840,
+          "type": "image/jpeg"
+        }
+      ],
+      "description": {
+        "title": "Cliffs at golden hour",
+        "credit": "Photo: Artur Pokusin · CC0"
+      }
+    }
+  ]
+}

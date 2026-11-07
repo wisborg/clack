@@ -1,7 +1,7 @@
 import type { ClackShow, SlideChangeDetail, SlideInput } from "../src/clack";
 import { tagName } from "../src/clack";
 import { assert, assertEqual, fixture, skip, sleep, test } from "./harness";
-import { figure, figures, img, imageLog, makeShow, onScreen, part, resetImageLog, settledOn, waitFor } from "./util";
+import { contentBox, figure, figures, img, imageLog, makeShow, onScreen, part, resetImageLog, settledOn, waitFor } from "./util";
 
 const three = [{ title: "One", credit: "Me" }, { title: "Two" }, { title: "Three" }];
 
@@ -195,7 +195,7 @@ test("fetches the photo at the size it is drawn", async () => {
   const show = makeShow([{ width: 1500, height: 1000 }]);
   await settledOn(show, "1 of 1");
   const photo = part(show, ".slide img") as HTMLImageElement;
-  const stage = part(show, ".stage").getBoundingClientRect();
+  const stage = contentBox(part(show, ".stage"));
   const drawn = Math.ceil(Math.min(stage.width, stage.height * 1.5));
   assertEqual(photo.sizes, `${drawn}px`, "sizes");
   assertEqual(Math.round(photo.getBoundingClientRect().width), Math.round(Math.min(stage.width, stage.height * 1.5)), "the width it is drawn at");

@@ -36,24 +36,69 @@
 .show {
   box-sizing: border-box;
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   width: 100%;
   height: 100%;
   aspect-ratio: 3 / 2;
   padding: var(--clack-padding-top) var(--clack-padding-inline) var(--clack-padding-bottom);
+  /* A photo swiped aside is cut off at the show's sides, never widening
+     the page; a shadow under one falls freely across the margins and below
+     it, onto the caption's space, as on a wall. */
+  overflow-x: clip;
+}
+
+/* The line above the photo: the show's title, and how many photos it has.
+   Only with a title, and only if the theme shows it. */
+.header {
+  grid-row: 1;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  padding-bottom: clamp(14px, 1.4cqi, 20px);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  color: var(--clack-muted);
+}
+
+.header[hidden],
+.show:not([data-header="true"]) .header {
+  display: none;
+}
+
+.header-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--clack-text);
+  font-family: var(--clack-header-font);
+  font-size: var(--clack-header-size);
+  font-weight: var(--clack-header-weight);
+  font-style: var(--clack-header-style);
+  letter-spacing: var(--clack-header-tracking);
+  text-transform: var(--clack-header-case);
+}
+
+.header-count {
+  flex: none;
+  font-variant-numeric: tabular-nums;
 }
 
 /* The stage: the photos, stacked in one cell so one can fade over another.
    A size container, so a photo is fitted to the space the grid gave it --
    and so a theme's length used inside it would have cqi of the stage, not
-   of the show, as the schema says: use them outside it, or on it, whose own
-   properties see the show (docs/themes.md, the end). */
+   of the show, as the schema says: the mat and frame are measured outside
+   it (.probe), and come in as px. */
 .stage {
+  grid-row: 2;
+  /* What the mount adds around a photo on each side, and the mat's share
+     of it, set by the show in px (#measure); none but in matted. Set
+     here, so a page's value on the element does not reach in. */
+  --clack-inset: 0px;
+  --clack-mat-inset: 0px;
   position: relative;
   display: grid;
   min-height: 0;
   container-type: size;
-  overflow: hidden;
   touch-action: pan-y pinch-zoom;
   user-select: none;
   -webkit-user-select: none;
@@ -69,6 +114,9 @@
 }
 
 .slide {
+  /* The room a photo has: the stage, less the mount around it. */
+  --clack-room-w: calc(100cqw - 2 * var(--clack-inset));
+  --clack-room-h: calc(100cqh - 2 * var(--clack-inset));
   grid-area: 1 / 1;
   display: grid;
   place-items: center;
@@ -76,6 +124,12 @@
   min-width: 0;
   min-height: 0;
   transform: translateX(var(--clack-drag, 0px));
+}
+
+/* The mount: in matted, the frame and the mat around the photo, or around
+   the place it holds; in every other layout, no box at all. */
+.mount {
+  display: contents;
 }
 
 /* Contained: the whole photo, as large as the frame allows, in its own
@@ -86,7 +140,7 @@
 
 .slide img {
   display: block;
-  width: min(100cqw, 100cqh * var(--clack-aspect));
+  width: min(var(--clack-room-w), var(--clack-room-h) * var(--clack-aspect));
   height: auto;
   aspect-ratio: var(--clack-aspect);
   box-shadow: var(--clack-shadow);
@@ -95,8 +149,8 @@
 
 /* Cover: the frame filled, the photo cropped. */
 :host([fit="cover"]) .slide img {
-  width: 100cqw;
-  height: 100cqh;
+  width: var(--clack-room-w);
+  height: var(--clack-room-h);
   aspect-ratio: auto;
   object-fit: cover;
   box-shadow: none;
@@ -104,7 +158,7 @@
 
 /* The first photo's place while it loads: its proportions, in its colour. */
 .fill {
-  width: min(100cqw, 100cqh * var(--clack-aspect));
+  width: min(var(--clack-room-w), var(--clack-room-h) * var(--clack-aspect));
   aspect-ratio: var(--clack-aspect);
   background: var(--clack-placeholder, var(--clack-hairline));
 }
@@ -125,8 +179,8 @@
 :host([fit="cover"]) .fill {
   position: relative;
   overflow: hidden;
-  width: 100cqw;
-  height: 100cqh;
+  width: var(--clack-room-w);
+  height: var(--clack-room-h);
   aspect-ratio: auto;
 }
 
@@ -134,8 +188,8 @@
   position: absolute;
   left: 50%;
   top: 50%;
-  width: max(100cqw, 100cqh * var(--clack-aspect));
-  height: max(100cqh, 100cqw / var(--clack-aspect));
+  width: max(var(--clack-room-w), var(--clack-room-h) * var(--clack-aspect));
+  height: max(var(--clack-room-h), var(--clack-room-w) / var(--clack-aspect));
   transform: translate(-50%, -50%);
 }
 
@@ -146,7 +200,7 @@
   place-content: center;
   justify-items: center;
   gap: 6px;
-  width: min(100cqw, 100cqh * var(--clack-aspect));
+  width: min(var(--clack-room-w), var(--clack-room-h) * var(--clack-aspect));
   aspect-ratio: var(--clack-aspect);
   padding: 16px;
   background: var(--clack-surface);
@@ -201,6 +255,7 @@
 }
 
 .below {
+  grid-row: 3;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -318,14 +373,82 @@
   white-space: nowrap;
 }
 
-/* The crossfade's length, which script plays (#duration), read here as a
-   time a second longer: so CSS works out whatever the token says, calc()
-   and all, and one it cannot read -- which leaves the initial 0s -- is told
-   from 0s. On an element of its own, with no part, so that nothing of the
-   page's, nor any animation of Clack's, changes it. */
-.timing {
-  display: none;
+/* Where the show reads what the theme's tokens come to (#measure,
+   #duration): unseen, and with no part, so that nothing of the page's,
+   nor any animation of Clack's, changes it. Outside the stage, so that cqi
+   in a token is of the show, as the schema says, not of the stage.
+   - Its size is the mat's width by the frame's, in px, whatever units the
+     tokens are in; and it changes, and is observed, whenever they do.
+   - Its animation-duration is the crossfade's length, which script plays,
+     a second longer: so CSS works out whatever the token says, calc() and
+     all, and one it cannot read -- which leaves the initial 0s -- is told
+     from 0s. */
+.probe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--clack-mat-width);
+  height: var(--clack-frame-width);
+  visibility: hidden;
+  pointer-events: none;
   animation-duration: calc(var(--clack-transition-duration) + 1s);
+}
+
+/* ---- Layouts: the theme's layout.type, on .show as data-layout ------- */
+
+/* Gallery: wide margins (the theme's padding), a little air above and
+   below the photo, the caption beneath. The air is the stage's margin, not
+   its padding: the stage's box is the room its photos have (#sizes). */
+.show[data-layout="gallery"] .stage {
+  margin-block: 8px;
+}
+
+/* Stage: the photo as large as the show allows, on a dark surround; the
+   theme's colours and padding make the rest. */
+
+/* Full-bleed: the photo as large as the show, edge to edge (the theme's
+   padding is none); the caption and controls beneath, kept off the edges. */
+.show[data-layout="full-bleed"] .header,
+.show[data-layout="full-bleed"] .below {
+  padding-inline: clamp(12px, 2cqi, 24px);
+}
+
+.show[data-layout="full-bleed"] .header {
+  padding-top: clamp(10px, 1.4cqi, 20px);
+}
+
+.show[data-layout="full-bleed"] .below {
+  padding-bottom: clamp(10px, 1.4cqi, 20px);
+}
+
+/* Matted: the photo in a mat board, in a frame, on the wall. The frame
+   casts its own shadow; the photo, none of its own. */
+.show[data-layout="matted"] .stage {
+  margin-block: 4px 6px;
+}
+
+.show[data-layout="matted"] .mount {
+  display: block;
+  padding: var(--clack-mat-inset);
+  border: calc(var(--clack-inset) - var(--clack-mat-inset)) solid var(--clack-frame);
+  background: var(--clack-mat);
+  box-shadow:
+    inset 0 0 0 1px rgb(0 0 0 / 0.35),
+    0 2px 3px rgb(0 0 0 / 0.18),
+    0 22px 48px rgb(0 0 0 / 0.22);
+}
+
+.show[data-layout="matted"] .slide img {
+  box-shadow: none;
+}
+
+/* The bevel: where the mat is cut, a 2px edge (#measure counts it in the
+   mat) in its own shade on the top and left, catching the light on the
+   bottom and right. Shadows, so the photo's own box is not changed. */
+.show[data-layout="matted"][data-bevel="true"] :is(.slide img, .fill, .missing) {
+  box-shadow:
+    -1px -1px 0 1px color-mix(in srgb, var(--clack-mat), #000 19%),
+    0 0 0 2px color-mix(in srgb, var(--clack-mat), #fff 60%);
 }
 
 @media (prefers-reduced-motion: reduce) {

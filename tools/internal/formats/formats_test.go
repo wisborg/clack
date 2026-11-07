@@ -211,8 +211,9 @@ func TestResolve(t *testing.T) {
 
 func TestExamples(t *testing.T) {
 	themeSchema, manifestSchema := schemas(t)
-	for _, name := range []string{"manifest.json", "manifest-minimal.json"} {
-		doc, errs := LoadManifest(manifestSchema, filepath.Join(root, "schema/examples", name))
+	// The examples, and the demo pages' manifest (design/demo).
+	for _, name := range []string{"schema/examples/manifest.json", "schema/examples/manifest-minimal.json", "design/demo/coastlines.json"} {
+		doc, errs := LoadManifest(manifestSchema, filepath.Join(root, name))
 		errs = append(errs, CheckManifest(doc)...)
 		for _, e := range errs {
 			t.Errorf("%s: %v", name, e)
