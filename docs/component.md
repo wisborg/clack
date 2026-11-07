@@ -121,7 +121,7 @@ script neither the markup nor a manifest is read; `show.slides = null` goes back
 | attribute | |
 |---|---|
 | `src` | a manifest to show (see above) |
-| `label` | what the show is called, for screen readers and in its header (default: the manifest's title, or "Photos", which is not shown) |
+| `label` | what the show is called, for screen readers (default: the manifest's title, or "Photos"); not shown — the header shows the manifest's title |
 | `loop` | the next of the last slide is the first, and the other way round |
 | `fit` | `contain` (default): the whole photo, as large as fits. `cover`: the frame filled, cropped |
 | `theme` | how the show looks: a built-in theme's name (`gallery`, `darkroom`, `mat`, `minimal`, `contact-sheet`, or `base`, which is what it is without one), or the URL of a theme file (see [Styling](#styling)) |
@@ -155,9 +155,10 @@ The element is 3:2 unless the page gives it a height.
 - **Never a half-loaded photo.** The next photo is fetched at the size it is drawn and
   decoded before it is shown; until then the current one stays, the counter already says
   where the visitor is going, and if it takes more than a moment a hairline sweeps the foot
-  of the frame. A newer request always wins over an older, slower one. A show not yet in the
-  page, or hidden, fetches no photo until it is laid out: the size a photo is drawn at is not
-  known before then, and one fetched at a guess may be fetched twice.
+  of the frame. A newer request always wins over an older, slower one. A photo asked for
+  while the show is hidden is fetched at the size it was last drawn at — before the show was
+  ever laid out, at the window's width — so that whatever waits on it is not left waiting;
+  hiding a show does not change the size of the photos it has.
 - **Loading ahead:** once a photo is on screen, the next, the previous, and the one after
   next are fetched. Photos no longer near are let go of (Firefox then stops their download;
   Chrome and Safari finish it into their cache).

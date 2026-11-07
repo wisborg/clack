@@ -22,10 +22,6 @@ export interface Photo {
   readonly settled: Promise<LoadState>;
   /** Settles it as dropped, if it has not settled yet. */
   readonly drop: () => void;
-  /** Gives it the size it is drawn at, and fetches it, if it has not been. */
-  readonly start: (sizes: string) => void;
-  /** Whether it has been: until it is, it is not fetched. */
-  readonly started: boolean;
 }
 
 /** What makes a slide's photo the photo it is: a change to any of these is a new photo. */
@@ -33,11 +29,7 @@ export function photoKey(slide: Slide): string {
   return JSON.stringify([slide.src, slide.srcset, slide.alternatives, slide.width, slide.height]);
 }
 
-/**
- * A slide's photo, built but not yet fetched: start() gives it the size it
- * is drawn at, and its URLs, and the browser fetches it then.
- */
-function build(slide: Slide): { element: HTMLElement; img: HTMLImageElement; start: (sizes: string) => void } {
+function build(slide: Slide, sizes: string): { element: HTMLElement; img: HTMLImageElement } {
   const img = document.createElement("img");
   img.alt = slide.alt;
   img.width = slide.width;
@@ -45,32 +37,30 @@ function build(slide: Slide): { element: HTMLElement; img: HTMLImageElement; sta
   img.decoding = "async";
   img.draggable = false;
   img.setAttribute("part", "photo");
-  // Into a <picture> (if it has other formats) before any URL is set: an
-  // <img> chooses among its picture's sources only once it is in it, and
-  // would otherwise start fetching its own candidate first.
-  const sources = slide.alternatives.map((alt) => {
+  // sizes before srcset: the browser picks a candidate as soon as srcset is
+  // set, and should pick it for the size the photo is drawn at.
+  img.sizes = sizes;
+  if (slide.alternatives.length === 0) {
+    if (slide.srcset) img.srcset = slide.srcset;
+    img.src = slide.src;
+    return { element: img, img };
+  }
+  const picture = document.createElement("picture");
+  for (const alt of slide.alternatives) {
     const source = document.createElement("source");
     if (alt.type) source.type = alt.type;
     if (alt.media) source.media = alt.media;
-    return source;
-  });
-  let element: HTMLElement = img;
-  if (sources.length > 0) {
-    element = document.createElement("picture");
-    element.append(...sources, img);
+    source.sizes = sizes;
+    source.srcset = alt.srcset;
+    picture.append(source);
   }
-  const start = (sizes: string): void => {
-    // sizes before srcset: the browser picks a candidate as soon as srcset
-    // is set, and should pick it for the size the photo is drawn at.
-    for (const [i, source] of sources.entries()) {
-      source.sizes = sizes;
-      source.srcset = slide.alternatives[i]!.srcset;
-    }
-    img.sizes = sizes;
-    if (slide.srcset) img.srcset = slide.srcset;
-    img.src = slide.src;
-  };
-  return { element, img, start };
+  // Into the <picture> before its URLs are set: an <img> chooses among its
+  // picture's sources only once it is in it, and would otherwise start
+  // fetching its own candidate first.
+  picture.append(img);
+  if (slide.srcset) img.srcset = slide.srcset;
+  img.src = slide.src;
+  return { element: picture, img };
 }
 
 /**
@@ -100,48 +90,25 @@ export class Photos {
 
   /**
    * The photo for slide, building and starting it if need be. `urgent`
-   * asks the browser to fetch it ahead of others. sizes is the size it is
-   * drawn at, or null while that is not known -- a show out of the page, or
-   * hidden -- when it is built but not fetched until resize() says.
+   * asks the browser to fetch it ahead of others. sizes is asked only for
+   * one built now: it means laying the show out.
    */
-  get(slide: Keyed, sizes: string | null, urgent: boolean): Photo {
+  get(slide: Keyed, sizes: () => string, urgent: boolean): Photo {
     let photo = this.#photos.get(slide.key);
     if (!photo) {
-      const { element, img, start } = build(slide);
+      const { element, img } = build(slide, sizes());
       img.fetchPriority = urgent ? "high" : "low";
-      let begin = (): void => {};
-      const begun = new Promise<void>((resolve) => {
-        begin = resolve;
-      });
       // A photo let go of while loading may never fire load or error (the
       // engine may not even stop the download), so dropping it settles it.
       let drop = (): void => {};
       const dropped = new Promise<LoadState>((resolve) => {
         drop = () => resolve("dropped");
       });
-      const settled = Promise.race([begun.then(() => settle(img)), dropped]);
-      let started = false;
-      const p: Photo = {
-        element,
-        img,
-        key: photoKey(slide),
-        state: "loading",
-        settled,
-        drop,
-        start: (s) => {
-          if (started) return;
-          started = true;
-          start(s);
-          begin();
-        },
-        get started() {
-          return started;
-        },
-      };
+      const settled = Promise.race([settle(img), dropped]);
+      const p: Photo = { element, img, key: photoKey(slide), state: "loading", settled, drop };
       void settled.then((state) => {
         p.state = state;
       });
-      if (sizes !== null) p.start(sizes);
       photo = p;
       this.#photos.set(slide.key, photo);
     } else if (urgent) {
@@ -155,17 +122,11 @@ export class Photos {
     return this.#photos.get(key);
   }
 
-  /**
-   * Sets the size every photo is drawn at; the browser fetches more pixels
-   * only if it needs them. One not yet fetched, for want of its size, is
-   * fetched now.
-   */
+  /** Sets the size every photo is drawn at; the browser fetches more pixels only if it needs them. */
   resize(sizes: (key: string) => string): void {
     for (const [key, photo] of this.#photos) {
       const s = sizes(key);
-      if (!photo.started) {
-        photo.start(s);
-      } else if (photo.img.sizes !== s) {
+      if (photo.img.sizes !== s) {
         for (const source of photo.element.querySelectorAll("source")) {
           source.sizes = s;
         }

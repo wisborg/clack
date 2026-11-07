@@ -236,7 +236,7 @@
       "additionalProperties": false
     },
     "header": {
-      "description": "The line above the photo, with the show's title and how many photos it has; shown only when the show has a title.",
+      "description": "The line above the photo, with the manifest's title and how many photos it has; shown only when the manifest has a title.",
       "allOf": [{ "$ref": "#/$defs/text" }],
       "properties": {
         "font": true, "size": true, "weight": true, "style": true, "tracking": true, "case": true,

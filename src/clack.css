@@ -35,6 +35,9 @@
    definite here and the ratio steps aside. */
 .show {
   box-sizing: border-box;
+  /* Its layers (the header and caption over the stage, the focus ring
+     over the photo) are stacked among themselves, not among the page's. */
+  isolation: isolate;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   width: 100%;
@@ -301,18 +304,21 @@
   letter-spacing: var(--clack-caption-tracking);
   text-transform: var(--clack-caption-case);
   line-height: 1.35;
+  /* A line each, title and credit, even with nothing to say: a photo's
+     size is worked out before its caption replaces the last, and a
+     caption of another height would make the stage another height, and
+     the photo be fetched again. (Only one that runs onto more lines
+     still does.) */
+  min-height: 1.35em;
 }
 
 .credit {
   display: var(--clack-caption-credit);
+  min-height: 1.5em;
   margin-top: 2px;
   font-size: 12.5px;
   letter-spacing: 0.01em;
   color: var(--clack-muted);
-}
-
-.credit[hidden] {
-  display: none;
 }
 
 .controls {

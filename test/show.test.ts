@@ -43,7 +43,7 @@ test("the controls move between slides and stop at the ends", async () => {
   assertEqual(show.index, 1, "the index moves at once");
   await settledOn(show, "2 of 3");
   assertEqual(part(show, ".title").textContent, "Two", "title");
-  assertEqual(part(show, ".credit").hidden, true, "no credit, hidden");
+  assertEqual(part(show, ".credit").textContent, "", "no credit");
   next.click();
   await settledOn(show, "3 of 3");
   assertEqual(next.ariaDisabled, "true", "next, at the last");

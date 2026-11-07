@@ -27,20 +27,32 @@ function matShow(show: ClackShow, theme = true): ClackShow {
   return show;
 }
 
-test("the header shows the show's title and how many photos it has, only with a title", async () => {
+/** A manifest of n photos, titled, served at a path of its own. */
+function titled(title: string, n: number, path: string): string {
+  const slides = Array.from({ length: n }, (_, i) => ({ id: `p${i}`, alt: `photo ${i + 1}`, width: 300, height: 200, sources: [{ url: img(300, 200), width: 300 }] }));
+  return echo(JSON.stringify({ format: "clack-manifest/1", title, slides }), { path });
+}
+
+test("the header shows the manifest's title and how many photos it has, only with a title", async () => {
   const show = makeShow([{}, {}, {}]);
   await settledOn(show, "1 of 3");
   const header = part(show, ".header");
   assert(header.hidden, "no title: no header");
-  show.setAttribute("label", "Coastlines");
-  assert(!header.hidden, "a title: a header");
+  show.src = titled("Coastlines", 3, "header-three.json");
+  await waitFor(() => !header.hidden, "a title: a header");
   assertEqual(part(show, ".header-title").textContent, "Coastlines", "the title");
-  assertEqual(part(show, ".header-count").textContent, "3 photos", "how many photos");
+  await waitFor(() => part(show, ".header-count").textContent === "3 photos", "how many photos");
   assert(header.getBoundingClientRect().height > 0, "drawn");
   const stage = part(show, ".stage").getBoundingClientRect();
   assert(header.getBoundingClientRect().bottom <= stage.top, "above the stage");
-  show.removeAttribute("label");
-  assert(header.hidden, "the title gone: the header too");
+  show.removeAttribute("src");
+  await waitFor(() => header.hidden === true, "the title gone: the header too");
+});
+
+test("a label names the show for screen readers, and is not shown", async () => {
+  const show = makeShow([{}], { label: "Coastlines" });
+  await settledOn(show, "1 of 1");
+  assert(part(show, ".header").hidden, "no header for a label");
 });
 
 test("the manifest's title is the header's, in the manifest's language", async () => {
@@ -59,7 +71,7 @@ test("the manifest's title is the header's, in the manifest's language", async (
 });
 
 test("a theme hides the header, and sets its type", async () => {
-  const show = makeShow([{}], { label: "Coastlines", theme: "minimal" });
+  const show = makeShow([], { src: titled("Coastlines", 1, "header-minimal.json"), theme: "minimal" });
   await settledOn(show, "1 of 1");
   assertEqual(part(show, ".header").getBoundingClientRect().height, 0, "minimal: no header");
   show.theme = "darkroom";
@@ -200,12 +212,6 @@ test("a change of theme to a matted one changes a photo's sizes once, to what it
     watch.disconnect();
   }
   assertEqual(seen.join(" "), `${Math.ceil(photo.getBoundingClientRect().width)}px`, "once, to the width drawn");
-});
-
-test("a label of nothing but spaces is no title", async () => {
-  const show = makeShow([{}], { label: "   " });
-  await settledOn(show, "1 of 1");
-  assert(part(show, ".header").hidden, "no header");
 });
 
 /** Two sizes of one photo, as a manifest or a script gives them: the smaller wide enough only for a photo drawn at most `fits` px wide. */
@@ -464,21 +470,77 @@ test("a show hidden leaves its photos' sizes as they were", async () => {
   assertEqual([...set.values()].flat().join(" "), "", "no size given while it has none");
 });
 
-test("slides given before the show is in the page are not fetched until it is laid out, then at their size", async () => {
-  await resetImageLog();
-  const { large, sources } = twoSizes(400, 600);
-  let show: ClackShow | undefined;
+test("a show hidden still goes where it is asked, its photo fetched at the size it was last drawn at", async () => {
+  const show = makeShow([{}, {}, {}, {}, {}]);
+  await settledOn(show, "1 of 5");
+  const drawn = (part(show, ".slide img") as HTMLImageElement).sizes;
+  show.hidden = true;
+  await sleep(100);
   const set = await sizesSet(async () => {
-    show = matShow(document.createElement("clack-show") as ClackShow);
-    show.slides = [{ id: "s", alt: "built early", width: 300, height: 200, sources }];
-    await sleep(100);
-    assertEqual((await imageLog()).filter((e) => sources.some((s) => e.endsWith(s.url))).length, 0, "nothing fetched out of the page");
-    fixture().append(show);
-    await settledOn(show, "1 of 1");
-    await sleep(100);
+    const went = await Promise.race([show.goTo(4), sleep(3000).then(() => "waiting")]);
+    assertEqual(went, true, "goTo resolves, hidden");
   });
-  assertSetOnce(set, show!);
-  assert(!(await imageLog()).some((e) => e.endsWith(large)), "the larger never asked for");
+  const last = [...set].find(([img]) => img.alt === "photo 5");
+  assert(last, "the photo asked for");
+  assertEqual(last[1].join(" "), drawn, "at the size the photos were drawn at");
+});
+
+test("a show hidden, given new slides and shown again in one go, shows them", async () => {
+  const show = makeShow([{}, {}]);
+  await settledOn(show, "1 of 2");
+  show.hidden = true;
+  await sleep(100);
+  show.slides = [{ id: "n", alt: "new", width: 300, height: 200, sources: [{ url: img(300, 200), width: 300 }] }];
+  show.hidden = false;
+  await settledOn(show, "1 of 1");
+  assertEqual(part(show, ".slide img").getAttribute("alt"), "new", "the new photo, on screen");
+});
+
+test("a theme changed while the show is hidden is drawn in when it is shown again", async () => {
+  const show = makeShow([{}], { theme: matted("30px", "5px") });
+  await waitFor(() => box(show).dataset["layout"] === "matted", "the theme");
+  await settledOn(show, "1 of 1");
+  await waitFor(() => getComputedStyle(part(show, ".slide .mount")).paddingTop === "30px", "mounted");
+  show.hidden = true;
+  await sleep(100);
+  show.theme = "gallery";
+  show.hidden = false;
+  const stage = part(show, ".stage").style;
+  assertEqual(`${stage.getPropertyValue("--clack-mat-inset")} ${stage.getPropertyValue("--clack-frame-inset")}`, "0px 0px", "no mount in gallery");
+  const room = contentBox(part(show, ".stage"));
+  const photo = part(show, ".slide img").getBoundingClientRect();
+  assert(near(photo.width, Math.min(room.width, room.height * 1.5)), `the photo, ${photo.width} wide, fills ${room.width}×${room.height}`);
+});
+
+test("captions with and without a credit, or a title, keep the stage the same height", async () => {
+  const show = makeShow([{ title: "One", credit: "Someone" }, { title: "Two" }, {}]);
+  await settledOn(show, "1 of 3");
+  const heights: number[] = [];
+  for (const at of ["1 of 3", "2 of 3", "3 of 3"]) {
+    await settledOn(show, at);
+    heights.push(part(show, ".stage").getBoundingClientRect().height);
+    if (at !== "3 of 3") await show.next();
+  }
+  assert(heights.every((h) => near(h, heights[0]!)), `the stage: ${heights.join(", ")}`);
+});
+
+test("a drag whose photo's slide is taken away does not move on when it is let go", async () => {
+  const show = makeShow([]);
+  const slide = (id: string) => ({ id, alt: id, width: 300, height: 200, sources: [{ url: img(300, 200), width: 300 }] });
+  show.slides = [slide("a"), slide("b"), slide("c")];
+  await settledOn(show, "1 of 3");
+  await sleep(200); // the others ready
+  const p = pointer(show);
+  const x = p.left + p.width * 0.8;
+  p.send("pointerdown", x);
+  p.send("pointermove", x - 60);
+  show.slides = [slide("b"), slide("c")]; // "a", on screen, gone
+  const at = show.index;
+  for (let i = 2; i <= 8; i++) p.send("pointermove", x - 40 * i);
+  p.send("pointerup", x - 320, { buttons: 0 });
+  await sleep(300);
+  assertEqual(show.index, at, "where the slides put it, not a step on");
+  assertEqual(getComputedStyle(box(show)).overflowX, "visible", "nothing cut off");
 });
 
 test("the header's count is there before the first photo is asked for", async () => {
@@ -534,7 +596,8 @@ test("a narrowed frame is never narrowed away", async () => {
   await waitFor(() => box(show).dataset["layout"] === "matted", "the theme");
   await settledOn(show, "1 of 1");
   await waitFor(() => parseFloat(getComputedStyle(part(show, ".slide .mount")).paddingTop) < 80, "narrowed");
-  assertEqual(getComputedStyle(part(show, ".slide .mount")).borderTopWidth, "1px", "a pixel, at least");
+  // A device pixel: half a CSS pixel on a screen of twice the density.
+  assertEqual(getComputedStyle(part(show, ".slide .mount")).borderTopWidth, `${1 / devicePixelRatio}px`, "a pixel, at least");
 });
 
 test("a theme file already here, set before Clack loads with slides, is the one the first photo is asked for in", async () => {
