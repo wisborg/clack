@@ -2,6 +2,7 @@
 // ParseTheme), from the shared cases; what a theme compiles to; and the
 // theme attribute, with built-in themes and theme files.
 import type { ClackShow } from "../src/clack";
+import { crossfade } from "../src/show";
 import { builtinTheme, compile, contrast, parseColor, readTheme, readThemeBytes, stripComments, ThemeError } from "../src/theme";
 import fixture from "./fixtures/themes.json";
 import { assert, assertEqual, assertThrows, skip, sleep, test } from "./harness";
@@ -294,6 +295,12 @@ test("a theme file is fetched only once its show is in the page", async () => {
   assertEqual(await fetchesOf("later.json"), 1, "fetched then");
 });
 
+test("a lone surrogate written as itself, as script may give it, is refused as one", () => {
+  const problems = problemsOf(() => readTheme(`{"format":"clack-theme/1","name":"N","x-a":"\ud800","x-a":1}`));
+  assertEqual(problems.length, 1, `one problem: ${JSON.stringify(problems)}`);
+  assert(problems[0]!.message.includes("a lone surrogate, at line 1"), problems[0]!.message);
+});
+
 test("past 1,000 problems, a theme's earliest 1,000 are kept", () => {
   const many = Object.fromEntries(Array.from({ length: 1500 }, (_, i) => [`k${String(i).padStart(4, "0")}`, 1]));
   const problems = problemsOf(() => readTheme(JSON.stringify({ format: "clack-theme/1", name: "N", ...many })));
@@ -311,6 +318,45 @@ test("a sheet the page adopted into the shadow root outlasts a change of theme",
   assert(show.shadowRoot!.adoptedStyleSheets.includes(mine), "the page's sheet is still there");
   assertEqual(getComputedStyle(show).outlineColor, "rgb(1, 2, 3)", "and applied");
   assertEqual(box(show).dataset["layout"], "stage", "with darkroom's");
+});
+
+test("an old theme's sheet that the page puts back does not outlast the themes after it", () => {
+  const show = makeShow([{}], { theme: "mat" });
+  const root = show.shadowRoot!;
+  const saved = [...root.adoptedStyleSheets]; // mat's, and Clack's
+  show.theme = "darkroom";
+  const mine = new CSSStyleSheet();
+  root.adoptedStyleSheets = [...saved, mine]; // mat's back, darkroom's gone
+  show.theme = "minimal";
+  assertEqual(root.adoptedStyleSheets.length, 3, "minimal's, Clack's and the page's");
+  assert(!root.adoptedStyleSheets.includes(saved[0]!), "mat's not kept as if it were the page's");
+  assertEqual(root.adoptedStyleSheets[2], mine, "the page's kept, last");
+  assertEqual(token(show, "canvas"), token(makeShow([{}], { theme: "minimal" }), "canvas"), "minimal's canvas");
+});
+
+test("a theme file that fails after its show left the page says so once the show is back", async () => {
+  await quietly(async (errors) => {
+    const show = makeShow([{}], { theme: "mat" });
+    show.theme = echo("{}", { path: "late.json", status: 404, delay: 300 });
+    const spot = document.createElement("div");
+    show.replaceWith(spot);
+    await sleep(700);
+    assertEqual(errors.length, 0, `nothing said while it is out of the page: ${errors.join(" | ")}`);
+    spot.replaceWith(show);
+    assertEqual(errors.length, 1, `said once it is back: ${errors.join(" | ")}`);
+    assert(errors[0]!.includes("404"), errors[0]!);
+    assertEqual(box(show).dataset["layout"], "matted", "mat's kept");
+  });
+});
+
+test("a crossfade is 700ms for a time CSS cannot read, and short when motion is reduced, either way", () => {
+  assertEqual(crossfade(NaN, false), 700, "not a time");
+  assertEqual(crossfade(NaN, true), 200, "not a time, motion reduced");
+  assertEqual(crossfade(450, false), 450, "as the theme says");
+  assertEqual(crossfade(450, true), 200, "motion reduced");
+  assertEqual(crossfade(100, true), 100, "already short");
+  assertEqual(crossfade(0, false), 0, "none");
+  assertEqual(crossfade(9000, false), 3000, "never more than 3 s");
 });
 
 test("a theme that is not one says so only once its show is in the page", async () => {

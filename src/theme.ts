@@ -21,7 +21,7 @@ import darkroom from "../themes/darkroom.json";
 import gallery from "../themes/gallery.json";
 import mat from "../themes/mat.json";
 import minimal from "../themes/minimal.json";
-import { checkJSON, decodeUTF8, fetchJSON, isObject, loneSurrogateAt, loneSurrogateProblem, maxProblems, parseJSON, RefusedError, type Obj } from "./json";
+import { checkJSON, decodeUTF8, fetchJSON, isObject, loneSurrogateIn, maxProblems, parseJSON, RefusedError, type Obj } from "./json";
 import { Schema, sortProblems, type Problem } from "./schema";
 
 /** The built-in themes, by the name a page or a theme gives them. base is what every theme starts from. */
@@ -118,12 +118,9 @@ export function readTheme(text: string): Obj {
   } catch (e) {
     throw new ThemeError([{ path: "", message: `is not JSON: ${(e as Error).message}` }]);
   }
-  // In the text, with its comments gone, as the tools look (formats.Parse);
-  // and one unescaped, which text given from script may hold.
-  const lone = loneSurrogateAt(stripped);
-  if (lone >= 0) throw new ThemeError([loneSurrogateProblem(stripped, lone)]);
-  const raw = stripped.search(/\p{Cs}/u);
-  if (raw >= 0) throw new ThemeError([loneSurrogateProblem(stripped, raw)]);
+  // In the text, with its comments gone, as the tools look (formats.Parse).
+  const lone = loneSurrogateIn(stripped);
+  if (lone) throw new ThemeError([lone]);
   // Nesting and numbers; lone surrogates are found in the text, above.
   const shape: Problem[] = [];
   checkJSON(doc, "", 1, shape);
@@ -350,10 +347,12 @@ function softShadow(schemes: readonly string[]): string {
 const kebab = (s: string): string => s.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
 
 /**
- * A resolved theme as CSS, every token named after its place
- * (docs/themes.md): colors.*.canvas is --clack-canvas, caption.size is
- * --clack-caption-size, and so on. Every value has passed the schema, so
- * each is already one CSS value of its kind.
+ * A resolved theme as CSS: each colour, length, type and timing token a
+ * property named after its place (docs/themes.md) -- colors.*.canvas is
+ * --clack-canvas, caption.size is --clack-caption-size, and so on -- and
+ * each choice of layout one of the choices, set as a data attribute on the
+ * show's box. Every value has passed the schema, so each is already one
+ * CSS value of its kind.
  */
 export function compile(t: Obj): Compiled {
   const p: [string, string][] = [];

@@ -105,9 +105,11 @@ photographs neutral: a tinted wall shifts how every photo on it looks.
 
 ### Lengths
 
-A length is `0` or a number with a unit: `px`, `rem`, `em`, `%` (of the show's width),
-`cqi`, `cqb`, `cqw`, `cqh`, `cqmin`, `cqmax` (of the show itself), or `vw`, `vh`, `vmin`,
-`vmax` (of the window). No negative lengths, and no `calc()`.
+A length is `0` or a number with a unit: `px`, `rem`, `em` (of the show's text), `cqi`, `cqw`
+(of the show's width), or `vw`, `vh`, `vmin`, `vmax` (of the window). No negative lengths,
+and no `calc()`. Not `%`, which CSS reads as a share of a different box for each property,
+and not `cqh`, `cqb`, `cqmin` or `cqmax`: the show's height is worked out from its width,
+so it is not there to be a share of.
 
 Where a token says *fluid*, it can instead grow with the show between two bounds — CSS's
 `clamp()`:

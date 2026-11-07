@@ -153,8 +153,10 @@ test("load accepts JSON only, of a size that makes sense, from where it says", a
   assertEqual(m.slides.length, 2, "slides");
   assert((await refusal(echo(manifestOf(1), { type: "text/html" }))).includes("application/json"), "HTML is refused");
   assert((await refusal(echo("{}", { status: 404 }))).includes("404"), "a 404 is refused");
-  assert((await refusal(`/big?bytes=${maxBytes + 1}&declare=1`)).includes("larger"), "a declared size too large is refused");
-  assert((await refusal(`/big?bytes=${maxBytes + 1}`)).includes("larger"), "an undeclared size too large is refused, as it comes");
+  const bigDeclared = await refusal(`/big?bytes=${maxBytes + 1}&declare=1`);
+  assert(bigDeclared.includes("larger"), `a declared size too large is refused: ${bigDeclared || "accepted"}`);
+  const big = await refusal(`/big?bytes=${maxBytes + 1}`);
+  assert(big.includes("larger"), `an undeclared size too large is refused, as it comes: ${big || "accepted"}`);
   assert((await refusal(echo("%FF", {}).replace("body=%25FF", "body=%FF"))).includes("not UTF-8"), "bytes that are not UTF-8 are refused");
   // After a redirect, relative URLs are relative to where it ended.
   const body = JSON.stringify({ format: "clack-manifest/1", slides: [{ id: "r", alt: "", width: 1, height: 1, sources: [{ url: "r.png", width: 1 }] }] });
@@ -258,6 +260,28 @@ test("check never throws, even on what JSON cannot hold", () => {
   ];
   for (const doc of odd) {
     assert(check(doc).length > 0, `refused: ${String(doc)}`);
+  }
+});
+
+test("a lone surrogate in a manifest's text is found wherever it is, written as itself or escaped", () => {
+  const slide = '{"id":"a","alt":"","width":1,"height":1,"sources":[{"url":"a.jpg","width":1}]}';
+  const deep = (inner: string): string => "[".repeat(70) + inner + "]".repeat(70);
+  for (const [name, lone] of [
+    ["written as itself", "\ud800"],
+    ["escaped", "\\ud800"],
+  ] as const) {
+    for (const [where, text] of [
+      ["in a value a repeated key replaces", `{"format":"clack-manifest/1","x-a":"${lone}","x-a":1,"slides":[${slide}]}`],
+      ["nested too deep", `{"format":"clack-manifest/1","x-a":${deep(`"${lone}"`)},"slides":[${slide}]}`],
+    ] as const) {
+      let message = "";
+      try {
+        parse(text, "https://example.com/m.json");
+      } catch (e) {
+        if (e instanceof ManifestError) message = e.problems.map((p) => p.message).join(" | ");
+      }
+      assert(/lone surrogate/.test(message) && !/nests/.test(message), `${name}, ${where}: ${message || "accepted"}`);
+    }
   }
 });
 

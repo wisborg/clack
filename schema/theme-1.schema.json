@@ -122,8 +122,8 @@
     },
     "length": {
       "type": "string",
-      "description": "A length that is not negative: 0, or a number with a unit. % is of the show's width; cqi, cqb, cqw, cqh, cqmin and cqmax are of the show itself; vw, vh, vmin and vmax of the window.",
-      "pattern": "^(?:0|(?:[0-9]{1,4}(?:\\.[0-9]{1,3})?|\\.[0-9]{1,3})(?:px|rem|em|%|vw|vh|vmin|vmax|cqi|cqb|cqw|cqh|cqmin|cqmax))$",
+      "description": "A length that is not negative: 0, or a number with a unit. em is of the show's text; cqi and cqw are of the show's width; vw, vh, vmin and vmax of the window.",
+      "pattern": "^(?:0|(?:[0-9]{1,4}(?:\\.[0-9]{1,3})?|\\.[0-9]{1,3})(?:px|rem|em|vw|vh|vmin|vmax|cqi|cqw))$",
       "examples": ["24px", "6.5vmin", "0"]
     },
     "fluidLength": {

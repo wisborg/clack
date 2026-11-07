@@ -66,6 +66,9 @@ export const isObject = (v: unknown): v is Obj => typeof v === "object" && v !==
  * would turn into U+FFFD, merging names that differ here. That last is
  * reported once, against the whole file, as the tools report it (they find
  * it in the raw text, before any path exists); the message says where.
+ * Only for a value given from script: in one parsed from text, look in
+ * the text instead (loneSurrogateIn), which this walk would miss in a
+ * value nested too deep, past maxProblems, or replaced by a repeated key.
  *
  * v sits at path, depth deep in its document; skip, if v holds it, is left
  * for a later call. The walk is depth first, in the document's order, so
@@ -143,10 +146,8 @@ const loneSurrogate = /\p{Cs}/u;
  * backslashes just before it pair it off. So the search is native -- for
  * each \u escape of a surrogate, not for every character -- which matters
  * in a manifest of many megabytes with an emoji written as a pair.
- * (Unescaped, a lone surrogate cannot come from bytes: UTF-8 cannot hold
- * one. Text given from script can hold one, which the caller looks for.)
  */
-export function loneSurrogateAt(text: string): number {
+function loneSurrogateEscapeAt(text: string): number {
   const escape = /\\u([dD][89a-fA-F][0-9a-fA-F]{2})/g;
   for (let m = escape.exec(text); m; m = escape.exec(text)) {
     let slashes = 0;
@@ -161,12 +162,21 @@ export function loneSurrogateAt(text: string): number {
   return -1;
 }
 
-/** The problem a lone surrogate at index in text is, reported against the whole file, with where it is. */
-export function loneSurrogateProblem(text: string, index: number): Problem {
+/**
+ * The problem a lone surrogate in JSON text is, if it holds one: escaped
+ * (loneSurrogateEscapeAt), or written as itself -- which text from bytes
+ * cannot be, as UTF-8 cannot hold one, but text given from script can.
+ * Reported against the whole file, as the tools report it, saying where.
+ */
+export function loneSurrogateIn(text: string): Problem | null {
+  const escaped = loneSurrogateEscapeAt(text);
+  const index = escaped >= 0 ? escaped : text.search(loneSurrogate);
+  if (index < 0) return null;
   const before = text.slice(0, index);
   const line = before.split("\n").length;
   const column = index - before.lastIndexOf("\n");
-  return { path: "", message: `has a string that is not well-formed Unicode (a lone surrogate escape, at line ${line}, column ${column})` };
+  const what = escaped >= 0 ? "a lone surrogate escape" : "a lone surrogate";
+  return { path: "", message: `has a string that is not well-formed Unicode (${what}, at line ${line}, column ${column})` };
 }
 
 /**

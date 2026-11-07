@@ -9,7 +9,7 @@
  * schema in Go (tools/internal/formats), and both are held to the same
  * cases (test/fixtures/manifests.json).
  */
-import { checkJSON, decodeUTF8, fetchJSON, isObject, loneSurrogateAt, loneSurrogateProblem, maxProblems, parseJSON, RefusedError, yieldToPage } from "./json";
+import { checkJSON, decodeUTF8, fetchJSON, isObject, loneSurrogateIn, maxProblems, parseJSON, RefusedError, yieldToPage } from "./json";
 import { checkSlideRules, rules } from "./rules";
 import { describeProblems, sortProblems, type Problem } from "./schema";
 import { convert, resolveHTTP, type Keyed, type SlideInput } from "./slides";
@@ -49,28 +49,31 @@ export function check(doc: unknown): Problem[] {
  * schema and the rules beyond it. Slides past the most a manifest may hold
  * are not looked at: the manifest is refused for their number already.
  * Checking stops once maxProblems are found; the verdict is settled.
+ * loneInText is the lone surrogate found in the text the manifest was
+ * parsed from, or null for none; left out for a manifest given from
+ * script, which has no text, and is looked for in the value instead.
  */
-function* checking(doc: unknown, loneInText: Problem | null = null): Generator<void, Problem[]> {
+function* checking(doc: unknown, loneInText?: Problem | null): Generator<void, Problem[]> {
   const all = isObject(doc) && Array.isArray(doc["slides"]) ? (doc["slides"] as unknown[]) : null;
   const { top, slide, maxSlides } = rules();
   // More slides than a manifest may hold settle the verdict, alone and at
   // once, as in the tools (formats.ParseManifest): nothing else is looked
   // at, so the two report the one same place.
   if (all && all.length > maxSlides) return [{ path: "/slides", message: `must have at most ${maxSlides} items` }];
-  // Then a lone surrogate, if the text had one (lonelyIn), alone.
+  // Then a lone surrogate, if the text had one (loneSurrogateIn), alone.
   if (loneInText) return [loneInText];
   const slides = all;
   const full = (problems: Problem[]): boolean => problems.length >= maxProblems;
 
   // Shape first: a value too deep or too large is all that is reported.
   const shape: Problem[] = [];
-  const lone: Problem[] = [];
+  const lone: Problem[] | undefined = loneInText === undefined ? [] : undefined;
   checkJSON(doc, "", 1, shape, lone, all ?? undefined);
   for (let i = 0; slides && i < slides.length && !full(shape); i++) {
     checkJSON(slides[i], `/slides/${i}`, 3, shape, lone);
     yield;
   }
-  if (lone.length > 0) return lone;
+  if (lone && lone.length > 0) return lone;
   if (shape.length > 0) return sortProblems(shape);
 
   const problems = top.validate(doc, false);
@@ -109,21 +112,16 @@ function runToEnd<T>(steps: Generator<void, T>): T {
  */
 export function parse(text: string, base: string): Manifest {
   const doc = parseJSON(text);
-  return runToEnd(reading(doc, base, lonelyIn(text)));
+  return runToEnd(reading(doc, base, loneSurrogateIn(text)));
 }
 
 /**
  * The one way a manifest's text becomes a Manifest, in steps of about a
  * slide: parse() runs them straight through; load() lets the page draw and
  * answer input every few milliseconds of them. (JSON.parse itself is one
- * step, the size of the file: no engine offers it in parts.)
+ * step, the size of the file: no engine offers it in parts.) lone is the
+ * lone surrogate the text held, if any, found in the text (loneSurrogateIn).
  */
-/** The problem a lone surrogate escape in a manifest's text is, if it has one. */
-function lonelyIn(text: string): Problem | null {
-  const at = loneSurrogateAt(text);
-  return at < 0 ? null : loneSurrogateProblem(text, at);
-}
-
 function* reading(doc: unknown, base: string, lone: Problem | null): Generator<void, Manifest> {
   const problems = yield* checking(doc, lone);
   if (problems.length > 0) {
@@ -206,7 +204,7 @@ export async function load(url: string, signal: AbortSignal): Promise<Manifest> 
   // The page's turn between the parse and the search of the text.
   await yieldToPage();
   signal.throwIfAborted();
-  const lone = lonelyIn(text);
+  const lone = loneSurrogateIn(text);
   text = null;
   // Then read as parse() reads any manifest -- one way in, which the tests
   // exercise too -- with the page given a turn every few milliseconds, and

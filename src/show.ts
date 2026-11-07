@@ -105,12 +105,20 @@ interface Look {
 }
 
 /**
+ * Every theme's stylesheet, so a show can tell them from the page's own:
+ * a page that saved the shadow root's sheets and puts them back, an old
+ * theme's among them, must not have that theme's outlast every later one.
+ */
+const lookSheets = new WeakSet<CSSStyleSheet>();
+
+/**
  * A compiled theme as a stylesheet of its own: one rule for :host, its
  * properties set one at a time through the CSS object model, so each value
  * is only ever a value.
  */
 function lookOf({ properties, choices }: Compiled): Look {
   const sheet = new CSSStyleSheet();
+  lookSheets.add(sheet);
   sheet.replaceSync(":host {}");
   const style = (sheet.cssRules[0] as CSSStyleRule).style;
   for (const [name, value] of properties) style.setProperty(name, value);
@@ -159,6 +167,16 @@ function builtinLook(name: string): Look {
     builtinLooks.set(name, look);
   }
   return look;
+}
+
+/**
+ * The crossfade's length in ms, from the theme's as CSS computes it (NaN
+ * when it is not a time): 700 if it is not one, at most 200 when motion is
+ * reduced, and never more than 3 s.
+ */
+export function crossfade(ms: number, reduced: boolean): number {
+  const given = Number.isFinite(ms) ? ms : 700;
+  return Math.min(given, reduced ? 200 : 3000);
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(name: K, className: string, part = ""): HTMLElementTagNameMap[K] {
@@ -212,14 +230,13 @@ export class ClackShow extends HTMLElement {
   readonly #live: HTMLDivElement;
   /** The show's outermost box, which carries the theme's layout choices. */
   readonly #box: HTMLDivElement;
-  /** The theme's stylesheet, adopted now. */
-  #sheet: CSSStyleSheet | null = null;
   /**
    * The theme asked for (a built-in's name, or a theme file's URL,
    * resolved), whether it failed, and what is still to be done about it
-   * once the show is in the page: a file to fetch, or why there is none.
+   * once the show is in the page: a file to fetch, or why there is none
+   * -- or why it failed, when it failed while the show was out of the page.
    */
-  #theme: { asked: string; failed: boolean; pending: { url: string } | { error: Error } | null } = { asked: "", failed: false, pending: null };
+  #theme: { asked: string; failed: boolean; pending: { url: string } | { error: unknown } | null } = { asked: "", failed: false, pending: null };
 
   #slides: Keyed[] = [];
   readonly #indexById = new Map<string, number>();
@@ -682,7 +699,10 @@ export class ClackShow extends HTMLElement {
         if (this.#theme === theme) this.#look(look);
       },
       (e: unknown) => {
-        if (this.#theme === theme) this.#themeFailed(pending.url, e);
+        if (this.#theme !== theme) return;
+        // Said once the show is back in the page, if it left meanwhile.
+        if (this.#ready) this.#themeFailed(pending.url, e);
+        else theme.pending = { error: e };
       },
     );
   }
@@ -700,9 +720,8 @@ export class ClackShow extends HTMLElement {
    */
   #look({ sheet, choices }: Look): void {
     const root = this.shadowRoot!;
-    const pages = root.adoptedStyleSheets.filter((s) => s !== this.#sheet && s !== styles());
+    const pages = root.adoptedStyleSheets.filter((s) => !lookSheets.has(s) && s !== styles());
     root.adoptedStyleSheets = [sheet, styles(), ...pages];
-    this.#sheet = sheet;
     for (const [name, value] of Object.entries(choices)) this.#box.dataset[name] = value;
   }
 
@@ -1035,7 +1054,7 @@ export class ClackShow extends HTMLElement {
       this.#announce(index + 1, this.#slides.length, slide);
     }
 
-    const duration = old ? this.#duration() : 0;
+    const duration = old ? this.#duration(figure) : 0;
     if (old && duration > 0) {
       const timing: KeyframeAnimationOptions = { duration, easing: "cubic-bezier(0.4, 0, 0.2, 1)" };
       const outgoing: Keyframe[] = how.swipe
@@ -1104,7 +1123,7 @@ export class ClackShow extends HTMLElement {
    * and an engine may not run animations in a hidden page at all, which
    * would leave the old slide in place until the page is shown again.
    */
-  #duration(): number {
+  #duration(figure: HTMLElement): number {
     if (document.visibilityState === "hidden") {
       return 0;
     }
@@ -1113,14 +1132,12 @@ export class ClackShow extends HTMLElement {
       return 0;
     }
     // As CSS reads the token -- a theme's, or any time the page sets,
-    // calc() and all -- from a property that takes a time and is otherwise
-    // unused (see .live in clack.css): computed, it is always seconds.
-    // A value that is not a time leaves it at CSS's initial 0s.
-    let ms = parseFloat(getComputedStyle(this.#live).animationDuration) * 1000;
-    if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      ms = Math.min(ms, 200);
-    }
-    return Number.isFinite(ms) ? Math.min(ms, 3000) : 700;
+    // calc() and all -- from the slide coming in, whose animation-duration
+    // is this crossfade's (see .slide in clack.css): computed, it is always
+    // seconds. A value that is not a time leaves it at CSS's initial 0s,
+    // and a show out of the page has no computed style at all.
+    const ms = parseFloat(getComputedStyle(figure).animationDuration) * 1000;
+    return crossfade(ms, matchMedia("(prefers-reduced-motion: reduce)").matches);
   }
 
   #caption(slide: Keyed | null): void {

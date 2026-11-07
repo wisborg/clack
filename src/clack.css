@@ -73,6 +73,9 @@
   min-width: 0;
   min-height: 0;
   transform: translateX(var(--clack-drag, 0px));
+  /* The crossfade's length, which script plays (#duration): read from
+     here as a time, so CSS works it out from whatever the token says. */
+  animation-duration: var(--clack-transition-duration);
 }
 
 /* Contained: the whole photo, as large as the frame allows, in its own
@@ -305,9 +308,6 @@
 /* For screen readers only. Pinned to the top: left where it falls, it
    would sit just below the show and make the page a pixel taller. */
 .live {
-  /* Not an animation (it has none): the transition's duration, read as a
-     time, so CSS works it out from whatever the token says (#duration). */
-  animation-duration: var(--clack-transition-duration);
   position: absolute;
   top: 0;
   left: 0;
