@@ -7,7 +7,7 @@ import { builtinNames as clacksBuiltins, builtinTheme, compile, contrast, parseC
 import themeSchema from "../schema/theme-1.schema.json";
 import fixture from "./fixtures/themes.json";
 import { assert, assertEqual, assertThrows, skip, sleep, test } from "./harness";
-import { checkRaw, comparePlaces, echo, figures, imageLog, makeShow, places, quietly, random, resetImageLog, setPointer, settledOn, waitFor } from "./util";
+import { checkRaw, comparePlaces, echo, figures, imageLog, makeShow, places, quietly, random, resetImageLog, setPointer, settledOn, showBox as box, waitFor } from "./util";
 
 /** The built-ins, as the schema names them: those a theme may extend, the tools' (formats.Builtins) too. */
 const builtinNames = themeSchema.properties.extends.enum;
@@ -189,8 +189,6 @@ test("no theme, however broken, makes the checker throw other than a ThemeError"
 /** A token's value on a show, as CSS computes it. */
 const token = (show: ClackShow, name: string): string => getComputedStyle(show).getPropertyValue(`--clack-${name}`);
 
-/** The show's box, which carries its layout's choices. */
-const box = (show: ClackShow): HTMLElement => show.shadowRoot!.querySelector<HTMLElement>(".show")!;
 
 test("a built-in theme is taken up at once, by its name, and base without one", () => {
   const show = makeShow([{}]);

@@ -51,6 +51,8 @@
    Only with a title, and only if the theme shows it. */
 .header {
   grid-row: 1;
+  /* Painted after the stage, and so over any shadow it casts. */
+  position: relative;
   display: flex;
   justify-content: space-between;
   align-items: baseline;
@@ -108,9 +110,12 @@
   outline: none;
 }
 
+/* Inside the stage's edge, not outside it: where the theme leaves no
+   margin (full-bleed), the show's sides would cut it off. Drawn over the
+   photo, as the stage paints its outline after its slides. */
 .stage:focus-visible {
   outline: 2px solid var(--clack-accent);
-  outline-offset: 2px;
+  outline-offset: -2px;
 }
 
 .slide {
@@ -256,6 +261,9 @@
 
 .below {
   grid-row: 3;
+  /* Painted after the stage (which is positioned, as each slide is), and
+     so over a shadow falling from the photo or its frame. */
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -379,6 +387,7 @@
    in a token is of the show, as the schema says, not of the stage.
    - Its size is the mat's width by the frame's, in px, whatever units the
      tokens are in; and it changes, and is observed, whenever they do.
+     (Not "0px" in a calc(), so a bare 0 is given a unit by compile.)
    - Its animation-duration is the crossfade's length, which script plays,
      a second longer: so CSS works out whatever the token says, calc() and
      all, and one it cannot read -- which leaves the initial 0s -- is told
@@ -387,8 +396,10 @@
   position: absolute;
   top: 0;
   left: 0;
-  width: var(--clack-mat-width);
-  height: var(--clack-frame-width);
+  /* A pixel more than each, so it always has a size, and so is always
+     observed (#measure takes the pixel off again). */
+  width: calc(var(--clack-mat-width) + 1px);
+  height: calc(var(--clack-frame-width) + 1px);
   visibility: hidden;
   pointer-events: none;
   animation-duration: calc(var(--clack-transition-duration) + 1s);
@@ -442,8 +453,8 @@
   box-shadow: none;
 }
 
-/* The bevel: where the mat is cut, a 2px edge (#measure counts it in the
-   mat) in its own shade on the top and left, catching the light on the
+/* The bevel: where the mat is cut, a 2px edge, drawn in the mat's last
+   2px, in its own shade on the top and left, catching the light on the
    bottom and right. Shadows, so the photo's own box is not changed. */
 .show[data-layout="matted"][data-bevel="true"] :is(.slide img, .fill, .missing) {
   box-shadow:

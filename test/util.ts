@@ -218,3 +218,8 @@ export function contentBox(e: Element): { width: number; height: number } {
     height: r.height - px("padding-top", "padding-bottom", "border-top-width", "border-bottom-width"),
   };
 }
+
+/** A show's own box, .show in its shadow root, which carries its layout's choices. */
+export function showBox(show: ClackShow): HTMLElement {
+  return show.shadowRoot!.querySelector<HTMLElement>(".show")!;
+}

@@ -121,8 +121,14 @@ function themeSheet({ properties }: Compiled): CSSStyleSheet {
   return sheet;
 }
 
-/** The bevel at the mat's cut, in px: drawn by clack.css, as 2px shadows. */
-const bevelWidth = 2;
+/**
+ * The mat's width by the frame's, from the probe's box: each is a pixel
+ * more there (see .probe in clack.css), so that it always has a size, and
+ * is always observed.
+ */
+function probed(box: { width: number; height: number }): { width: number; height: number } {
+  return { width: Math.max(0, box.width - 1), height: Math.max(0, box.height - 1) };
+}
 
 /** Content in the mount, which in the matted layout frames it (see clack.css). */
 function mount(content: Element): HTMLElement {
@@ -267,8 +273,6 @@ export class ClackShow extends HTMLElement {
   static readonly observedAttributes = ["loop", "fit", "label", "src", "theme"];
 
   readonly #internals: ElementInternals;
-  /** The manifest's title, hidden, in its language: what names the show when it does (see #name). */
-  readonly #nameBox: HTMLSpanElement;
   readonly #stage: HTMLDivElement;
   readonly #notice: HTMLParagraphElement;
   readonly #title: HTMLSpanElement;
@@ -287,6 +291,14 @@ export class ClackShow extends HTMLElement {
   #showLang: string | null = null;
   /** What the mount adds around a photo on each side, in px (#measure). */
   #inset = 0;
+  /**
+   * The theme's stylesheet, adopted now: held, so that it is known again.
+   * Safari may let go of a sheet's script object that only a WeakSet holds
+   * -- the sheet itself living on, adopted -- and make a new one, which
+   * themeSheets does not know: the old theme's sheet would then be kept as
+   * one of the page's, after Clack's, and outlast the next theme.
+   */
+  #sheet: CSSStyleSheet | null = null;
   /** The show's outermost box, which carries the theme's layout choices. */
   readonly #box: HTMLDivElement;
   /**
@@ -351,14 +363,13 @@ export class ClackShow extends HTMLElement {
   #frame = { width: 0, height: 0 };
 
   #stopSwipe: (() => void) | null = null;
+  /** The stage and the probe, both: one observer, so a change to both is taken in one go. */
   readonly #resize = new ResizeObserver((entries) => this.#onResize(entries));
-  readonly #probed = new ResizeObserver((entries) => {
-    const size = entries[entries.length - 1]?.contentRect;
-    if (size) this.#probeSize = { width: size.width, height: size.height };
-    this.#measure();
-  });
-  /** The probe's size, as last observed: the mat's width by the frame's, in px. */
-  #probeSize = { width: 0, height: 0 };
+  /**
+   * The mat's width by the frame's, in px, as the probe was last observed
+   * (see .probe in clack.css); null until it is, in the page.
+   */
+  #probeSize: { width: number; height: number } | null = null;
   // Changes to the markup re-read the slides; the host's own attributes
   // (loop, fit, label) are not slides, and have their own callback.
   readonly #mutations = new MutationObserver((records) => {
@@ -404,8 +415,6 @@ export class ClackShow extends HTMLElement {
     controls.append(this.#previous, this.#counter, this.#next);
     below.append(caption, controls);
 
-    this.#nameBox = el("span", "name");
-    this.#nameBox.hidden = true;
     this.#live = el("div", "live");
     this.#live.ariaLive = "polite";
     this.#live.ariaAtomic = "true";
@@ -416,10 +425,13 @@ export class ClackShow extends HTMLElement {
     this.#headerCount = el("span", "header-count");
     this.#header.append(this.#headerTitle, this.#headerCount);
     this.#header.hidden = true;
+    // Hidden from screen readers: its title is the show's name already,
+    // and the slides say where the visitor is, of how many.
+    this.#header.ariaHidden = "true";
 
     show.append(this.#header, this.#stage, below);
     this.#probe = el("div", "probe");
-    root.append(show, this.#live, this.#nameBox, this.#probe);
+    root.append(show, this.#live, this.#probe);
 
     this.addEventListener("keydown", (e) => this.#onKey(e));
   }
@@ -447,7 +459,7 @@ export class ClackShow extends HTMLElement {
   connectedCallback(): void {
     document.addEventListener("visibilitychange", this.#onVisibility);
     this.#resize.observe(this.#stage);
-    this.#probed.observe(this.#probe);
+    this.#resize.observe(this.#probe);
     this.#stopSwipe = listen(this.#stage, {
       move: (dx) => this.#drag(dx),
       end: (outcome) => this.#swiped(outcome),
@@ -473,11 +485,16 @@ export class ClackShow extends HTMLElement {
     if (this.#showing.from === "markup") this.#showing = { from: "none" };
     this.#ready = true;
     this.#takeUpTheme();
+    // Before any photo is asked for, so the first is asked for at the size
+    // it is drawn at, mount and all.
+    this.#measure();
     this.#render();
   }
 
   disconnectedCallback(): void {
     this.#ready = false;
+    // Measured afresh when it is back: a theme may change meanwhile.
+    this.#probeSize = null;
     document.removeEventListener("visibilitychange", this.#onVisibility);
     // A manifest on its way is not dropped: there is no telling a move --
     // however long it takes -- from a removal, and a show that is moved must
@@ -485,7 +502,6 @@ export class ClackShow extends HTMLElement {
     // back (#render does nothing out of the page); a show removed for good
     // downloads it once, and is collected with it.
     this.#resize.disconnect();
-    this.#probed.disconnect();
     this.#mutations.disconnect();
     this.#stopSwipe?.();
     this.#stopSwipe = null;
@@ -798,11 +814,20 @@ export class ClackShow extends HTMLElement {
   #look(compiled: Compiled): void {
     const root = this.shadowRoot!;
     const pages = root.adoptedStyleSheets.filter((s) => !themeSheets.has(s) && s !== styles());
-    root.adoptedStyleSheets = [themeSheet(compiled), styles(), ...pages];
+    this.#sheet = themeSheet(compiled);
+    root.adoptedStyleSheets = [this.#sheet, styles(), ...pages];
     const { choices } = compiled;
     for (const [name, value] of Object.entries(choices)) this.#box.dataset[name] = value;
-    // A new layout may mount photos or not, whether or not the mat's size changed.
-    if (this.#ready) this.#measure();
+    // Measured again once it is laid out in this theme -- whether or not
+    // the mat's size changed, as the layout may now mount photos or not.
+    // Observed afresh, which reports its size, with the stage's, in the
+    // next rendering of the page: the photos' sizes then change once, to
+    // what they are drawn at, not first to the new layout with the old
+    // theme's mat, or to the new mat on the old stage.
+    if (this.#ready) {
+      this.#resize.unobserve(this.#probe);
+      this.#resize.observe(this.#probe);
+    }
   }
 
   #showManifest(m: Manifest): void {
@@ -850,31 +875,32 @@ export class ClackShow extends HTMLElement {
 
   /**
    * The manifest's title names the show if the page has not, read in the
-   * manifest's language: the show is labelled by a hidden element of its
-   * own that carries it, where the engine supports labelling by element
-   * from ElementInternals; otherwise by the text alone. (The slides' own
-   * language goes with each slide -- see Keyed.lang.)
+   * manifest's language: the show is labelled by the header's title, which
+   * carries it, where the engine supports labelling by element from
+   * ElementInternals -- whether or not the theme shows the header; otherwise
+   * by the text alone. (The slides' own language goes with each slide --
+   * see Keyed.lang.)
    */
   #setTitle(title: string, lang: string | null): void {
     this.#showTitle = title;
     this.#showLang = lang;
     this.#name();
-    this.#nameBox.textContent = title;
-    applyLang(this.#nameBox, lang);
   }
 
-  /** Names the show: its label, else the manifest's title, else "Photos". */
+  /**
+   * Names the show: its label, else the manifest's title, else "Photos";
+   * and shows the title, if there is one, in the header: the page's, in
+   * the page's language, or the manifest's, in its own.
+   */
   #name(): void {
-    const label = this.getAttribute("label");
+    const label = this.getAttribute("label")?.trim() ?? "";
     const byElement = "ariaLabelledByElements" in this.#internals;
     const internals = this.#internals as ElementInternals & { ariaLabelledByElements: Element[] | null };
     // The text is always given too: an engine that does not follow a
     // reference from the host into its own shadow tree falls back to it,
     // so the show is never left without a name.
     this.#internals.ariaLabel = label || this.#showTitle || text.show;
-    if (byElement) internals.ariaLabelledByElements = !label && this.#showTitle ? [this.#nameBox] : null;
-    // The header shows the same title, if there is one: the page's, in the
-    // page's language, or the manifest's, in its own.
+    if (byElement) internals.ariaLabelledByElements = !label && this.#showTitle ? [this.#headerTitle] : null;
     const title = label || this.#showTitle;
     this.#headerTitle.textContent = title;
     applyLang(this.#headerTitle, label ? null : this.#showLang);
@@ -1214,7 +1240,7 @@ export class ClackShow extends HTMLElement {
     if (document.visibilityState === "hidden") {
       return 0;
     }
-    // The tokens as .timing inherits them.
+    // The tokens as the probe inherits them.
     const style = getComputedStyle(this.#probe);
     if (style.getPropertyValue("--clack-transition").trim() === "none") {
       return 0;
@@ -1226,7 +1252,7 @@ export class ClackShow extends HTMLElement {
       return 0;
     }
     // As CSS reads the token -- a theme's, or any time the page sets,
-    // calc() and all -- a second longer (see .timing in clack.css), so that
+    // calc() and all -- a second longer (see .probe in clack.css), so that
     // one that is not a time, which leaves CSS's initial 0s (or auto, in
     // an engine that has it), is told from 0s; computed, it is always
     // seconds. A show out of the page has no computed style at all.
@@ -1359,53 +1385,76 @@ export class ClackShow extends HTMLElement {
    * What the mount comes to around a photo, in px, from the theme's mat
    * and frame as of the show (the probe's size: see .probe in clack.css),
    * set on the stage for the CSS that draws it, and counted in the width
-   * each photo is drawn at. Worked out again whenever either changes size,
-   * and with every theme, for its layout; none but in the matted layout. The bevel, where there is
-   * one, is the mat's last 2px (see clack.css).
+   * each photo is drawn at; none but in the matted layout. The bevel,
+   * where there is one, is drawn in the mat's last 2px (clack.css).
+   *
+   * Never more than a sixth of the stage's shorter side, each side: on a
+   * show too small for its mat -- the built-in one is of the window, not
+   * the show -- the mat and frame are narrowed together, and the photo
+   * keeps two thirds of the stage.
+   *
+   * Worked out again whenever the mat, the frame or the stage changes
+   * size, and with every theme, from their sizes as observed (#onResize,
+   * #look) -- but for the first time in the page, before any photo is
+   * asked for, when the probe's is read, as the stage's is (#stageSize).
    */
   #measure(): void {
     const box = this.#box.dataset;
     let mat = 0;
     let frame = 0;
     if (box["layout"] === "matted") {
-      // As observed, not read here: Safari, asked for a style in the
-      // shadow tree just after its sheets are replaced, keeps the host's
-      // old theme. (Its layout size, too: no transform of the page's.)
-      mat = this.#probeSize.width + (box["bevel"] === "true" ? bevelWidth : 0);
-      frame = this.#probeSize.height;
+      this.#probeSize ??= probed(this.#probe.getBoundingClientRect());
+      ({ width: mat, height: frame } = this.#probeSize);
+      const stage = this.#stageSize();
+      const most = Math.min(stage.width, stage.height) / 6;
+      if (most > 0 && mat + frame > most) {
+        // In whole pixels, as a browser draws a border's width.
+        frame = Math.round((frame * most) / (mat + frame));
+        mat = most - frame;
+      }
     }
     const inset = mat + frame;
     this.#stage.style.setProperty("--clack-inset", `${inset}px`);
     this.#stage.style.setProperty("--clack-mat-inset", `${mat}px`);
-    if (inset !== this.#inset) {
-      this.#inset = inset;
-      this.#photos.resize((key) => this.#sizes(this.#indexByKey.get(key) ?? -1));
-    }
+    this.#inset = inset;
   }
 
+  /**
+   * The stage or the probe has changed size, or both have (in one report,
+   * so the photos' sizes are not worked out from one before the other):
+   * the mount is worked out again, and every photo's size.
+   */
   #onResize(entries: ResizeObserverEntry[]): void {
-    const box = entries[entries.length - 1]?.contentRect;
-    if (!box) {
-      return;
+    for (const { target, contentRect: box } of entries) {
+      if (target === this.#stage) this.#frame = { width: box.width, height: box.height };
+      else this.#probeSize = probed(box);
     }
-    this.#frame = { width: box.width, height: box.height };
+    this.#measure();
     this.#photos.resize((key) => this.#sizes(this.#indexByKey.get(key) ?? -1));
+  }
+
+  /**
+   * The stage's size, as observed; until it is, its box, which is its
+   * content box, as observed -- the stage has no padding (clack.css), or
+   * a photo's sizes would change once it is observed, and an engine may
+   * fetch the photo again.
+   */
+  #stageSize(): { width: number; height: number } {
+    if (this.#frame.width === 0) {
+      const r = this.#stage.getBoundingClientRect();
+      this.#frame = { width: r.width, height: r.height };
+    }
+    return this.#frame;
   }
 
   /** What the `sizes` of slide i's photo should say: the width it is drawn at. */
   #sizes(i: number): string {
-    if (this.#frame.width === 0) {
-      // Not yet observed: its box, which is its content box, as observed
-      // -- the stage has no padding (clack.css), or a photo's sizes would
-      // change once observed, and an engine may fetch it again.
-      const r = this.#stage.getBoundingClientRect();
-      this.#frame = { width: r.width, height: r.height };
-    }
+    const stage = this.#stageSize();
     const slide = this.#slides[i];
     const fit = this.getAttribute("fit") === "cover" ? "cover" : "contain";
     // The room the mount leaves the photo, if the layout has one.
     const room = (side: number): number => Math.max(0, side - 2 * this.#inset);
-    const w = slide ? drawnWidth(room(this.#frame.width), room(this.#frame.height), slide.width / slide.height, fit) : 0;
+    const w = slide ? drawnWidth(room(stage.width), room(stage.height), slide.width / slide.height, fit) : 0;
     return w > 0 ? `${w}px` : "100vw";
   }
 }
