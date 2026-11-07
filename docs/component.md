@@ -155,7 +155,9 @@ The element is 3:2 unless the page gives it a height.
 - **Never a half-loaded photo.** The next photo is fetched at the size it is drawn and
   decoded before it is shown; until then the current one stays, the counter already says
   where the visitor is going, and if it takes more than a moment a hairline sweeps the foot
-  of the frame. A newer request always wins over an older, slower one.
+  of the frame. A newer request always wins over an older, slower one. A show not yet in the
+  page, or hidden, fetches no photo until it is laid out: the size a photo is drawn at is not
+  known before then, and one fetched at a guess may be fetched twice.
 - **Loading ahead:** once a photo is on screen, the next, the previous, and the one after
   next are fetched. Photos no longer near are let go of (Firefox then stops their download;
   Chrome and Safari finish it into their cache).

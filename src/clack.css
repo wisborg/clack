@@ -436,7 +436,7 @@
 
 /* Gallery: wide margins (the theme's padding), a little air above and
    below the photo, the caption beneath. The air is the stage's margin, not
-   its padding: the stage's box is the room its photos have (#sizes). */
+   its padding, so that the stage is the room its photos have. */
 .show[data-layout="gallery"] .stage {
   margin-block: 8px;
 }

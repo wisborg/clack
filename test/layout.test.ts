@@ -13,6 +13,20 @@ function matted(mat: string, frame: string, bevel = false): string {
 
 const near = (a: number, b: number): boolean => Math.abs(a - b) < 0.6;
 
+/**
+ * A show made ready to be put in the page in the mat theme, its mat 30px
+ * and its frame 5px (unless the theme is set otherwise), 600px wide, and
+ * quick to cross-fade: its 3:2 photos drawn about 363px wide.
+ */
+function matShow(show: ClackShow, theme = true): ClackShow {
+  if (theme) show.setAttribute("theme", "mat");
+  show.style.setProperty("--clack-mat-width", "30px");
+  show.style.setProperty("--clack-frame-width", "5px");
+  show.style.setProperty("--clack-transition-duration", "40ms");
+  show.style.width = "600px";
+  return show;
+}
+
 test("the header shows the show's title and how many photos it has, only with a title", async () => {
   const show = makeShow([{}, {}, {}]);
   await settledOn(show, "1 of 3");
@@ -125,13 +139,6 @@ test("full-bleed: the photo has the whole width, and the caption is kept off the
   assert(caption.left - host.left >= 12, `the caption ${caption.left - host.left}px from the edge`);
 });
 
-test("the stage has no padding in any layout, so a photo's sizes are right before the stage is first measured", () => {
-  for (const theme of ["base", "gallery", "darkroom", "mat", "minimal", "contact-sheet"]) {
-    const stage = getComputedStyle(part(makeShow([{}], { theme }), ".stage"));
-    assertEqual(`${stage.paddingTop} ${stage.paddingRight} ${stage.paddingBottom} ${stage.paddingLeft}`, "0px 0px 0px 0px", theme);
-  }
-});
-
 test("on a show too small for its mat, the mat and frame give way, and the photo keeps two thirds", async () => {
   const show = makeShow([{ width: 300, height: 200 }], { theme: matted("80px", "20px") });
   show.style.width = "300px";
@@ -156,23 +163,17 @@ test("on a show too small for its mat, the mat and frame give way, and the photo
 
 test("a matted show asks for its first photo at the size it is drawn, mount and all", async () => {
   await resetImageLog();
-  // Of two sizes, the larger only for a photo drawn without its mount.
-  const dpr = devicePixelRatio;
-  const small = img(Math.round(400 * dpr), Math.round((400 * dpr) / 1.5));
-  const large = img(Math.round(600 * dpr), Math.round((600 * dpr) / 1.5));
-  const show = document.createElement("clack-show") as ClackShow;
-  show.setAttribute("theme", "mat");
-  show.style.setProperty("--clack-mat-width", "30px");
-  show.style.setProperty("--clack-frame-width", "5px");
-  show.style.setProperty("--clack-transition-duration", "40ms");
-  show.style.width = "600px";
+  // Of two sizes, the larger only for a photo drawn without its mount:
+  // drawn about 363px wide in the mount, 468px without.
+  const { large, sources } = twoSizes(400, 600);
+  const show = matShow(document.createElement("clack-show") as ClackShow);
   const fig = document.createElement("figure");
   const im = document.createElement("img");
   im.width = 300;
   im.height = 200;
   im.alt = "a photo";
   im.loading = "lazy"; // the markup's own, which a visitor never sees, not fetched
-  im.srcset = `${small} ${Math.round(400 * dpr)}w, ${large} ${Math.round(600 * dpr)}w`;
+  im.srcset = sources.map((s) => `${s.url} ${s.width}w`).join(", ");
   fig.append(im);
   show.append(fig);
   fixture().append(show);
@@ -239,11 +240,7 @@ test("slides and a theme set before Clack loads: the first photo is asked for in
   const early = inert.createElement("clack-show") as unknown as Record<string, unknown>;
   early["slides"] = [{ id: "s", alt: "early", width: 300, height: 200, sources }];
   early["theme"] = "mat";
-  const show = document.adoptNode(early as unknown as ClackShow);
-  show.style.setProperty("--clack-mat-width", "30px");
-  show.style.setProperty("--clack-frame-width", "5px");
-  show.style.setProperty("--clack-transition-duration", "40ms");
-  show.style.width = "600px";
+  const show = matShow(document.adoptNode(early as unknown as ClackShow), false);
   fixture().append(show);
   await settledOn(show, "1 of 1");
   const drawn = part(show, ".slide img").getBoundingClientRect().width;
@@ -259,12 +256,7 @@ test("under a page's transform, the first photo is asked for at its size as laid
   const card = fixture();
   card.style.transform = "scale(0.5)";
   card.style.transformOrigin = "0 0";
-  const show = document.createElement("clack-show") as ClackShow;
-  show.setAttribute("theme", "mat");
-  show.style.setProperty("--clack-mat-width", "30px");
-  show.style.setProperty("--clack-frame-width", "5px");
-  show.style.setProperty("--clack-transition-duration", "40ms");
-  show.style.width = "600px";
+  const show = matShow(document.createElement("clack-show") as ClackShow);
   card.append(show);
   // In the page, and not yet observed: the stage and the mat are read.
   show.slides = [{ id: "s", alt: "scaled", width: 300, height: 200, sources }];
@@ -328,7 +320,7 @@ test("a manifest's title of nothing but spaces is no title", async () => {
  * Every value each photo's sizes was set to while during runs: a photo
  * whose sizes changes after it is first set may be fetched twice.
  */
-async function sizesSet(during: () => Promise<void>): Promise<Map<HTMLImageElement, string[]>> {
+async function sizesSet(during: () => Promise<void>, onFirst?: (img: HTMLImageElement) => void): Promise<Map<HTMLImageElement, string[]>> {
   const proto = HTMLImageElement.prototype;
   const own = Object.getOwnPropertyDescriptor(proto, "sizes")!;
   const set: Map<HTMLImageElement, string[]> = new Map();
@@ -336,6 +328,7 @@ async function sizesSet(during: () => Promise<void>): Promise<Map<HTMLImageEleme
     ...own,
     set(this: HTMLImageElement, value: string) {
       const values = set.get(this) ?? [];
+      if (values.length === 0) onFirst?.(this);
       set.set(this, [...values, value]);
       own.set!.call(this, value);
     },
@@ -458,4 +451,123 @@ test("the stage's focus ring is drawn over the photo, inside the stage's edge", 
   const ring = getComputedStyle(stage, "::before");
   assertEqual(`${ring.outlineStyle} ${ring.outlineOffset} ${ring.zIndex} ${ring.position}`, "solid -2px 1 absolute", "a ring of its own, inside the edge, over the slides");
   assertEqual(getComputedStyle(stage).outlineStyle, "none", "not the stage's own, which the photo would cover");
+});
+
+test("a show hidden leaves its photos' sizes as they were", async () => {
+  const show = makeShow([{}, {}, {}]);
+  await settledOn(show, "1 of 3");
+  await sleep(200); // the others preloaded
+  const set = await sizesSet(async () => {
+    show.hidden = true;
+    await sleep(150); // observed with no size
+  });
+  assertEqual([...set.values()].flat().join(" "), "", "no size given while it has none");
+});
+
+test("slides given before the show is in the page are not fetched until it is laid out, then at their size", async () => {
+  await resetImageLog();
+  const { large, sources } = twoSizes(400, 600);
+  let show: ClackShow | undefined;
+  const set = await sizesSet(async () => {
+    show = matShow(document.createElement("clack-show") as ClackShow);
+    show.slides = [{ id: "s", alt: "built early", width: 300, height: 200, sources }];
+    await sleep(100);
+    assertEqual((await imageLog()).filter((e) => sources.some((s) => e.endsWith(s.url))).length, 0, "nothing fetched out of the page");
+    fixture().append(show);
+    await settledOn(show, "1 of 1");
+    await sleep(100);
+  });
+  assertSetOnce(set, show!);
+  assert(!(await imageLog()).some((e) => e.endsWith(large)), "the larger never asked for");
+});
+
+test("the header's count is there before the first photo is asked for", async () => {
+  const counts: string[] = [];
+  let show: ClackShow | undefined;
+  const set = await sizesSet(async () => {
+    const manifest = { format: "clack-manifest/1", title: "Coastlines", slides: [{ id: "a", alt: "counted", width: 300, height: 200, sources: [{ url: img(300, 200), width: 300 }] }] };
+    show = makeShow([], { src: echo(JSON.stringify(manifest), { path: "counted.json", delay: 200 }) });
+    await settledOn(show!, "1 of 1");
+  }, (img) => counts.push(`${img.alt}: ${part(show!, ".header-count").textContent}`));
+  assert(set.size > 0, "a photo was asked for");
+  assertEqual(counts[0], "counted: 1 photo", "the count, when the photo was first given its size");
+});
+
+test("a swipe back to the photo on screen, while another is coming, springs back", async () => {
+  const show = makeShow([{}, { delay: 1500 }, {}]);
+  await settledOn(show, "1 of 3");
+  void show.next(); // the second, still coming
+  const p = pointer(show);
+  const x = p.left + p.width * 0.2;
+  p.swipe(x, x + 320); // rightwards: back to the first, on screen
+  await waitFor(() => !figures(show).some((f) => f.style.getPropertyValue("--clack-drag")), "the photo back in place");
+  await waitFor(() => getComputedStyle(box(show)).overflowX === "visible", "nothing cut off");
+  assertEqual(show.index, 0, "on the first");
+});
+
+test("a drag cut short -- the slides taken away, or the show moved -- leaves nothing behind", async () => {
+  for (const cut of ["slides emptied", "moved"] as const) {
+    const show = makeShow([], {});
+    show.slides = Array.from({ length: 3 }, (_, i) => ({ id: `s${i}`, alt: `photo ${i + 1}`, width: 300, height: 200, sources: [{ url: img(300, 200), width: 300 }] }));
+    await settledOn(show, "1 of 3");
+    const p = pointer(show);
+    const x = p.left + p.width * 0.8;
+    p.send("pointerdown", x);
+    p.send("pointermove", x - 60);
+    assertEqual(getComputedStyle(box(show)).overflowX, "clip", `${cut}: while dragged`);
+    const figure = figures(show)[0]!;
+    if (cut === "slides emptied") {
+      show.slides = [];
+    } else {
+      const place = show.parentElement!;
+      show.remove();
+      place.append(show);
+    }
+    assertEqual(getComputedStyle(box(show)).overflowX, "visible", `${cut}: nothing cut off`);
+    assertEqual(figure.style.getPropertyValue("--clack-drag"), "", `${cut}: the photo back in place`);
+  }
+});
+
+test("a narrowed frame is never narrowed away", async () => {
+  const show = makeShow([{}], { theme: matted("80px", "2px") });
+  show.style.width = "320px";
+  await waitFor(() => box(show).dataset["layout"] === "matted", "the theme");
+  await settledOn(show, "1 of 1");
+  await waitFor(() => parseFloat(getComputedStyle(part(show, ".slide .mount")).paddingTop) < 80, "narrowed");
+  assertEqual(getComputedStyle(part(show, ".slide .mount")).borderTopWidth, "1px", "a pixel, at least");
+});
+
+test("a theme file already here, set before Clack loads with slides, is the one the first photo is asked for in", async () => {
+  const theme = matted("30px", "5px");
+  const first = makeShow([{}], { theme });
+  await waitFor(() => box(first).dataset["layout"] === "matted", "the theme, for the first show");
+  let show: ClackShow | undefined;
+  const set = await sizesSet(async () => {
+    const inert = document.implementation.createHTMLDocument("");
+    const early = inert.createElement("clack-show") as unknown as Record<string, unknown>;
+    early["slides"] = [{ id: "s", alt: "early, in a file's theme", width: 300, height: 200, sources: [{ url: img(300, 200), width: 300 }] }];
+    early["theme"] = theme;
+    show = document.adoptNode(early as unknown as ClackShow);
+    show.style.setProperty("--clack-transition-duration", "40ms");
+    show.style.width = "600px";
+    fixture().append(show);
+    assertEqual(box(show).dataset["layout"], "matted", "taken up at once");
+    await settledOn(show, "1 of 1");
+    await sleep(100);
+  });
+  assertSetOnce(set, show!);
+});
+
+test("a stage the page gives padding, counted in its width, is measured by the room inside it", async () => {
+  const page = new CSSStyleSheet();
+  page.replaceSync("clack-show.padded::part(stage) { box-sizing: border-box; padding: 12px; }");
+  document.adoptedStyleSheets = [...document.adoptedStyleSheets, page];
+  try {
+    const show = makeShow([{}], { class: "padded" });
+    await settledOn(show, "1 of 1");
+    const photo = part(show, ".slide img") as HTMLImageElement;
+    assertEqual(photo.sizes, `${Math.ceil(photo.getBoundingClientRect().width)}px`, "sizes, as drawn");
+  } finally {
+    document.adoptedStyleSheets = document.adoptedStyleSheets.filter((s) => s !== page);
+  }
 });
