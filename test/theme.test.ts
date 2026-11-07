@@ -90,17 +90,48 @@ test("Clack's built-in themes are the schema's, which are the tools'", () => {
   for (const name of builtinNames) assertEqual(builtinTheme(name)["format"], "clack-theme/1", `${name}: bundled`);
 });
 
+/**
+ * The property each compiled token is used in, as Clack's styles use it,
+ * or null for one only script reads. A custom property takes any text at
+ * all, so a value is checked where it will be used: a token not listed
+ * here fails, so that a new one is checked too.
+ */
+function usedAs(property: string, roles: readonly string[]): string | null {
+  const token = property.replace(/^--clack-/, "");
+  if (property === "color-scheme") return "color-scheme";
+  if (roles.includes(token)) return "color";
+  if (["serif", "sans", "mono", "caption-font", "header-font"].includes(token)) return "font-family";
+  if (/^padding-|-width$|^control-size$|^index-row-height$|^index-gap$/.test(token)) return "padding-left";
+  if (token === "shadow") return "box-shadow";
+  if (/-size$/.test(token)) return "font-size";
+  if (/-weight$/.test(token)) return "font-weight";
+  if (/-style$/.test(token)) return "font-style";
+  if (/-case$/.test(token)) return "text-transform";
+  if (/-tracking$/.test(token)) return "letter-spacing";
+  if (token === "caption-credit") return "display";
+  if (token === "transition-duration") return "animation-duration";
+  if (token === "transition") return null;
+  throw new Error(`${property}: not known to this test`);
+}
+
+/** Every value a compiled theme gives, valid CSS where it is used, its references to other tokens followed. */
+function assertTyped(label: string, properties: [string, string][]): void {
+  const values = new Map(properties);
+  const colors = builtinTheme("base")["colors"] as Record<string, Record<string, string>>;
+  const roles = Object.values(colors).flatMap((scheme) => Object.keys(scheme));
+  const kebab = (s: string): string => s.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
+  for (const [property, value] of properties) {
+    const as = usedAs(property, roles.map(kebab));
+    if (as === null) continue;
+    const resolved = value.replace(/var\((--clack-[a-z-]+)\)/g, (_, name: string) => values.get(name) ?? "");
+    assert(CSS.supports(as, resolved), `${label}: ${property}: ${value}, as ${as}, is not CSS`);
+  }
+}
+
 test("every built-in theme compiles to values CSS takes, every one of them", () => {
   for (const name of builtinNames) {
     const { properties, choices } = compile(builtinTheme(name));
-    const sheet = new CSSStyleSheet();
-    sheet.replaceSync(":host {}");
-    const style = (sheet.cssRules[0] as CSSStyleRule).style;
-    for (const [property, value] of properties) {
-      style.setProperty(property, value);
-      // A custom property takes anything; color-scheme is the one that is not.
-      assert(style.getPropertyValue(property) !== "", `${name}: ${property}: ${value} is not taken`);
-    }
+    assertTyped(name, properties);
     for (const token of ["canvas", "text", "padding-inline", "caption-size", "control-size", "transition-duration", "index-gap"]) {
       assert(properties.some(([p]) => p === `--clack-${token}`), `${name}: --clack-${token} is set`);
     }
@@ -285,6 +316,7 @@ test("a 0 without a unit, as a theme may write it, still makes valid CSS", async
     controls: { size: "0" },
     transition: { duration: "0" },
   });
+  assertTyped("zero", compile(readTheme(zero)).properties);
   const show = makeShow([{}, {}], { theme: echo(zero, { path: "zero.json" }) });
   await waitFor(() => token(show, "control-size") === "0px", "the theme");
   const button = show.shadowRoot!.querySelector("button")!.getBoundingClientRect();
@@ -306,6 +338,25 @@ test("a theme file is fetched only once its show is in the page", async () => {
   makeShow([{}]).replaceWith(show);
   await waitFor(() => box(show).dataset["layout"] === "matted", "the theme, once it is in");
   assertEqual(await fetchesOf("later.json"), 1, "fetched then");
+});
+
+test("in text from script, an escape and a half written as itself make a pair, as JSON.parse reads them", () => {
+  const theme = (name: string): string => `{"format":"clack-theme/1","name":"${name}"}`;
+  for (const [what, name] of [
+    ["an escaped high half, then a low one as itself", "\\uD83D\uDE00"],
+    ["a high half as itself, then an escaped low one", "\uD83D\\uDE00"],
+  ] as const) {
+    assertEqual(problemsOf(() => readTheme(theme(name))).length, 0, `${what}: accepted`);
+    assertEqual((readTheme(theme(name))["name"] as string).codePointAt(0), 0x1f600, `${what}: one character`);
+  }
+  for (const [what, name] of [
+    ["an escaped high half, then a high one as itself", "\\uD83D\uD83Dx"],
+    ["a high half as itself, then an escaped high one", "\uD83D\\uD83Dx"],
+    ["an escaped high half, then a whole pair as itself", "\\uD83D\uD83D\uDE00"],
+  ] as const) {
+    const problems = problemsOf(() => readTheme(theme(name)));
+    assert(problems.length === 1 && problems[0]!.message.includes("lone surrogate"), `${what}: ${JSON.stringify(problems)}`);
+  }
 });
 
 test("a lone surrogate written as itself, as script may give it, is refused as one", () => {
@@ -362,6 +413,43 @@ test("a theme file that fails after its show left the page says so once the show
     assert(errors[0]!.includes("404"), errors[0]!);
     assertEqual(box(show).dataset["layout"], "matted", "mat's kept");
   });
+});
+
+test("each show has a theme sheet of its own, so a page that changes one changes no other", () => {
+  const [a, b] = [makeShow([{}], { theme: "mat" }), makeShow([{}], { theme: "mat" })];
+  const sheet = a.shadowRoot!.adoptedStyleSheets[0]!;
+  (sheet.cssRules[0] as CSSStyleRule).style.setProperty("--clack-canvas", "rgb(255, 0, 0)");
+  assertEqual(token(a, "canvas"), "rgb(255, 0, 0)", "the one changed");
+  assert(token(b, "canvas") !== "rgb(255, 0, 0)", "not the other");
+  assert(token(makeShow([{}], { theme: "mat" }), "canvas") !== "rgb(255, 0, 0)", "nor a show made after");
+});
+
+test("a theme file on its way is not forgotten, however many others arrive meanwhile", async () => {
+  await resetImageLog();
+  const file = (name: string): string => JSON.stringify({ format: "clack-theme/1", name, extends: "mat" });
+  const first = echo(file("First"), { path: "first.json", delay: 1500 });
+  const a = makeShow([{}], { theme: first });
+  const others = Array.from({ length: 9 }, (_, i) => echo(file(`Other ${i}`), { path: `other-${i}.json` }));
+  const shows = others.map((theme) => makeShow([{}], { theme }));
+  await waitFor(() => shows.every((s) => box(s).dataset["layout"] === "matted"), "the others");
+  const b = makeShow([{}], { theme: first });
+  await waitFor(() => [a, b].every((s) => box(s).dataset["layout"] === "matted"), "the first, in both shows");
+  assertEqual(await fetchesOf("first.json"), 1, "the first fetched once");
+  // Of those here, only the last few asked for are kept.
+  const c = makeShow([{}], { theme: others[0]! });
+  await waitFor(() => box(c).dataset["layout"] === "matted", "the first of the others, again");
+  assertEqual(await fetchesOf("other-0.json"), 2, "the one asked for longest ago, forgotten, fetched again");
+});
+
+test("a theme file larger than a theme may be is refused, as the tools refuse it, however its size is found", async () => {
+  for (const declare of ["1", "0"]) {
+    await quietly(async (errors) => {
+      const show = makeShow([{}], { theme: "mat" });
+      show.theme = `/big?bytes=${64 * 1024 + 1}&declare=${declare}`;
+      await waitFor(() => errors.length > 0, "the console told");
+      assert(errors[0]!.includes("was refused") && errors[0]!.includes("is larger than 65536 bytes"), `declared ${declare}: ${errors[0]}`);
+    });
+  }
 });
 
 test("a theme file that failed while its show was out of the page is fetched again when asked for again meanwhile", async () => {
@@ -424,6 +512,8 @@ test("a transition lasts as long as CSS works out the token's time, calc() and a
   // One CSS cannot read is no time, not none.
   assertEqual(await crossfadeWith("700"), 700, "no unit: the 700ms fallback");
   assertEqual(await crossfadeWith("fast"), 700, "a word: the 700ms fallback");
+  // But a 0 without one, as a theme may write it, is none.
+  assertEqual(await crossfadeWith("0"), 0, "0: none");
 });
 
 test("a page's animation of the slide part does not change how long a transition lasts", async () => {

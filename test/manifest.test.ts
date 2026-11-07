@@ -154,9 +154,9 @@ test("load accepts JSON only, of a size that makes sense, from where it says", a
   assert((await refusal(echo(manifestOf(1), { type: "text/html" }))).includes("application/json"), "HTML is refused");
   assert((await refusal(echo("{}", { status: 404 }))).includes("404"), "a 404 is refused");
   const bigDeclared = await refusal(`/big?bytes=${maxBytes + 1}&declare=1`);
-  assert(bigDeclared.includes("larger"), `a declared size too large is refused: ${bigDeclared || "accepted"}`);
+  assert(bigDeclared.includes("was refused: (the whole file): is larger than"), `a declared size too large is refused: ${bigDeclared || "accepted"}`);
   const big = await refusal(`/big?bytes=${maxBytes + 1}`);
-  assert(big.includes("larger"), `an undeclared size too large is refused, as it comes: ${big || "accepted"}`);
+  assert(big.includes("was refused: (the whole file): is larger than"), `an undeclared size too large is refused, as it comes: ${big || "accepted"}`);
   assert((await refusal(echo("%FF", {}).replace("body=%25FF", "body=%FF"))).includes("not UTF-8"), "bytes that are not UTF-8 are refused");
   // After a redirect, relative URLs are relative to where it ended.
   const body = JSON.stringify({ format: "clack-manifest/1", slides: [{ id: "r", alt: "", width: 1, height: 1, sources: [{ url: "r.png", width: 1 }] }] });

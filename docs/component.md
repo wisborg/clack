@@ -178,7 +178,7 @@ needs one of them (`harbour.json`, `./harbour`). Spaces around the value are ign
 A theme file is fetched as a manifest is — once the show is in the page, served as JSON,
 cookies sent to the page's own origin only — and checked whole before anything of it is
 used; until it is here the show keeps the theme it had, and if it cannot be had or is
-refused — or takes more than 30 seconds to arrive — the show keeps that theme for good and
+refused — or takes more than 30 seconds to arrive, from the last time it was asked for — the show keeps that theme for good and
 the console says why, each problem by its place in the file. A show that is not in the page
 fetches nothing and says nothing. The last few files asked for are kept, so one is fetched once however many
 shows use it and however its URL is spelt (its fragment, `#…`, aside); a file that has changed is seen at a new URL

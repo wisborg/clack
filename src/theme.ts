@@ -21,7 +21,7 @@ import darkroom from "../themes/darkroom.json";
 import gallery from "../themes/gallery.json";
 import mat from "../themes/mat.json";
 import minimal from "../themes/minimal.json";
-import { checkJSON, decodeUTF8, fetchJSON, isObject, loneSurrogateIn, maxProblems, parseJSON, RefusedError, type Obj } from "./json";
+import { checkJSON, decodeUTF8, fetchJSON, isObject, loneSurrogateIn, maxProblems, parseJSON, put, RefusedError, type Obj } from "./json";
 import { Schema, sortProblems, type Problem } from "./schema";
 
 /** The built-in themes, by the name a page or a theme gives them. base is what every theme starts from. */
@@ -181,34 +181,31 @@ function chain(theme: Obj, depth: number): Obj {
   const beneath = parentName === "base" ? parent : chain(parent, depth + 1);
   const inherited: Obj = {};
   for (const k of Object.keys(beneath)) {
-    if (!own.has(k) && !k.startsWith("x-")) inherited[k] = beneath[k];
+    if (!own.has(k) && !k.startsWith("x-")) put(inherited, k, beneath[k]);
   }
   return merge(inherited, theme);
 }
 
 /**
- * over merged onto under, as a new value sharing nothing with either -- but
- * an extension's (x-) value, kept as it is: Clack never reads one, and it
- * may hold any key at all, "__proto__" among them, which a copy made by
- * assignment would turn into a prototype.
+ * over merged onto under, as a new value sharing nothing with either --
+ * but an extension's (x-) value, kept as it is given: Clack never reads
+ * one, and it is a theme's own, not merged with another's. Every key is
+ * set as a field (put), so none -- "__proto__" either, in an object the
+ * schema left open -- can become a prototype.
  */
 function merge(under: Obj, over: Obj): Obj {
   const out: Obj = {};
-  for (const k of Object.keys(under)) out[k] = clone(under[k]);
+  for (const k of Object.keys(under)) put(out, k, clone(under[k]));
   for (const k of Object.keys(over)) {
-    if (k.startsWith("x-")) {
-      out[k] = over[k];
-      continue;
-    }
     const a = out[k];
     const b = over[k];
-    out[k] = isObject(a) && isObject(b) ? merge(a, b) : clone(b);
+    put(out, k, k.startsWith("x-") ? b : isObject(a) && isObject(b) && Object.hasOwn(out, k) ? merge(a, b) : clone(b));
   }
   return out;
 }
 
 // An object copied, so no theme's resolution changes another's. No array
-// needs it: the schema allows them only under x- names, kept by reference.
+// needs it: the schema allows them only under x- names, kept as given.
 const clone = (v: unknown): unknown => (isObject(v) ? merge({}, v) : v);
 
 /** The colour schemes a resolved theme is shown in. */
@@ -418,7 +415,7 @@ export function compile(t: Obj): Compiled {
  * a theme that is refused, or an Error for one that could not be had.
  */
 export async function loadTheme(url: string, signal: AbortSignal): Promise<Obj> {
-  const { bytes } = await fetchJSON(url, signal, "theme", maxThemeBytes);
+  const { bytes } = await fetchJSON(url, signal, "theme", maxThemeBytes, (p) => new ThemeError(p));
   signal.throwIfAborted();
   return readThemeBytes(bytes);
 }

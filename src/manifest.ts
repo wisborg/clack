@@ -194,7 +194,7 @@ export async function load(url: string, signal: AbortSignal): Promise<Manifest> 
   // Decoded and parsed in one go, and the bytes let go of before the long
   // check and build begin: with their text, up to three times the
   // manifest's size.
-  let { bytes, url: at }: { bytes: Uint8Array | null; url: string } = await fetchJSON(url, signal, "manifest", maxBytes);
+  let { bytes, url: at }: { bytes: Uint8Array | null; url: string } = await fetchJSON(url, signal, "manifest", maxBytes, (p) => new ManifestError(p));
   await yieldToPage();
   signal.throwIfAborted();
   let text: string | null = decode(bytes!);

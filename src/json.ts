@@ -55,6 +55,14 @@ export function reportFailure(what: string, url: string, e: unknown, then: strin
 
 export type Obj = Record<string, unknown>;
 
+/**
+ * Sets o[k] to v as a field of its own, whatever k is: "__proto__" too,
+ * which an assignment would take as o's prototype.
+ */
+export function put(o: Obj, k: string, v: unknown): void {
+  Object.defineProperty(o, k, { value: v, enumerable: true, writable: true, configurable: true });
+}
+
 /** Whether v is a JSON object (not an array, not null). */
 export const isObject = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
 
@@ -118,54 +126,64 @@ export function checkJSON(v: unknown, path: string, depth: number, out: Problem[
 
 const escapeStep = (key: string | number): string => (typeof key === "number" ? String(key) : escape(key));
 
-/** A surrogate standing alone: in Unicode mode, a pair is one code point and does not match. */
-const loneSurrogate = /\p{Cs}/u;
+/** Half of a surrogate pair as an escape; or as itself, standing alone in the text (in Unicode mode, a pair is one code point). */
+const escapedHalf = /\\u[dD][89a-fA-F][0-9a-fA-F]{2}/g;
+const eitherHalf = /\\u[dD][89a-fA-F][0-9a-fA-F]{2}|\p{Cs}/gu;
 
 /**
- * Where JSON text holds a \u escape that is half of a surrogate pair
- * without its other half (formats.loneSurrogate), or -1. Looked for in the
- * text, as the tools look for it, and not in the parsed value: the walk of
- * that stops at a value nested too deep, or once enough problems are
- * found, and never sees a value that a repeated key replaced.
+ * Where JSON text holds half of a surrogate pair without its other half
+ * (formats.loneSurrogate), and whether it is an escape; or null. Looked for
+ * in the text, as the tools look for it, and not in the parsed value: the
+ * walk of that stops at a value nested too deep, or once enough problems
+ * are found, and never sees a value that a repeated key replaced.
  *
  * Only for text that parsed as JSON, with any comments gone: then every
  * backslash is in a string, and one starts an escape unless the
  * backslashes just before it pair it off. So the search is native -- for
  * each \u escape of a surrogate, not for every character -- which matters
- * in a manifest of many megabytes with an emoji written as a pair.
+ * in a manifest of many megabytes with an emoji written as a pair. Text
+ * decoded from bytes cannot hold a half as itself (UTF-8 cannot), so only
+ * text from script is searched for those too; there, as JSON.parse reads
+ * it, an escape and a half as itself can make a pair, either way round.
  */
-function loneSurrogateEscapeAt(text: string): number {
-  const escape = /\\u([dD][89a-fA-F][0-9a-fA-F]{2})/g;
-  for (let m = escape.exec(text); m; m = escape.exec(text)) {
+function loneSurrogateAt(text: string, fromScript: boolean): { index: number; escaped: boolean } | null {
+  /** The half starting at i, if one does: its code unit, and how long it is written. */
+  const halfAt = (i: number): { unit: number; length: number } | null => {
+    const c = text.charCodeAt(i);
+    if (c >= 0xd800 && c <= 0xdfff) return { unit: c, length: 1 };
+    if (c !== 0x5c || !/^\\u[dD][89a-fA-F][0-9a-fA-F]{2}$/.test(text.slice(i, i + 6))) return null;
     let slashes = 0;
-    while (text[m.index - 1 - slashes] === "\\") slashes++;
-    if (slashes % 2 === 1) continue; // "\\u...": a backslash, then letters
-    const unit = parseInt(m[1]!, 16);
-    if (unit >= 0xdc00) return m.index; // a low half with no high half before it
-    const low = /^\\u[dD][c-fC-F][0-9a-fA-F]{2}/.test(text.slice(m.index + 6, m.index + 12));
-    if (!low) return m.index; // a high half with no low half after it
-    escape.lastIndex = m.index + 12; // the pair, whole
+    while (text[i - 1 - slashes] === "\\") slashes++;
+    if (slashes % 2 === 1) return null; // "\\u...": a backslash, then letters
+    return { unit: parseInt(text.slice(i + 2, i + 6), 16), length: 6 };
+  };
+  const halves = new RegExp(fromScript ? eitherHalf : escapedHalf);
+  for (let m = halves.exec(text); m; m = halves.exec(text)) {
+    const half = halfAt(m.index);
+    if (!half) continue;
+    const lone = { index: m.index, escaped: half.length === 6 };
+    if (half.unit >= 0xdc00) return lone; // a low half with no high half before it
+    const low = halfAt(m.index + half.length);
+    if (!low || low.unit < 0xdc00) return lone; // a high half with no low half after it
+    halves.lastIndex = m.index + half.length + low.length; // the pair, whole
   }
-  return -1;
+  return null;
 }
 
 /**
- * The problem a lone surrogate in JSON text is, if it holds one: escaped
- * (loneSurrogateEscapeAt) -- or, in text given from script, written as
- * itself. Text decoded from bytes cannot hold one so (UTF-8 cannot), and
- * is not searched for it again: a manifest can be many megabytes. A lone
- * surrogate is the one problem reported, against the whole file, as the
- * tools report it (they find it before anything else can be checked); the
- * message says where.
+ * The problem a lone surrogate in JSON text is, if it holds one
+ * (loneSurrogateAt): the one problem reported, against the whole file, as
+ * the tools report it (they find it before anything else can be checked);
+ * the message says where.
  */
 export function loneSurrogateIn(text: string, fromScript: boolean): Problem | null {
-  const escaped = loneSurrogateEscapeAt(text);
-  const index = escaped >= 0 ? escaped : fromScript ? text.search(loneSurrogate) : -1;
-  if (index < 0) return null;
+  const lone = loneSurrogateAt(text, fromScript);
+  if (!lone) return null;
+  const { index } = lone;
   let line = 1;
   for (let at = text.indexOf("\n"); at >= 0 && at < index; at = text.indexOf("\n", at + 1)) line++;
   const column = index - text.lastIndexOf("\n", index - 1);
-  const what = escaped >= 0 ? "a lone surrogate escape" : "a lone surrogate";
+  const what = lone.escaped ? "a lone surrogate escape" : "a lone surrogate";
   return { path: "", message: `has a string that is not well-formed Unicode (${what}, at line ${line}, column ${column})` };
 }
 
@@ -201,14 +219,17 @@ export function decodeUTF8(bytes: Uint8Array): string | null {
  * JSON is accepted (by its Content-Type), and no more than maxBytes of it;
  * the request carries cookies to the page's own origin only, and can be
  * cancelled with signal. A response refused before it is read is
- * cancelled, not left to download. Throws an Error that says why.
+ * cancelled, not left to download. Throws an Error that says why -- for a
+ * file too large, the one refused makes, as the file's own checks refuse
+ * one (and the tools do, as a problem in it).
  */
-export async function fetchJSON(url: string, signal: AbortSignal, what: string, maxBytes: number): Promise<{ bytes: Uint8Array; url: string }> {
+export async function fetchJSON(url: string, signal: AbortSignal, what: string, maxBytes: number, refused: (problems: Problem[]) => Error): Promise<{ bytes: Uint8Array; url: string }> {
   const response = await fetch(url, { credentials: "same-origin", signal, headers: { Accept: "application/json" } });
-  const refuse = async (why: string): Promise<never> => {
+  const refuse = async (why: string | Error): Promise<never> => {
     await response.body?.cancel().catch(() => {});
-    throw new Error(`Clack: ${why}`);
+    throw typeof why === "string" ? new Error(`Clack: ${why}`) : why;
   };
+  const tooLarge = (): Error => refused([{ path: "", message: `is larger than ${maxBytes} bytes` }]);
   if (!response.ok) {
     await refuse(`the ${what} could not be fetched: ${response.status} ${response.statusText}`.trim());
   }
@@ -218,7 +239,7 @@ export async function fetchJSON(url: string, signal: AbortSignal, what: string, 
   }
   const declared = Number(response.headers.get("Content-Length") ?? "0");
   if (declared > maxBytes) {
-    await refuse(`the ${what} is larger than ${maxBytes} bytes`);
+    await refuse(tooLarge());
   }
   // Read in pieces, so a file that does not say its size, or says it
   // wrongly, still cannot be larger than the limit.
@@ -236,7 +257,7 @@ export async function fetchJSON(url: string, signal: AbortSignal, what: string, 
     if (done) break;
     if (size + value.byteLength > maxBytes) {
       await reader.cancel();
-      throw new Error(`Clack: the ${what} is larger than ${maxBytes} bytes`);
+      throw tooLarge();
     }
     if (buffer && size + value.byteLength <= buffer.byteLength) {
       buffer.set(value, size);

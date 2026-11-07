@@ -2,7 +2,7 @@
  * Slides: what Clack shows, read from the host page's markup or given from
  * script, in one shape whatever the source.
  */
-import { maxDepth } from "./json";
+import { maxDepth, put } from "./json";
 import { checkSlideRules, isColor, readThumbHash, rules } from "./rules";
 import { describeProblems, sortProblems } from "./schema";
 
@@ -402,7 +402,7 @@ function withoutNulls(v: unknown, fail: (why: string) => never): unknown {
         height = Math.max(height, r.height);
         // A field named __proto__ is copied as a field, not set as a
         // prototype, so the schema sees -- and refuses -- it, as in a manifest.
-        Object.defineProperty(o, k, { value: r.copy, enumerable: true, writable: true, configurable: true });
+        put(o, k, r.copy);
       }
       copy = o;
     }

@@ -98,75 +98,113 @@ function styles(): CSSStyleSheet {
   return sheet;
 }
 
-/** A theme as the show adopts it: its stylesheet, and its layout's choices. */
-interface Look {
-  sheet: CSSStyleSheet;
-  choices: Compiled["choices"];
-}
-
 /**
  * Every theme's stylesheet, so a show can tell them from the page's own:
  * a page that saved the shadow root's sheets and puts them back, an old
  * theme's among them, must not have that theme's outlast every later one.
  */
-const lookSheets = new WeakSet<CSSStyleSheet>();
+const themeSheets = new WeakSet<CSSStyleSheet>();
 
 /**
  * A compiled theme as a stylesheet of its own: one rule for :host, its
  * properties set one at a time through the CSS object model, so each value
- * is only ever a value.
+ * is only ever a value. One for each show, not shared: the shadow root is
+ * open, and a page that changes one show's sheet changes only that show.
  */
-function lookOf({ properties, choices }: Compiled): Look {
+function themeSheet({ properties }: Compiled): CSSStyleSheet {
   const sheet = new CSSStyleSheet();
-  lookSheets.add(sheet);
+  themeSheets.add(sheet);
   sheet.replaceSync(":host {}");
   const style = (sheet.cssRules[0] as CSSStyleRule).style;
   for (const [name, value] of properties) style.setProperty(name, value);
-  return { sheet, choices };
+  return sheet;
+}
+
+/** Where a show's theme is (#theme). */
+type ThemeState = { is: "shown" } | { is: "to-fetch"; url: string } | { is: "fetching" } | { is: "to-say"; error: unknown } | { is: "failed" };
+
+/** A theme file asked for: on its way, or here (or failed, and soon forgotten). */
+interface ThemeFile {
+  compiled: Promise<Compiled>;
+  settled: boolean;
+  /** Gives it the whole time to arrive again, from now: someone has asked for it now. */
+  wait(): void;
 }
 
 /**
- * The looks of the theme files asked for last, by URL, so a file is fetched
- * once however many shows ask for it -- and forgotten if it fails, so
- * asking again fetches it again. Only the last few are kept: a page that
- * previews many themes, or a new version of one at a new URL, does not
- * collect them all. A fetch is not cancelled when a show stops wanting it:
- * another may want it still, and a theme file is small.
+ * The theme files asked for, by URL, so a file is fetched once however
+ * many shows ask for it -- and forgotten if it fails, so asking again
+ * fetches it again. Of those that have arrived, only the last few asked
+ * for are kept: a page that previews many themes, or a new version of one
+ * at a new URL, does not collect them all; one on its way is kept until it
+ * arrives. A fetch is not cancelled when a show stops wanting it: another
+ * may want it still, and a theme file is small.
  */
-const themeFiles = new Map<string, Promise<Look>>();
+const themeFiles = new Map<string, ThemeFile>();
 const themeFilesKept = 8;
-/** How long a theme file may take to arrive, in ms: far more than a few kilobytes ever need. */
+/**
+ * How long a theme file may take to arrive, in ms, from the last time it
+ * was asked for: far more than a few kilobytes ever need. A server that
+ * never answers fails it in the end, so it can be asked for again.
+ */
 const themeFileTimeout = 30_000;
 
-function themeFile(url: string): Promise<Look> {
-  let look = themeFiles.get(url);
-  if (look) {
+function themeFile(url: string): Promise<Compiled> {
+  let file = themeFiles.get(url);
+  if (file) {
     themeFiles.delete(url); // to the end: asked for last
   } else {
-    // A server that never answers fails it in the end, so it can be asked for again.
-    look = loadTheme(url, AbortSignal.timeout(themeFileTimeout)).then((t) => lookOf(compile(t)));
-    look.catch(() => {
-      if (themeFiles.get(url) === look) themeFiles.delete(url);
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const compiled = loadTheme(url, controller.signal).then(compile);
+    const f: ThemeFile = {
+      compiled,
+      settled: false,
+      wait() {
+        if (f.settled) return;
+        clearTimeout(timer);
+        timer = setTimeout(() => controller.abort(new DOMException(`no answer in ${themeFileTimeout / 1000} seconds`, "TimeoutError")), themeFileTimeout);
+      },
+    };
+    const settle = (): void => {
+      f.settled = true;
+      clearTimeout(timer);
+      keepFewThemeFiles();
+    };
+    compiled.then(settle, () => {
+      if (themeFiles.get(url) === f) themeFiles.delete(url);
+      settle();
     });
+    file = f;
   }
-  themeFiles.set(url, look);
-  for (const oldest of themeFiles.keys()) {
-    if (themeFiles.size <= themeFilesKept) break;
-    themeFiles.delete(oldest);
-  }
-  return look;
+  file.wait();
+  themeFiles.set(url, file);
+  keepFewThemeFiles();
+  return file.compiled;
 }
 
-// The built-in themes' looks, each made once and shared by every show.
-const builtinLooks = new Map<string, Look>();
-
-function builtinLook(name: string): Look {
-  let look = builtinLooks.get(name);
-  if (!look) {
-    look = lookOf(compile(builtinTheme(name)));
-    builtinLooks.set(name, look);
+/** Forgets the theme files that have arrived but were asked for longest ago, past themeFilesKept of them. */
+function keepFewThemeFiles(): void {
+  let here = 0;
+  for (const f of themeFiles.values()) if (f.settled) here++;
+  for (const [url, f] of themeFiles) {
+    if (here <= themeFilesKept) break;
+    if (!f.settled) continue;
+    themeFiles.delete(url);
+    here--;
   }
-  return look;
+}
+
+// The built-in themes, each compiled once.
+const builtinThemes = new Map<string, Compiled>();
+
+function builtinCompiled(name: string): Compiled {
+  let compiled = builtinThemes.get(name);
+  if (!compiled) {
+    compiled = compile(builtinTheme(name));
+    builtinThemes.set(name, compiled);
+  }
+  return compiled;
 }
 
 /**
@@ -234,11 +272,11 @@ export class ClackShow extends HTMLElement {
   readonly #box: HTMLDivElement;
   /**
    * The theme asked for (a built-in's name, or a theme file's URL,
-   * resolved), whether it failed, and what is still to be done about it
-   * once the show is in the page: a file to fetch, or why there is none
-   * -- or why it failed, when it failed while the show was out of the page.
+   * resolved), and where it is: shown; a file to fetch once the show is in
+   * the page, or on its way; or failed -- said, or to be said once the
+   * show is in the page. Asking for one that failed again is a retry.
    */
-  #theme: { asked: string; failed: boolean; pending: { url: string } | { error: unknown } | null } = { asked: "", failed: false, pending: null };
+  #theme: { asked: string; state: ThemeState } = { asked: "", state: { is: "shown" } };
 
   #slides: Keyed[] = [];
   readonly #indexById = new Map<string, number>();
@@ -313,7 +351,7 @@ export class ClackShow extends HTMLElement {
     const root = this.attachShadow({ mode: "open" });
     const show = el("div", "show", "show");
     this.#box = show;
-    this.#look(builtinLook("base"));
+    this.#look(builtinCompiled("base"));
     // Focusable by a click (not by Tab), so the keys work after clicking
     // the photo; the controls are what Tab reaches.
     this.#stage = el("div", "stage", "stage");
@@ -667,19 +705,20 @@ export class ClackShow extends HTMLElement {
     const resolved = isBuiltin(given) || !/[./:]/.test(given) ? null : resolveHTTP(given, document.baseURI);
     const url = typeof resolved === "string" ? resolved.replace(/#.*$/s, "") : resolved;
     const asked = typeof url === "string" ? url : given;
-    if (asked === this.#theme.asked && !this.#theme.failed) return;
+    const was = this.#theme.state.is;
+    if (asked === this.#theme.asked && was !== "failed" && was !== "to-say") return;
     if (isBuiltin(asked)) {
-      this.#theme = { asked, failed: false, pending: null };
-      this.#look(builtinLook(asked));
+      this.#theme = { asked, state: { is: "shown" } };
+      this.#look(builtinCompiled(asked));
       return;
     }
-    const pending =
+    const state: ThemeState =
       url === null
-        ? { error: new Error(`it is not a built-in theme (they are ${builtinNames.join(", ")}), nor a URL`) }
+        ? { is: "to-say", error: new Error(`it is not a built-in theme (they are ${builtinNames.join(", ")}), nor a URL`) }
         : typeof url === "string"
-          ? { url }
-          : { error: new Error(`it is not an http(s) URL (${url.problem})`) };
-    this.#theme = { asked, failed: false, pending };
+          ? { is: "to-fetch", url }
+          : { is: "to-say", error: new Error(`it is not an http(s) URL (${url.problem})`) };
+    this.#theme = { asked, state };
     this.#takeUpTheme();
   }
 
@@ -690,46 +729,42 @@ export class ClackShow extends HTMLElement {
    */
   #takeUpTheme(): void {
     const theme = this.#theme;
-    const pending = theme.pending;
-    if (!this.#ready || pending === null) return;
-    theme.pending = null;
-    if ("error" in pending) {
-      this.#themeFailed(theme.asked, pending.error);
+    const state = theme.state;
+    if (!this.#ready) return;
+    if (state.is === "to-say") {
+      // Said, the show keeping the theme it has.
+      theme.state = { is: "failed" };
+      reportFailure("theme", theme.asked, state.error, "; the show keeps the theme it had");
       return;
     }
-    themeFile(pending.url).then(
-      (look) => {
-        if (this.#theme === theme) this.#look(look);
-      },
-      (e: unknown) => {
+    if (state.is !== "to-fetch") return;
+    theme.state = { is: "fetching" };
+    themeFile(state.url).then(
+      (compiled) => {
         if (this.#theme !== theme) return;
-        if (this.#ready) {
-          this.#themeFailed(pending.url, e);
-        } else {
-          // Said once the show is back in the page, if it left meanwhile;
-          // failed already, so asking again meanwhile fetches it again.
-          theme.failed = true;
-          theme.pending = { error: e };
-        }
+        theme.state = { is: "shown" };
+        this.#look(compiled);
+      },
+      (error: unknown) => {
+        if (this.#theme !== theme) return;
+        // Said now -- or once the show is back in the page, if it left
+        // meanwhile.
+        theme.state = { is: "to-say", error };
+        this.#takeUpTheme();
       },
     );
   }
 
-  /** The theme asked for could not be had, or was refused: said to the console, the show keeping the theme it has. */
-  #themeFailed(name: string, e: unknown): void {
-    this.#theme.failed = true;
-    reportFailure("theme", name, e, "; the show keeps the theme it had");
-  }
-
   /**
-   * Shows the show in a look: its stylesheet before Clack's own, which no
+   * Shows the show in a theme: a stylesheet of its own before Clack's, which no
    * theme can override, and its choices on the show's box. Any sheet the
    * page has adopted into the shadow root itself is kept, after Clack's.
    */
-  #look({ sheet, choices }: Look): void {
+  #look(compiled: Compiled): void {
     const root = this.shadowRoot!;
-    const pages = root.adoptedStyleSheets.filter((s) => !lookSheets.has(s) && s !== styles());
-    root.adoptedStyleSheets = [sheet, styles(), ...pages];
+    const pages = root.adoptedStyleSheets.filter((s) => !themeSheets.has(s) && s !== styles());
+    root.adoptedStyleSheets = [themeSheet(compiled), styles(), ...pages];
+    const { choices } = compiled;
     for (const [name, value] of Object.entries(choices)) this.#box.dataset[name] = value;
   }
 
@@ -1135,8 +1170,15 @@ export class ClackShow extends HTMLElement {
     if (document.visibilityState === "hidden") {
       return 0;
     }
-    const style = getComputedStyle(this);
+    // The tokens as .timing inherits them.
+    const style = getComputedStyle(this.#timing);
     if (style.getPropertyValue("--clack-transition").trim() === "none") {
+      return 0;
+    }
+    // A 0 without a unit, as a theme may write it, and so a page: none,
+    // though CSS takes no time without one, and calc() below would drop it.
+    const token = style.getPropertyValue("--clack-transition-duration").trim();
+    if (/^[+-]?(?:0+\.?0*|\.0+)$/.test(token)) {
       return 0;
     }
     // As CSS reads the token -- a theme's, or any time the page sets,
@@ -1144,7 +1186,7 @@ export class ClackShow extends HTMLElement {
     // one that is not a time, which leaves CSS's initial 0s (or auto, in
     // an engine that has it), is told from 0s; computed, it is always
     // seconds. A show out of the page has no computed style at all.
-    const s = parseFloat(getComputedStyle(this.#timing).animationDuration);
+    const s = parseFloat(style.animationDuration);
     const ms = s > 0 ? Math.round(s * 1000) - 1000 : NaN;
     return crossfade(ms, matchMedia("(prefers-reduced-motion: reduce)").matches);
   }
