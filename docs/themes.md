@@ -209,14 +209,21 @@ places, for every one.
 ## What Clack draws of a theme, so far
 
 Every token is checked and compiled, but the show does not yet draw all of them. It does
-draw the colours `canvas`, `surface`, `text`, `muted`, `hairline`, `accent`, `control`,
-`controlActive`, `mat` and `frame` (not yet the label's three or the film's three), the
-scheme, the padding, the four layouts, the shadow, the mat and its bevel, the frame, the
-header and its type, the caption's type and whether it shows the credit, the controls'
-size, and the transition's duration, or `none`. The caption card, floating controls and
-their reveal, the progress line, the `slide` transition (a crossfade until then), the
-details panel and the index are still to come; until floating controls are, `full-bleed`
-has its caption and controls beneath the photo.
+draw every colour but the film's three, the scheme, the padding, the four layouts, the
+shadow, the mat and its bevel, the frame, the header and its type, the caption's type,
+whether it shows the credit, and its card, the controls' style, size and reveal, and the
+transition. The progress line (with auto-play), the details panel and the index are still
+to come.
+
+The caption card is drawn only in a show with captions; a slide with none keeps its place,
+with no card. Floating controls are a bar over the foot of the photo, holding the caption
+and the controls; on a show 640px wide or less, it runs from side to side and holds only the
+controls (a slide's title is still read out as the visitor moves to it). Controls shown
+`on-activity` appear when the pointer moves or presses, a key is pressed, or focus arrives,
+and go three seconds after the last of it, unless the pointer rests on them or focus is
+among them; until then they are not in the pointer's way, but are always in the keyboard's.
+In `floating`, the whole bar comes and goes; in `plain`, the controls do, and the caption
+stays.
 
 In `matted`, the frame casts its own shadow, and `layout.shadow` is not drawn. The mat and
 the frame are measured as of the show, as the schema says — `cqi` in either is of the

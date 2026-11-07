@@ -14,7 +14,9 @@ go run ./tools/dev shots                       # every page, light and dark, des
 (`go run ./tools/dev shots -set demo`), to compare with the mock-ups at the same sizes:
 `slideshow` from markup, and a page for each theme (`gallery`, `darkroom`, `mat`,
 `minimal`) from one manifest of the photographs, `coastlines.json`, which the tools check as
-they check the examples.
+they check the examples. Darkroom and Minimal show their controls only for the visitor's
+activity, which a screenshot has none of; `minimal-shown` is Minimal with its floating bar
+always shown (`minimal-shown.json`), to see it.
 
 `?scheme=light` or `?scheme=dark` forces a scheme; otherwise the page follows the system.
 Darkroom is dark by nature and ignores it.

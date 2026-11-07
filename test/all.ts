@@ -12,6 +12,7 @@ import "./schemas.test";
 import "./thumbhash.test";
 import "./theme.test";
 import "./layout.test";
+import "./around.test";
 
 declare global {
   interface Window {

@@ -162,8 +162,9 @@ The element is 3:2 unless the page gives it a height.
 - **Loading ahead:** once a photo is on screen, the next, the previous, and the one after
   next are fetched. Photos no longer near are let go of (Firefox then stops their download;
   Chrome and Safari finish it into their cache).
-- **Crossfade** between photos, shortened when the visitor asks for reduced motion, and
-  skipped — or finished at once — while the page is hidden.
+- **A crossfade or a slide** between photos, as the theme says. With reduced motion a slide
+  becomes a short crossfade, and a crossfade is shortened; while the page is hidden, the
+  change is made at once.
 - **A photo that cannot be loaded** keeps its place, with its description and a note
   saying so; the show goes on.
 - **Screen readers** hear the show as a carousel of slides ("3 of 24"), and the visitor's

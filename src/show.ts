@@ -254,6 +254,49 @@ export function crossfade(ms: number, reduced: boolean): number {
   return Math.min(given, reduced ? 200 : 3000);
 }
 
+/**
+ * The transition a theme asks for (transition.type, and its duration in
+ * ms as CSS computes it: see crossfade), as it is played: none for none,
+ * or none long; and with reduced motion, nothing slides -- a short
+ * crossfade instead.
+ */
+export function transitionOf(type: string, ms: number, reduced: boolean): { type: "crossfade" | "slide"; ms: number } | null {
+  const length = crossfade(ms, reduced);
+  if (type === "none" || length <= 0) return null;
+  return { type: type === "slide" && !reduced ? "slide" : "crossfade", ms: length };
+}
+
+/** How long controls shown for the visitor's activity stay once it stops, in ms. */
+const revealFor = 3000;
+
+/**
+ * How one photo gives way to the next: the keyframes of the one coming in
+ * and the one going out. exit is the way the one going out leaves on
+ * screen (-1 to the left); offset, where a swipe let go of it, if one did.
+ * A crossfade fades one into the other (a swiped photo carrying on a
+ * little the way the finger went); a slide moves both along by a whole
+ * stage, the next coming in from the side the last leaves by.
+ */
+export function transitionFrames(type: "crossfade" | "slide", exit: -1 | 1, offset: number | null): { incoming: Keyframe[]; outgoing: Keyframe[] } {
+  const from = `translateX(${offset ?? 0}px)`;
+  if (type === "slide") {
+    return {
+      incoming: [{ transform: `translateX(${-exit * 100}%)` }, { transform: "translateX(0)" }],
+      outgoing: [{ transform: from }, { transform: `translateX(${exit * 100}%)` }],
+    };
+  }
+  return {
+    incoming: [{ opacity: 0 }, { opacity: 1 }],
+    outgoing:
+      offset === null
+        ? [{ opacity: 1 }, { opacity: 0 }]
+        : [
+            { opacity: 1, transform: from },
+            { opacity: 0, transform: `translateX(${exit * 12}%)` },
+          ],
+  };
+}
+
 function el<K extends keyof HTMLElementTagNameMap>(name: K, className: string, part = ""): HTMLElementTagNameMap[K] {
   const e = document.createElement(name);
   e.className = className;
@@ -393,6 +436,8 @@ export class ClackShow extends HTMLElement {
   #swipes: Swipes | null = null;
   /** Stops listening for the screen's pixel ratio to change (#watchRatio). */
   #unwatchRatio: (() => void) | null = null;
+  /** Hides controls shown for the visitor's activity once it stops (#onActivity). */
+  #idle: ReturnType<typeof setTimeout> | undefined;
   /** Where the photo was, springing back, when a drag caught it again: where the drag starts from. */
   #caught = 0;
   /** The photo springing back after a drag that went nowhere, while it does. */
@@ -477,6 +522,9 @@ export class ClackShow extends HTMLElement {
     root.append(show, this.#live, this.#nameBox, probes);
 
     this.addEventListener("keydown", (e) => this.#onKey(e));
+    for (const type of ["pointermove", "pointerdown", "keydown", "focusin"] as const) {
+      this.addEventListener(type, this.#onActivity, { passive: true });
+    }
   }
 
   #button(label: string, name: string, onClick: () => void): HTMLButtonElement {
@@ -538,6 +586,9 @@ export class ClackShow extends HTMLElement {
 
   disconnectedCallback(): void {
     this.#ready = false;
+    // The visitor's activity, here, is over.
+    clearTimeout(this.#idle);
+    this.#box.classList.remove("active");
     // A drag the visitor was in the middle of ends here: its end will not
     // be heard.
     this.#endDrag();
@@ -1243,16 +1294,16 @@ export class ClackShow extends HTMLElement {
       this.#announce(index + 1, this.#slides.length, slide);
     }
 
-    const duration = old ? this.#duration() : 0;
-    if (old && duration > 0) {
-      const timing: KeyframeAnimationOptions = { duration, easing: "cubic-bezier(0.4, 0, 0.2, 1)" };
-      const outgoing: Keyframe[] = how.swipe
-        ? [
-            { opacity: 1, transform: `translateX(${how.swipe.offset}px)` },
-            { opacity: 0, transform: `translateX(${how.swipe.exit * 12}%)` },
-          ]
-        : [{ opacity: 1 }, { opacity: 0 }];
-      const animations = [figure.animate([{ opacity: 0 }, { opacity: 1 }], timing), old.animate(outgoing, timing)];
+    const transition = old ? this.#transition() : null;
+    if (old && transition) {
+      const timing: KeyframeAnimationOptions = { duration: transition.ms, easing: "cubic-bezier(0.4, 0, 0.2, 1)" };
+      // The way the old photo leaves: the finger's, or the way the visitor
+      // is going -- leftwards for the next, where the text runs left to right.
+      const exit = how.swipe ? how.swipe.exit : ((-this.#direction * (this.#rtl() ? -1 : 1)) as -1 | 1);
+      const frames = transitionFrames(transition.type, exit, how.swipe ? how.swipe.offset : null);
+      // Cut off at the show's sides while they slide (#settleMoving).
+      if (transition.type === "slide") this.#box.classList.add("moving");
+      const animations = [figure.animate(frames.incoming, timing), old.animate(frames.outgoing, timing)];
       const running: Running = {
         animations,
         done: () => {
@@ -1311,25 +1362,25 @@ export class ClackShow extends HTMLElement {
   }
 
   /**
-   * The crossfade's length in milliseconds, from the theme, shortened when
-   * motion is reduced, and none while the page is hidden: nobody sees it,
-   * and an engine may not run animations in a hidden page at all, which
-   * would leave the old slide in place until the page is shown again.
+   * How one photo gives way to the next, from the theme -- a crossfade or a
+   * slide, and how long it takes -- or null for none at once. With reduced
+   * motion, a slide is a crossfade, and short; and there is none while the
+   * page is hidden: nobody sees it, and an engine may not run animations in
+   * a hidden page at all, which would leave the old slide in place until
+   * the page is shown again.
    */
-  #duration(): number {
+  #transition(): { type: "crossfade" | "slide"; ms: number } | null {
     if (document.visibilityState === "hidden") {
-      return 0;
+      return null;
     }
     // The tokens as the probe inherits them.
     const style = getComputedStyle(this.#probe);
-    if (style.getPropertyValue("--clack-transition").trim() === "none") {
-      return 0;
-    }
+    const type = style.getPropertyValue("--clack-transition").trim();
     // A 0 without a unit, as a theme may write it, and so a page: none,
     // though CSS takes no time without one, and calc() below would drop it.
     const token = style.getPropertyValue("--clack-transition-duration").trim();
     if (/^[+-]?(?:0+\.?0*|\.0+)$/.test(token)) {
-      return 0;
+      return null;
     }
     // As CSS reads the token -- a theme's, or any time the page sets,
     // calc() and all -- a second longer (see .probe in clack.css), so that
@@ -1337,8 +1388,7 @@ export class ClackShow extends HTMLElement {
     // an engine that has it), is told from 0s; computed, it is always
     // seconds. A show out of the page has no computed style at all.
     const s = parseFloat(style.animationDuration);
-    const ms = s > 0 ? Math.round(s * 1000) - 1000 : NaN;
-    return crossfade(ms, matchMedia("(prefers-reduced-motion: reduce)").matches);
+    return transitionOf(type, s > 0 ? Math.round(s * 1000) - 1000 : NaN, matchMedia("(prefers-reduced-motion: reduce)").matches);
   }
 
   #caption(slide: Keyed | null): void {
@@ -1348,6 +1398,31 @@ export class ClackShow extends HTMLElement {
     applyLang(this.#credit, slide ? slide.creditLang : null);
     this.#title.textContent = slide?.title ?? "";
     this.#credit.textContent = slide?.credit ?? "";
+    // Nothing to say: its place kept, but no card drawn for it.
+    this.#title.parentElement!.classList.toggle("blank", !slide?.title && !slide?.credit);
+  }
+
+  /**
+   * The visitor is here: the pointer moved or pressed, a key, focus. In a
+   * theme whose controls appear only then (controls.reveal on-activity),
+   * they are shown, and hidden again a few seconds after the last of it --
+   * unless the pointer rests on them, or focus is among them (clack.css
+   * shows them then whatever this says).
+   */
+  readonly #onActivity = (): void => {
+    if (this.#box.dataset["reveal"] !== "on-activity") return;
+    this.#box.classList.add("active");
+    clearTimeout(this.#idle);
+    this.#idle = setTimeout(() => this.#onIdle(), revealFor);
+  };
+
+  #onIdle(): void {
+    const below = this.#box.querySelector(".below")!;
+    if (below.matches(":hover")) {
+      this.#idle = setTimeout(() => this.#onIdle(), revealFor);
+      return;
+    }
+    this.#box.classList.remove("active");
   }
 
   #updateControls(): void {

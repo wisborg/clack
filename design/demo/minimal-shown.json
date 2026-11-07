@@ -1,0 +1,8 @@
+{
+  "$schema": "../../schema/theme-1.schema.json",
+  "format": "clack-theme/1",
+  "name": "Minimal, controls shown",
+  "description": "Minimal with its floating controls always shown, so the demo's screenshots show the bar, which Minimal itself shows only for the visitor's activity.",
+  "extends": "minimal",
+  "controls": { "reveal": "always" }
+}

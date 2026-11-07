@@ -141,8 +141,10 @@ test("in every layout but matted, there is no mount: the photo is the box", asyn
   }
 });
 
-test("full-bleed: the photo has the whole width, and the caption is kept off the edges", async () => {
-  const show = makeShow([{ width: 300, height: 100, title: "Wide" }], { theme: "minimal" });
+test("full-bleed with plain controls: the photo has the whole width, and the caption beneath is kept off the edges", async () => {
+  const theme = echo(JSON.stringify({ format: "clack-theme/1", name: "Bleed", extends: "minimal", controls: { style: "plain", reveal: "always" } }), { path: "bleed-plain.json" });
+  const show = makeShow([{ width: 300, height: 100, title: "Wide" }], { theme });
+  await waitFor(() => box(show).dataset["controls"] === "plain" && box(show).dataset["layout"] === "full-bleed", "the theme");
   await settledOn(show, "1 of 1");
   const host = show.getBoundingClientRect();
   const photo = part(show, ".slide img").getBoundingClientRect();

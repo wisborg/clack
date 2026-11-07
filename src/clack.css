@@ -507,6 +507,101 @@
     0 0 0 var(--clack-bevel) color-mix(in srgb, var(--clack-mat), #fff 60%);
 }
 
+/* ---- Around the photo: the caption card, floating controls ------------ */
+
+/* The caption on a printed card, in the label's colours whatever the
+   wall: a museum label (caption.card). Only in a show with captions; a
+   slide with none keeps its place, with no card drawn. */
+.show[data-card="true"]:is([data-titles="true"], [data-credits="true"]) .caption {
+  justify-self: start;
+  padding: 10px 14px 11px;
+  background: var(--clack-label);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.12);
+  color: var(--clack-label-text);
+}
+
+.show[data-card="true"] .caption.blank {
+  visibility: hidden;
+}
+
+.show[data-card="true"] .credit {
+  font-size: 11.5px;
+  color: var(--clack-label-muted);
+}
+
+/* Floating: the caption and controls on a translucent bar over the foot
+   of the photo (controls.style), the photo having the whole stage. */
+.show[data-controls="floating"] .below {
+  position: absolute;
+  left: 50%;
+  bottom: clamp(12px, 2cqi, 20px);
+  translate: -50% 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: calc(100% - 24px);
+  box-sizing: border-box;
+  padding: 6px 8px 6px 18px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--clack-surface) 72%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  backdrop-filter: blur(18px) saturate(1.4);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.12),
+    0 8px 24px rgb(0 0 0 / 0.16);
+  white-space: nowrap;
+}
+
+.show[data-controls="floating"] .title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.show[data-controls="floating"] .counter {
+  min-width: 48px;
+}
+
+/* On a narrow show, the bar runs from side to side, and holds only the
+   controls: the title is still read out at each slide. */
+@container (max-width: 640px) {
+  .show[data-controls="floating"] .below {
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    translate: none;
+    max-width: none;
+    justify-content: center;
+    padding: 6px 8px;
+  }
+
+  .show[data-controls="floating"] .caption {
+    display: none;
+  }
+}
+
+/* Shown only for the visitor's activity (controls.reveal: #onActivity):
+   the controls -- in floating, the whole bar -- unseen and not in the
+   pointer's way until the pointer moves or a key or focus arrives, and
+   again a few seconds after. Still there for the keyboard, and shown
+   while focus is among them. */
+.controls,
+.show[data-controls="floating"] .below {
+  transition: opacity 240ms var(--clack-ease);
+}
+
+.show[data-reveal="on-activity"]:not(.active) .controls:not(:focus-within),
+.show[data-reveal="on-activity"][data-controls="floating"]:not(.active) .below:not(:focus-within) {
+  opacity: 0;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .controls,
+  .show[data-controls="floating"] .below {
+    transition: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .stage.loading::after {
     animation: clack-appear 200ms 400ms both;
