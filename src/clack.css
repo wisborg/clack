@@ -51,8 +51,10 @@
    Only with a title, and only if the theme shows it. */
 .header {
   grid-row: 1;
-  /* Painted after the stage, and so over any shadow it casts. */
+  /* Over any shadow the stage casts, though it comes first: the stage is
+     positioned, and would otherwise be painted after it. */
   position: relative;
+  z-index: 1;
   display: flex;
   justify-content: space-between;
   align-items: baseline;
@@ -163,6 +165,7 @@
 
 /* The first photo's place while it loads: its proportions, in its colour. */
 .fill {
+  min-height: 0;
   width: min(var(--clack-room-w), var(--clack-room-h) * var(--clack-aspect));
   aspect-ratio: var(--clack-aspect);
   background: var(--clack-placeholder, var(--clack-hairline));
@@ -201,6 +204,10 @@
 /* A photo that could not be loaded keeps its place, and says so. */
 .missing {
   box-sizing: border-box;
+  /* Never taller than its proportions, however much it says, so it stays
+     within the stage, which does not clip (its shadows fall outside). */
+  min-height: 0;
+  overflow: hidden;
   display: grid;
   place-content: center;
   justify-items: center;
@@ -261,9 +268,10 @@
 
 .below {
   grid-row: 3;
-  /* Painted after the stage (which is positioned, as each slide is), and
-     so over a shadow falling from the photo or its frame. */
+  /* Over a shadow falling from the photo or its frame: the stage is
+     positioned, as each slide is. */
   position: relative;
+  z-index: 1;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -457,9 +465,12 @@
    2px, in its own shade on the top and left, catching the light on the
    bottom and right. Shadows, so the photo's own box is not changed. */
 .show[data-layout="matted"][data-bevel="true"] :is(.slide img, .fill, .missing) {
+  /* No wider than the mat it is drawn in, which a small show narrows. */
+  --clack-bevel: min(2px, var(--clack-mat-inset));
   box-shadow:
-    -1px -1px 0 1px color-mix(in srgb, var(--clack-mat), #000 19%),
-    0 0 0 2px color-mix(in srgb, var(--clack-mat), #fff 60%);
+    calc(var(--clack-bevel) / -2) calc(var(--clack-bevel) / -2) 0 calc(var(--clack-bevel) / 2)
+      color-mix(in srgb, var(--clack-mat), #000 19%),
+    0 0 0 var(--clack-bevel) color-mix(in srgb, var(--clack-mat), #fff 60%);
 }
 
 @media (prefers-reduced-motion: reduce) {

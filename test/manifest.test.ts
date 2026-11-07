@@ -534,10 +534,10 @@ test("a photo kept across manifests takes the new one's language", async () => {
 test("the manifest's title names the show in the manifest's language", async () => {
   const s = show({ src: echo(manifestOf(1)) });
   await waitFor(() => s.count === 1, "the manifest");
-  // The header's title, which names it, shown or not.
-  const name = s.shadowRoot!.querySelector<HTMLElement>(".header-title")!;
+  const name = s.shadowRoot!.querySelector<HTMLElement>(".name")!;
   assertEqual(name.textContent, "From a manifest", "the title");
   assertEqual(name.getAttribute("lang"), "da", "its language");
+  assertEqual(name.hidden, true, "hidden: it names, it is not shown");
 });
 
 test("random URLs: whatever the schema's pattern accepts, the browser resolves", () => {
@@ -673,8 +673,8 @@ test("a relative src means what it meant when it was set, wherever the page goes
 
 test("a manifest with no language leaves the show's name in the page's", async () => {
   const s = show({ src: echo(JSON.stringify({ format: "clack-manifest/1", title: "Coast", slides: [] })) });
-  await waitFor(() => s.shadowRoot!.querySelector(".header-title")!.textContent === "Coast", "the name");
-  assertEqual(s.shadowRoot!.querySelector(".header-title")!.hasAttribute("lang"), false, "inherited, not unknown");
+  await waitFor(() => s.shadowRoot!.querySelector(".name")!.textContent === "Coast", "the name");
+  assertEqual(s.shadowRoot!.querySelector(".name")!.hasAttribute("lang"), false, "inherited, not unknown");
 });
 
 test("slides withdrawn while the show is out of the page are back as soon as it is", () => {

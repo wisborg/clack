@@ -145,7 +145,7 @@ test("on a show too small for its mat, the mat and frame give way, and the photo
   assert(side <= most + 0.6, `each side ${side}px, at most a sixth of ${Math.min(stage.width, stage.height)}px`);
   assert(parseFloat(style.paddingTop) < 80 && parseFloat(style.borderTopWidth) < 20, `the mat and frame narrowed together: ${style.paddingTop}, ${style.borderTopWidth}`);
   // In proportion, the frame in whole pixels.
-  assert(Math.abs(parseFloat(style.borderTopWidth) - side / 5) <= 0.5, `in proportion: ${style.paddingTop}, ${style.borderTopWidth}`);
+  assert(Math.abs(parseFloat(style.borderTopWidth) - side / 5) <= 1, `in proportion: ${style.paddingTop}, ${style.borderTopWidth}`);
   const photo = part(show, ".slide img").getBoundingClientRect();
   assert(photo.width > 0 && photo.height >= (stage.height * 2) / 3 - 1, `the photo ${photo.width}×${photo.height}, in a stage ${stage.width}×${stage.height}`);
   const framed = mount.getBoundingClientRect();
@@ -203,6 +203,122 @@ test("a change of theme to a matted one changes a photo's sizes once, to what it
 
 test("a label of nothing but spaces is no title", async () => {
   const show = makeShow([{}], { label: "   " });
+  await settledOn(show, "1 of 1");
+  assert(part(show, ".header").hidden, "no header");
+});
+
+/** Two sizes of one photo, as a manifest or a script gives them: the smaller wide enough only for a photo drawn at most `fits` px wide. */
+function twoSizes(fits: number, larger: number): { small: string; large: string; sources: { url: string; width: number }[] } {
+  const dpr = devicePixelRatio;
+  const w = (css: number): number => Math.round(css * dpr);
+  const small = img(w(fits), Math.round(w(fits) / 1.5));
+  const large = img(w(larger), Math.round(w(larger) / 1.5));
+  return { small, large, sources: [{ url: small, width: w(fits) }, { url: large, width: w(larger) }] };
+}
+
+test("a manifest's title, shown in the header, is counted in the first photo's size", async () => {
+  await resetImageLog();
+  // 600px wide, its stage about 306px tall without the header and 270px
+  // with it: a 3:2 photo drawn about 459px wide, or about 405px.
+  const { large, sources } = twoSizes(430, 700);
+  const manifest = { format: "clack-manifest/1", title: "Coastlines", slides: [{ id: "a", alt: "", width: 300, height: 200, sources }] };
+  // Late enough that the stage is observed first, without the header.
+  const show = makeShow([], { src: echo(JSON.stringify(manifest), { path: "titled.json", delay: 300 }) });
+  await settledOn(show, "1 of 1");
+  const drawn = part(show, ".slide img").getBoundingClientRect().width;
+  assert(drawn <= 430, `drawn at ${drawn}px, which the smaller covers`);
+  await sleep(200);
+  assert(!(await imageLog()).some((e) => e.endsWith(large)), "the larger never asked for");
+});
+
+test("slides and a theme set before Clack loads: the first photo is asked for in the theme, mount and all", async () => {
+  await resetImageLog();
+  // Drawn about 363px wide in a 30px mat and 5px frame; 468px without.
+  const { large, sources } = twoSizes(400, 600);
+  const inert = document.implementation.createHTMLDocument("");
+  const early = inert.createElement("clack-show") as unknown as Record<string, unknown>;
+  early["slides"] = [{ id: "s", alt: "early", width: 300, height: 200, sources }];
+  early["theme"] = "mat";
+  const show = document.adoptNode(early as unknown as ClackShow);
+  show.style.setProperty("--clack-mat-width", "30px");
+  show.style.setProperty("--clack-frame-width", "5px");
+  show.style.setProperty("--clack-transition-duration", "40ms");
+  show.style.width = "600px";
+  fixture().append(show);
+  await settledOn(show, "1 of 1");
+  const drawn = part(show, ".slide img").getBoundingClientRect().width;
+  assert(drawn <= 400, `drawn at ${drawn}px, which the smaller covers`);
+  await sleep(200);
+  assert(!(await imageLog()).some((e) => e.endsWith(large)), "the larger never asked for");
+});
+
+test("under a page's transform, the first photo is asked for at its size as laid out, not as scaled", async () => {
+  await resetImageLog();
+  // Drawn about 363px wide; at half scale, its box is half that.
+  const { small, sources } = twoSizes(200, 400);
+  const card = fixture();
+  card.style.transform = "scale(0.5)";
+  card.style.transformOrigin = "0 0";
+  const show = document.createElement("clack-show") as ClackShow;
+  show.setAttribute("theme", "mat");
+  show.style.setProperty("--clack-mat-width", "30px");
+  show.style.setProperty("--clack-frame-width", "5px");
+  show.style.setProperty("--clack-transition-duration", "40ms");
+  show.style.width = "600px";
+  card.append(show);
+  // In the page, and not yet observed: the stage and the mat are read.
+  show.slides = [{ id: "s", alt: "scaled", width: 300, height: 200, sources }];
+  await settledOn(show, "1 of 1");
+  await sleep(200);
+  assert(!(await imageLog()).some((e) => e.endsWith(small)), "the smaller, for the scaled size, never asked for");
+});
+
+test("a photo that could not be loaded keeps within the stage, however little room there is", async () => {
+  const show = makeShow([{ src: "/img/broken.png?tag=small-missing" }]);
+  show.style.width = "300px";
+  await settledOn(show, "1 of 1");
+  const stage = part(show, ".stage").getBoundingClientRect();
+  const missing = part(show, ".missing").getBoundingClientRect();
+  assert(missing.bottom <= stage.bottom + 0.5 && missing.top >= stage.top - 0.5, `the box, ${missing.top}–${missing.bottom}, within the stage, ${stage.top}–${stage.bottom}`);
+});
+
+test("a wide frame on a small show, with no mat, is narrowed to fit, and never drawn wider than counted", async () => {
+  const show = makeShow([{}], { theme: matted("0", "40px") });
+  show.style.width = "300px";
+  await waitFor(() => box(show).dataset["layout"] === "matted", "the theme");
+  await settledOn(show, "1 of 1");
+  await sleep(50);
+  const stage = part(show, ".stage").getBoundingClientRect();
+  const framed = part(show, ".slide .mount").getBoundingClientRect();
+  assert(framed.top >= stage.top - 0.5 && framed.bottom <= stage.bottom + 0.5, `the frame, ${framed.top}–${framed.bottom}, within the stage, ${stage.top}–${stage.bottom}`);
+  assertEqual(getComputedStyle(part(show, ".slide .mount")).paddingTop, "0px", "no mat");
+  const photo = part(show, ".slide img").getBoundingClientRect();
+  assertEqual((part(show, ".slide img") as HTMLImageElement).sizes, `${Math.ceil(photo.width)}px`, "sizes, as drawn");
+});
+
+test("a frame is drawn in whole pixels, and counted as drawn", async () => {
+  const show = makeShow([{}], { theme: matted("10px", "1cqi") });
+  show.style.width = "613px";
+  await waitFor(() => box(show).dataset["layout"] === "matted", "the theme");
+  await settledOn(show, "1 of 1");
+  await waitFor(() => getComputedStyle(part(show, ".slide .mount")).borderTopWidth === "6px", "1% of 613px, as 6px");
+  assertEqual(part(show, ".stage").style.getPropertyValue("--clack-inset"), "16px", "counted as drawn: the 10px mat and the 6px frame");
+  const room = contentBox(part(show, ".stage"));
+  const photo = part(show, ".slide img").getBoundingClientRect();
+  assert(near(photo.width, Math.min(room.width - 32, (room.height - 32) * 1.5)), `the photo, ${photo.width} wide, fills the room the 16px mount leaves in ${room.width}×${room.height}`);
+});
+
+test("a bevel is never wider than its mat", async () => {
+  const show = makeShow([{}], { theme: matted("1px", "5px", true) });
+  await waitFor(() => box(show).dataset["bevel"] === "true", "the theme");
+  await settledOn(show, "1 of 1");
+  const shadow = getComputedStyle(part(show, ".slide img")).boxShadow;
+  assert(shadow.includes("1px") && !shadow.includes("2px"), `within the 1px mat: ${shadow}`);
+});
+
+test("a manifest's title of nothing but spaces is no title", async () => {
+  const manifest = { format: "clack-manifest/1", title: "   ", slides: [{ id: "a", alt: "", width: 300, height: 200, sources: [{ url: img(300, 200), width: 300 }] }] };
+  const show = makeShow([], { src: echo(JSON.stringify(manifest), { path: "blank-title.json" }) });
   await settledOn(show, "1 of 1");
   assert(part(show, ".header").hidden, "no header");
 });

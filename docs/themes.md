@@ -221,7 +221,7 @@ has its caption and controls beneath the photo.
 In `matted`, the frame casts its own shadow, and `layout.shadow` is not drawn. The mat and
 the frame are measured as of the show, as the schema says — `cqi` in either is of the
 show's width — though the photo they surround is fitted to the stage within it. The bevel
-is drawn in the mat's last 2px. On a show too small for its mat (the built-in themes' mat is
+is drawn in the mat's last 2px (or all of a narrower one), and the frame in whole pixels. On a show too small for its mat (the built-in themes' mat is
 a share of the window, not of the show), the mat and frame are narrowed together, so that
 each side takes no more than a sixth of the stage's shorter side, and the photo keeps two
 thirds of it.

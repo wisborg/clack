@@ -122,6 +122,17 @@ function themeSheet({ properties }: Compiled): CSSStyleSheet {
 }
 
 /**
+ * An element's size as laid out, as a ResizeObserver reports it: from its
+ * computed style, which for an element with no padding or border is its
+ * content box, in CSS pixels, untouched by any transform. Nothing, out of
+ * the page.
+ */
+function laidOut(e: Element): { width: number; height: number } {
+  const style = getComputedStyle(e);
+  return { width: parseFloat(style.width) || 0, height: parseFloat(style.height) || 0 };
+}
+
+/**
  * The mat's width by the frame's, from the probe's box: each is a pixel
  * more there (see .probe in clack.css), so that it always has a size, and
  * is always observed.
@@ -273,6 +284,13 @@ export class ClackShow extends HTMLElement {
   static readonly observedAttributes = ["loop", "fit", "label", "src", "theme"];
 
   readonly #internals: ElementInternals;
+  /**
+   * The manifest's title, hidden, in its language: what names the show
+   * when it does (see #name). Not the header's title, which is the same
+   * words, but styled: in a theme's capitals, a screen reader may spell
+   * the name out.
+   */
+  readonly #nameBox: HTMLSpanElement;
   readonly #stage: HTMLDivElement;
   readonly #notice: HTMLParagraphElement;
   readonly #title: HTMLSpanElement;
@@ -360,7 +378,12 @@ export class ClackShow extends HTMLElement {
   #token = 0;
   #pending: Promise<boolean> | null = null;
   #running: Running[] = [];
-  #frame = { width: 0, height: 0 };
+  /**
+   * The stage's size, as last observed, or read (#stageSize); null when
+   * it is not known -- before it is in the page, and after anything that
+   * may change it: a header shown or hidden, a theme, a move.
+   */
+  #frame: { width: number; height: number } | null = null;
 
   #stopSwipe: (() => void) | null = null;
   /** The stage and the probe, both: one observer, so a change to both is taken in one go. */
@@ -431,7 +454,9 @@ export class ClackShow extends HTMLElement {
 
     show.append(this.#header, this.#stage, below);
     this.#probe = el("div", "probe");
-    root.append(show, this.#live, this.#probe);
+    this.#nameBox = el("span", "name");
+    this.#nameBox.hidden = true;
+    root.append(show, this.#live, this.#nameBox, this.#probe);
 
     this.addEventListener("keydown", (e) => this.#onKey(e));
   }
@@ -469,7 +494,7 @@ export class ClackShow extends HTMLElement {
     // through the accessor now. A value the setter refuses is reported, as
     // it would have been had Clack been there, and the show carries on.
     const own = this as unknown as Record<string, unknown>;
-    for (const name of ["src", "slides", "loop", "theme"]) {
+    const replay = (name: string): void => {
       if (Object.hasOwn(this, name)) {
         const value = own[name];
         delete own[name];
@@ -479,22 +504,28 @@ export class ClackShow extends HTMLElement {
           reportError(e);
         }
       }
-    }
+    };
+    // The theme first, and measured in it, before slides from script may
+    // ask for a photo: so the first is asked for at the size it is drawn
+    // at, mount and all.
+    replay("theme");
+    this.#frame = null;
+    this.#measure();
+    for (const name of ["src", "slides", "loop"]) replay(name);
     // The markup is read again on a reconnect, in case it changed while
     // the show was out of the page and not watching it.
     if (this.#showing.from === "markup") this.#showing = { from: "none" };
     this.#ready = true;
     this.#takeUpTheme();
-    // Before any photo is asked for, so the first is asked for at the size
-    // it is drawn at, mount and all.
-    this.#measure();
     this.#render();
   }
 
   disconnectedCallback(): void {
     this.#ready = false;
-    // Measured afresh when it is back: a theme may change meanwhile.
+    // Measured afresh when it is back: it may be somewhere else, of
+    // another size, and a theme may change meanwhile.
     this.#probeSize = null;
+    this.#frame = null;
     document.removeEventListener("visibilitychange", this.#onVisibility);
     // A manifest on its way is not dropped: there is no telling a move --
     // however long it takes -- from a removal, and a show that is moved must
@@ -824,6 +855,9 @@ export class ClackShow extends HTMLElement {
     // next rendering of the page: the photos' sizes then change once, to
     // what they are drawn at, not first to the new layout with the old
     // theme's mat, or to the new mat on the old stage.
+    // The stage may change size too (each layout has its own air): read
+    // again if a photo is asked for before it is observed.
+    this.#frame = null;
     if (this.#ready) {
       this.#resize.unobserve(this.#probe);
       this.#resize.observe(this.#probe);
@@ -875,15 +909,17 @@ export class ClackShow extends HTMLElement {
 
   /**
    * The manifest's title names the show if the page has not, read in the
-   * manifest's language: the show is labelled by the header's title, which
-   * carries it, where the engine supports labelling by element from
-   * ElementInternals -- whether or not the theme shows the header; otherwise
-   * by the text alone. (The slides' own language goes with each slide --
-   * see Keyed.lang.)
+   * manifest's language: the show is labelled by a hidden element of its
+   * own that carries it, where the engine supports labelling by element
+   * from ElementInternals; otherwise by the text alone. (The slides' own
+   * language goes with each slide -- see Keyed.lang.) A title of nothing
+   * but spaces is none.
    */
   #setTitle(title: string, lang: string | null): void {
-    this.#showTitle = title;
+    this.#showTitle = title.trim() ? title : "";
     this.#showLang = lang;
+    this.#nameBox.textContent = this.#showTitle;
+    applyLang(this.#nameBox, lang);
     this.#name();
   }
 
@@ -900,11 +936,16 @@ export class ClackShow extends HTMLElement {
     // reference from the host into its own shadow tree falls back to it,
     // so the show is never left without a name.
     this.#internals.ariaLabel = label || this.#showTitle || text.show;
-    if (byElement) internals.ariaLabelledByElements = !label && this.#showTitle ? [this.#headerTitle] : null;
+    if (byElement) internals.ariaLabelledByElements = !label && this.#showTitle ? [this.#nameBox] : null;
     const title = label || this.#showTitle;
     this.#headerTitle.textContent = title;
     applyLang(this.#headerTitle, label ? null : this.#showLang);
-    this.#header.hidden = !title;
+    if (this.#header.hidden !== !title) {
+      this.#header.hidden = !title;
+      // The stage is shorter, or taller: read again if a photo is asked
+      // for before it is observed.
+      this.#frame = null;
+    }
   }
 
   /**
@@ -1403,15 +1444,19 @@ export class ClackShow extends HTMLElement {
     let mat = 0;
     let frame = 0;
     if (box["layout"] === "matted") {
-      this.#probeSize ??= probed(this.#probe.getBoundingClientRect());
+      this.#probeSize ??= probed(laidOut(this.#probe));
       ({ width: mat, height: frame } = this.#probeSize);
       const stage = this.#stageSize();
       const most = Math.min(stage.width, stage.height) / 6;
       if (most > 0 && mat + frame > most) {
-        // In whole pixels, as a browser draws a border's width.
-        frame = Math.round((frame * most) / (mat + frame));
-        mat = most - frame;
+        // In proportion, the frame rounded (below) and never past the most.
+        const k = most / (mat + frame);
+        mat *= k;
+        frame = Math.min(frame * k, Math.floor(most - mat));
       }
+      // In whole pixels, as a browser draws a border's width, so that the
+      // frame drawn is the frame counted.
+      frame = frame > 0 ? Math.max(1, Math.round(frame)) : 0;
     }
     const inset = mat + frame;
     this.#stage.style.setProperty("--clack-inset", `${inset}px`);
@@ -1434,17 +1479,18 @@ export class ClackShow extends HTMLElement {
   }
 
   /**
-   * The stage's size, as observed; until it is, its box, which is its
-   * content box, as observed -- the stage has no padding (clack.css), or
-   * a photo's sizes would change once it is observed, and an engine may
+   * The stage's size, as observed; until it is, as laid out, read the way
+   * the observer reports it -- its content box (the stage has no padding:
+   * clack.css), as CSS has it, untouched by any transform of the page's --
+   * or a photo's sizes would change once it is observed, and an engine may
    * fetch the photo again.
    */
   #stageSize(): { width: number; height: number } {
-    if (this.#frame.width === 0) {
-      const r = this.#stage.getBoundingClientRect();
-      this.#frame = { width: r.width, height: r.height };
-    }
-    return this.#frame;
+    if (this.#frame) return this.#frame;
+    const size = laidOut(this.#stage);
+    // Out of the page, it has none, and is not known.
+    if (size.width > 0) this.#frame = size;
+    return size;
   }
 
   /** What the `sizes` of slide i's photo should say: the width it is drawn at. */
