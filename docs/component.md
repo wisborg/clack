@@ -194,7 +194,7 @@ after their tokens — `--clack-canvas`, `--clack-text`, `--clack-transition-dur
 on (`compile` in `src/theme.ts` names them all). A page can set them on `clack-show` too, and
 its value wins over the theme's. The font families, `fonts.*`, are `--clack-serif`,
 `--clack-sans` and `--clack-mono`, for now always the visitor's own. Its choices of layout — `layout.type`, `mat.bevel`,
-`caption.card`, `header.visible`, `controls.style` and `reveal`, `progress.position`,
+`caption.card` and `credit`, `header.visible`, `controls.style` and `reveal`, `progress.position`,
 `details.position` and `index.style` — are not properties: they choose among Clack's own
 styles, inside the element, so a page chooses them with a theme, not with CSS. With a theme that follows the visitor's light or dark setting (`scheme:
 "auto"`, as most do), `color-scheme` on the element forces one; a theme that forces a scheme

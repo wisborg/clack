@@ -53,7 +53,7 @@
 /* The line above the photo: the show's title, and how many photos it has.
    Only with a title, and only if the theme shows it. */
 .header {
-  grid-row: 1;
+  grid-area: 1 / 1;
   /* Over any shadow the stage casts: positioned, as the stage is, and
      after it (it comes after it in the show, though it is drawn above). */
   position: relative;
@@ -95,7 +95,9 @@
    of the show, as the schema says: the mat and frame are measured outside
    it (.probe), and come in as px. */
 .stage {
-  grid-row: 2;
+  /* Row and column both: placed by row alone, it would be put beside a
+     floating bar that shares its cell. */
+  grid-area: 2 / 1;
   /* The mat and the frame the mount puts around a photo, each side, set
      by the show in px (#layOut); none but in matted. Set here, so a
      page's value on the element does not reach in. */
@@ -277,7 +279,7 @@
 }
 
 .below {
-  grid-row: 3;
+  grid-area: 3 / 1;
   /* Over a shadow falling from the photo or its frame: positioned, as
      the stage is, and after it. */
   position: relative;
@@ -318,12 +320,13 @@
   min-height: 1.5em;
 }
 
-.show:not([data-credits="true"]) .credit {
+.show:not([data-credits="true"]) .credit,
+.show[data-credit="false"] .credit {
   display: none;
 }
 
 .credit {
-  display: var(--clack-caption-credit);
+  display: block;
   margin-top: 2px;
   font-size: 12.5px;
   letter-spacing: 0.01em;
@@ -413,13 +416,13 @@
 }
 
 /* Where the show reads what the theme's tokens come to (#measure,
-   #duration): unseen, and with no part, so that nothing of the page's,
+   #transition): unseen, and with no part, so that nothing of the page's,
    nor any animation of Clack's, changes it. Outside the stage, so that cqi
    in a token is of the show, as the schema says, not of the stage.
    - Its size is the mat's width by the frame's, in px, whatever units the
      tokens are in; and it changes, and is observed, whenever they do.
      (Not "0px" in a calc(), so a bare 0 is given a unit by compile.)
-   - Its animation-duration is the crossfade's length, which script plays,
+   - Its animation-duration is the transition's length, which script plays,
      a second longer: so CSS works out whatever the token says, calc() and
      all, and one it cannot read -- which leaves the initial 0s -- is told
      from 0s. */
@@ -512,7 +515,7 @@
 /* The caption on a printed card, in the label's colours whatever the
    wall: a museum label (caption.card). Only in a show with captions; a
    slide with none keeps its place, with no card drawn. */
-.show[data-card="true"]:is([data-titles="true"], [data-credits="true"]) .caption {
+.show[data-card="true"]:is([data-titles="true"], [data-credits="true"][data-credit="true"]) .caption {
   justify-self: start;
   padding: 10px 14px 11px;
   background: var(--clack-label);
@@ -530,18 +533,24 @@
 }
 
 /* Floating: the caption and controls on a translucent bar over the foot
-   of the photo (controls.style), the photo having the whole stage. */
+   of the photo (controls.style): in the stage's own cell, at its foot,
+   whatever the layout's margins, and the photo has the whole stage. Of
+   one width whatever the title, so a control does not move from under
+   the pointer from one slide to the next: the title takes what room the
+   controls leave, and is cut short if it needs more. */
 .show[data-controls="floating"] .below {
-  position: absolute;
-  left: 50%;
-  bottom: clamp(12px, 2cqi, 20px);
-  translate: -50% 0;
+  /* The stage's cell, row and column: not a column of its own beside it. */
+  grid-area: 2 / 1;
+  align-self: end;
+  justify-self: center;
   display: flex;
   align-items: center;
   gap: 14px;
-  max-width: calc(100% - 24px);
+  width: min(calc(100% - 24px), 560px);
   box-sizing: border-box;
-  padding: 6px 8px 6px 18px;
+  margin-bottom: clamp(12px, 2cqi, 20px);
+  padding-block: 6px;
+  padding-inline: 18px 8px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--clack-surface) 72%, transparent);
   -webkit-backdrop-filter: blur(18px) saturate(1.4);
@@ -550,6 +559,10 @@
     0 1px 2px rgb(0 0 0 / 0.12),
     0 8px 24px rgb(0 0 0 / 0.16);
   white-space: nowrap;
+}
+
+.show[data-controls="floating"] .caption {
+  flex: 1;
 }
 
 .show[data-controls="floating"] .title {
@@ -561,21 +574,33 @@
   min-width: 48px;
 }
 
-/* On a narrow show, the bar runs from side to side, and holds only the
-   controls: the title is still read out at each slide. */
+/* A show with no captions: a bar of the controls alone, as wide as they are. */
+.show[data-controls="floating"]:not([data-titles="true"], [data-credits="true"][data-credit="true"]) .below {
+  width: auto;
+  padding-inline: 8px;
+}
+
+.show[data-controls="floating"]:not([data-titles="true"], [data-credits="true"][data-credit="true"]) .caption {
+  display: none;
+}
+
+/* On a narrow show, the bar runs from side to side, and shows only the
+   controls; the caption is still there, unseen, for screen readers. */
 @container (max-width: 640px) {
   .show[data-controls="floating"] .below {
-    left: 12px;
-    right: 12px;
-    bottom: 12px;
-    translate: none;
-    max-width: none;
+    justify-self: stretch;
+    width: auto;
+    margin: 0 12px 12px;
     justify-content: center;
-    padding: 6px 8px;
+    padding-inline: 8px;
   }
 
   .show[data-controls="floating"] .caption {
-    display: none;
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
   }
 }
 
@@ -583,14 +608,16 @@
    the controls -- in floating, the whole bar -- unseen and not in the
    pointer's way until the pointer moves or a key or focus arrives, and
    again a few seconds after. Still there for the keyboard, and shown
-   while focus is among them. */
+   while it is among them: focus the keyboard brought (:focus-visible),
+   not the focus a click or a tap leaves on a button, which would keep
+   them up for good. */
 .controls,
 .show[data-controls="floating"] .below {
   transition: opacity 240ms var(--clack-ease);
 }
 
-.show[data-reveal="on-activity"]:not(.active) .controls:not(:focus-within),
-.show[data-reveal="on-activity"][data-controls="floating"]:not(.active) .below:not(:focus-within) {
+.show[data-reveal="on-activity"]:not(.active) .controls:not(:has(:focus-visible)),
+.show[data-reveal="on-activity"][data-controls="floating"]:not(.active) .below:not(:has(:focus-visible)) {
   opacity: 0;
   pointer-events: none;
 }

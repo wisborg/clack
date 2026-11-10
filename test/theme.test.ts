@@ -108,7 +108,6 @@ function usedAs(property: string, roles: readonly string[]): string | null {
   if (/-style$/.test(token)) return "font-style";
   if (/-case$/.test(token)) return "text-transform";
   if (/-tracking$/.test(token)) return "letter-spacing";
-  if (token === "caption-credit") return "display";
   if (token === "transition-duration") return "animation-duration";
   if (token === "transition") return null;
   throw new Error(`${property}: not known to this test`);
@@ -147,7 +146,7 @@ test("every built-in theme compiles to values CSS takes, every one of them", () 
   assertEqual(gallery.get("color-scheme"), "light dark", "gallery follows the visitor");
   assertEqual(gallery.get("--clack-surface"), "light-dark(#fbfbfa, #232323)", "a colour in each scheme");
   assertEqual(gallery.get("--clack-padding-inline"), "clamp(16px, 5cqi, 72px)", "a fluid length");
-  assertEqual(new Map(compile(builtinTheme("minimal")).properties).get("--clack-caption-credit"), "none", "no credit");
+  assertEqual(compile(builtinTheme("minimal")).choices["credit"], "false", "no credit");
 });
 
 test("no theme, however broken, makes the checker throw other than a ThemeError", async () => {

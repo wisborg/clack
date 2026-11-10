@@ -217,11 +217,14 @@ to come.
 
 The caption card is drawn only in a show with captions; a slide with none keeps its place,
 with no card. Floating controls are a bar over the foot of the photo, holding the caption
-and the controls; on a show 640px wide or less, it runs from side to side and holds only the
-controls (a slide's title is still read out as the visitor moves to it). Controls shown
-`on-activity` appear when the pointer moves or presses, a key is pressed, or focus arrives,
-and go three seconds after the last of it, unless the pointer rests on them or focus is
-among them; until then they are not in the pointer's way, but are always in the keyboard's.
+and the controls, of one width whatever the title, so a control does not move from under
+the pointer; on a show 640px wide or less, it runs from side to side and shows only the
+controls, the caption still there for screen readers. Controls shown `on-activity` appear
+when the pointer moves or presses, a key is pressed, or focus arrives, and go three seconds
+after the last of it, unless a mouse or pen rests on them or the keyboard's focus is among
+them; until then they are not in the pointer's way, but are always in the keyboard's. A
+slide moves the photos along only from one slide to another; the first photo, and a new
+photo of the slide on screen, fade in.
 In `floating`, the whole bar comes and goes; in `plain`, the controls do, and the caption
 stays.
 

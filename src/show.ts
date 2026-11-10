@@ -245,7 +245,7 @@ function builtinCompiled(name: string): Compiled {
 }
 
 /**
- * The crossfade's length in ms, from the theme's as CSS computes it (NaN
+ * The transition's length in ms, from the theme's as CSS computes it (NaN
  * when it is not a time): 700 if it is not one, or is less than none; at
  * most 200 when motion is reduced, and never more than 3 s.
  */
@@ -280,8 +280,10 @@ const revealFor = 3000;
 export function transitionFrames(type: "crossfade" | "slide", exit: -1 | 1, offset: number | null): { incoming: Keyframe[]; outgoing: Keyframe[] } {
   const from = `translateX(${offset ?? 0}px)`;
   if (type === "slide") {
+    // The next starts beside the last, where a swipe let go of it.
+    const beside = offset ? `translateX(calc(${offset}px + ${-exit * 100}%))` : `translateX(${-exit * 100}%)`;
     return {
-      incoming: [{ transform: `translateX(${-exit * 100}%)` }, { transform: "translateX(0)" }],
+      incoming: [{ transform: beside }, { transform: "translateX(0)" }],
       outgoing: [{ transform: from }, { transform: `translateX(${exit * 100}%)` }],
     };
   }
@@ -351,7 +353,7 @@ export class ClackShow extends HTMLElement {
   readonly #previous: HTMLButtonElement;
   readonly #next: HTMLButtonElement;
   readonly #live: HTMLDivElement;
-  /** Unseen, and no part: where what the theme's tokens come to is read (#measure, #duration). */
+  /** Unseen, and no part: where what the theme's tokens come to is read (#measure, #transition). */
   readonly #probe: HTMLDivElement;
   /** The line above the stage, and its two parts: the show's title, and how many photos it has. */
   readonly #header: HTMLDivElement;
@@ -438,6 +440,9 @@ export class ClackShow extends HTMLElement {
   #unwatchRatio: (() => void) | null = null;
   /** Hides controls shown for the visitor's activity once it stops (#onActivity). */
   #idle: ReturnType<typeof setTimeout> | undefined;
+  /** When the visitor was last active here, and with what kind of pointer, if one. */
+  #lastActivity = 0;
+  #lastPointer = "";
   /** Where the photo was, springing back, when a drag caught it again: where the drag starts from. */
   #caught = 0;
   /** The photo springing back after a drag that went nowhere, while it does. */
@@ -588,6 +593,7 @@ export class ClackShow extends HTMLElement {
     this.#ready = false;
     // The visitor's activity, here, is over.
     clearTimeout(this.#idle);
+    this.#idle = undefined;
     this.#box.classList.remove("active");
     // A drag the visitor was in the middle of ends here: its end will not
     // be heard.
@@ -1294,7 +1300,10 @@ export class ClackShow extends HTMLElement {
       this.#announce(index + 1, this.#slides.length, slide);
     }
 
-    const transition = old ? this.#transition() : null;
+    let transition = old ? this.#transition() : null;
+    // A slide only from one slide to another: a photo replacing its
+    // placeholder, or a new photo of the slide on screen, fades in place.
+    if (transition?.type === "slide" && (previous < 0 || previous === index)) transition = { ...transition, type: "crossfade" };
     if (old && transition) {
       const timing: KeyframeAnimationOptions = { duration: transition.ms, easing: "cubic-bezier(0.4, 0, 0.2, 1)" };
       // The way the old photo leaves: the finger's, or the way the visitor
@@ -1399,7 +1408,8 @@ export class ClackShow extends HTMLElement {
     this.#title.textContent = slide?.title ?? "";
     this.#credit.textContent = slide?.credit ?? "";
     // Nothing to say: its place kept, but no card drawn for it.
-    this.#title.parentElement!.classList.toggle("blank", !slide?.title && !slide?.credit);
+    const credited = !!slide?.credit && this.#box.dataset["credit"] !== "false";
+    this.#title.parentElement!.classList.toggle("blank", !slide?.title && !credited);
   }
 
   /**
@@ -1409,17 +1419,28 @@ export class ClackShow extends HTMLElement {
    * unless the pointer rests on them, or focus is among them (clack.css
    * shows them then whatever this says).
    */
-  readonly #onActivity = (): void => {
+  readonly #onActivity = (e: Event): void => {
     if (this.#box.dataset["reveal"] !== "on-activity") return;
+    if (e instanceof PointerEvent) this.#lastPointer = e.pointerType;
+    this.#lastActivity = performance.now();
     this.#box.classList.add("active");
-    clearTimeout(this.#idle);
-    this.#idle = setTimeout(() => this.#onIdle(), revealFor);
+    // One timer for all of it, however many events: it looks again when
+    // it runs (#onIdle).
+    this.#idle ??= setTimeout(() => this.#onIdle(), revealFor);
   };
 
+  /**
+   * A few seconds after the activity that showed the controls: hidden, if
+   * there has been none since, and the pointer does not rest on them -- a
+   * mouse's or a pen's: a touch leaves what it last touched hovered.
+   */
   #onIdle(): void {
-    const below = this.#box.querySelector(".below")!;
-    if (below.matches(":hover")) {
-      this.#idle = setTimeout(() => this.#onIdle(), revealFor);
+    this.#idle = undefined;
+    const left = revealFor - (performance.now() - this.#lastActivity);
+    const floating = this.#box.dataset["controls"] === "floating";
+    const resting = this.#lastPointer !== "touch" && this.#box.querySelector(floating ? ".below" : ".controls")!.matches(":hover");
+    if (left > 0 || resting) {
+      this.#idle = setTimeout(() => this.#onIdle(), left > 0 ? left : revealFor);
       return;
     }
     this.#box.classList.remove("active");

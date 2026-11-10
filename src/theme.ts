@@ -388,7 +388,6 @@ export function compile(t: Obj): Compiled {
     for (const token of ["size", "weight", "style", "case"]) set(`${part}-${token}`, get(`${part}.${token}`));
     set(`${part}-tracking`, one(get(`${part}.tracking`), "em"));
   }
-  set("caption-credit", get("caption.credit") ? "block" : "none");
   set("control-size", length(get("controls.size")));
   set("transition", get("transition.type"));
   set("transition-duration", one(get("transition.duration"), "s"));
@@ -400,6 +399,7 @@ export function compile(t: Obj): Compiled {
     layout: String(get("layout.type")),
     bevel: String(get("layout.mat.bevel")),
     card: String(get("caption.card")),
+    credit: String(get("caption.credit")),
     header: String(get("header.visible")),
     controls: String(get("controls.style")),
     reveal: String(get("controls.reveal")),
