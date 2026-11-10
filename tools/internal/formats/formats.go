@@ -413,23 +413,25 @@ func Schemes(resolved map[string]any) []string {
 
 // A contrastRule is a pair of colour roles and the least contrast WCAG 2.2
 // asks of them: 4.5:1 for text (1.4.3), 3:1 for controls and the focus
-// ring (1.4.11).
+// ring (1.4.11). plain marks a pair only plain controls are drawn in:
+// floating ones are only ever on the bar (barRules).
 type contrastRule struct {
 	fg, bg string
 	min    float64
+	plain  bool
 }
 
 var contrastRules = []contrastRule{
-	{"text", "canvas", 4.5},
-	{"text", "surface", 4.5},
-	{"muted", "canvas", 4.5},
-	{"muted", "surface", 4.5},
-	{"accent", "canvas", 3},
-	{"control", "canvas", 3},
-	{"controlActive", "canvas", 3},
-	{"labelText", "label", 4.5},
-	{"labelMuted", "label", 4.5},
-	{"edgePrint", "film", 4.5},
+	{"text", "canvas", 4.5, false},
+	{"text", "surface", 4.5, false},
+	{"muted", "canvas", 4.5, false},
+	{"muted", "surface", 4.5, false},
+	{"accent", "canvas", 3, false},
+	{"control", "canvas", 3, true},
+	{"controlActive", "canvas", 3, true},
+	{"labelText", "label", 4.5, false},
+	{"labelMuted", "label", 4.5, false},
+	{"edgePrint", "film", 4.5, false},
 }
 
 // opaque lists the roles other colours are measured against, which must be
@@ -468,6 +470,8 @@ const hoverMin = 3.0
 func CheckContrast(resolved map[string]any) []error {
 	var errs []error
 	colors, _ := resolved["colors"].(map[string]any)
+	controls, _ := resolved["controls"].(map[string]any)
+	floating := controls["style"] == "floating"
 	for _, scheme := range Schemes(resolved) {
 		palette, _ := colors[scheme].(map[string]any)
 		at := func(role string) string { return "/colors/" + scheme + "/" + role }
@@ -495,6 +499,9 @@ func CheckContrast(resolved map[string]any) []error {
 			}
 		}
 		for _, r := range contrastRules {
+			if r.plain && floating {
+				continue
+			}
 			fg, ok1 := get(r.fg)
 			bg, ok2 := get(r.bg)
 			if !ok1 || !ok2 {
@@ -517,8 +524,7 @@ func CheckContrast(resolved map[string]any) []error {
 		}
 		// Plain controls are drawn on the canvas, floating ones only ever
 		// on the bar.
-		controls, _ := resolved["controls"].(map[string]any)
-		if controls["style"] != "floating" {
+		if !floating {
 			if canvas, ok := get("canvas"); ok {
 				hover(canvas, "canvas")
 			}

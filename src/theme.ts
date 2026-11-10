@@ -220,14 +220,15 @@ function schemesOf(resolved: Obj): ("light" | "dark")[] {
  * Pairs of roles and the least contrast WCAG 2.2 asks of them: 4.5:1 for
  * text (1.4.3), 3:1 for controls and the focus ring (1.4.11).
  */
-const contrastRules: [string, string, number][] = [
+const contrastRules: [string, string, number, "plain"?][] = [
   ["text", "canvas", 4.5],
   ["text", "surface", 4.5],
   ["muted", "canvas", 4.5],
   ["muted", "surface", 4.5],
   ["accent", "canvas", 3],
-  ["control", "canvas", 3],
-  ["controlActive", "canvas", 3],
+  // Only plain controls are drawn on the canvas; floating ones only ever on the bar.
+  ["control", "canvas", 3, "plain"],
+  ["controlActive", "canvas", 3, "plain"],
   ["labelText", "label", 4.5],
   ["labelMuted", "label", 4.5],
   ["edgePrint", "film", 4.5],
@@ -263,6 +264,7 @@ const hoverMin = 3;
 function checkContrast(resolved: Obj): Problem[] {
   const out: Problem[] = [];
   const colors = resolved["colors"] as Record<string, Record<string, string>>;
+  const floating = (resolved["controls"] as Obj | undefined)?.["style"] === "floating";
   for (const scheme of schemesOf(resolved)) {
     const palette = colors[scheme] ?? {};
     const at = (role: string): string => `/colors/${scheme}/${role}`;
@@ -279,7 +281,8 @@ function checkContrast(resolved: Obj): Problem[] {
       const c = get(role);
       if (c && c[3] !== 1) out.push({ path: at(role), message: "must be opaque" });
     }
-    for (const [fg, bg, min] of contrastRules) {
+    for (const [fg, bg, min, only] of contrastRules) {
+      if (only === "plain" && floating) continue;
       const f = get(fg);
       const b = get(bg);
       if (!f || !b) continue;
@@ -295,8 +298,7 @@ function checkContrast(resolved: Obj): Problem[] {
       if (c < hoverMin) out.push({ path: at("controlActive"), message: `on hairline over ${name} is ${c.toFixed(2)}:1, needs ${hoverMin.toFixed(1)}:1` });
     };
     // Plain controls are drawn on the canvas, floating ones only ever on the bar.
-    const controls = resolved["controls"] as Obj | undefined;
-    if (controls?.["style"] !== "floating") {
+    if (!floating) {
       const canvas = get("canvas");
       if (canvas) hover(canvas, "canvas");
       continue;

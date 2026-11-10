@@ -469,6 +469,33 @@
    "error": null
   },
   {
+   "name": "a control at rest too faint on a mid-grey canvas",
+   "set": {
+    "/colors/light/canvas": "#808080",
+    "/colors/light/text": "#000000",
+    "/colors/light/muted": "#000000",
+    "/colors/light/controlActive": "#000000",
+    "/colors/light/hairline": "rgb(0 0 0 / 0.1)",
+    "/colors/light/control": "rgb(0 0 0 / 0.55)"
+   },
+   "error": "/colors/light/control"
+  },
+  {
+   "name": "the same control floating, never drawn on the canvas, enough on the bar",
+   "set": {
+    "/colors/light/canvas": "#808080",
+    "/colors/light/text": "#000000",
+    "/colors/light/muted": "#000000",
+    "/colors/light/controlActive": "#000000",
+    "/colors/light/hairline": "rgb(0 0 0 / 0.1)",
+    "/colors/light/control": "rgb(0 0 0 / 0.55)",
+    "/controls": {
+     "style": "floating"
+    }
+   },
+   "error": null
+  },
+  {
    "name": "a whole document that is a list",
    "set": {
     "": []

@@ -87,7 +87,7 @@ to `auto` gets base's light colours for the scheme Darkroom leaves out.
 | `muted` | credits, counters, labels | 4.5:1 on canvas and on surface |
 | `hairline` | rules, the progress track, a hovered control's backdrop | — |
 | `accent` | the focus ring, the active state | 3:1 on canvas, and on the floating bar |
-| `control`, `controlActive` | control icons, at rest and hovered | 3:1 on canvas, and on the floating bar; `controlActive` also on the hairline beneath a hovered control, over the canvas (plain controls) or the bar (floating) |
+| `control`, `controlActive` | control icons, at rest and hovered | 3:1 where the controls are drawn: on canvas (`plain`) or on the floating bar (`floating`); `controlActive` also on the hairline beneath a hovered control there |
 | `mat`, `frame` | the mat board and picture frame (`matted`) | — |
 | `label`, `labelText`, `labelMuted` | the caption card (`caption.card`) | 4.5:1 for both texts on label |
 | `film`, `edgePrint`, `mark` | the contact sheet's film, frame numbers, and pick mark | 4.5:1 for edgePrint on film |
@@ -227,16 +227,19 @@ to come.
 The caption card is drawn only in a show with captions, as the theme shows them (a credit
 counts only if it shows credits); a slide with none keeps its place, with no card, and a
 change of theme draws or takes away the card at once. Floating controls are a bar over the
-foot of the photo, in any layout, holding the caption and the controls, of one width
-whatever the title, so a control does not move from under the pointer: a title or credit
-longer than the room the controls leave is cut short with an ellipsis. On a show 640px wide
-or less, it runs from side to side, the caption on a line of its own above the controls.
+foot of the stage, in any layout — over the photo's foot where the photo fills the stage,
+and not following each photo's own, which would move the controls from slide to slide —
+holding the caption and the controls, of one width whatever the caption, so a control does
+not move from under the pointer. A caption longer than the room the controls leave runs
+onto more lines, shown whole, the bar growing upwards and the controls staying at its foot.
+On a show 640px wide or less, a bar with a caption runs from side to side, the caption on a
+line of its own above the controls; one without is the controls alone, as wide as they are.
 The counter is as wide as the show's last number makes it, so the controls beside it do not
 move as the slide's number gains a digit. Controls shown `on-activity` appear when the
 pointer moves or presses, a key is pressed, or focus arrives, and go three seconds after the
-last of it, unless a mouse or pen moved onto them and rests there, or the keyboard's focus
-is among them; until then they are not in the pointer's way, but are always in the
-keyboard's. Only the controls go: the caption is shown, as a caption is. In `plain`, it
+last of it, unless a mouse or pen moved onto them and rests there, or focus the keyboard
+brought (Tab) is among them — not focus a click left there, even once keys follow; until
+then they are not in the pointer's way, but are always in the keyboard's. Only the controls go: the caption is shown, as a caption is. In `plain`, it
 stays where it is; in `floating`, the bar goes, and the caption keeps a box of the bar's
 own surface, held to the same contrasts, where it was on the bar (a show with no captions
 loses the whole bar). A

@@ -472,6 +472,10 @@ export class ClackShow extends HTMLElement {
    * there -- shown by a key -- are hovered, but not rested on.
    */
   #pointerOn = false;
+  /** Whether the visitor's last input was a key or a pointer's press, for how focus came to the controls. */
+  #lastInput: "key" | "pointer" | "" = "";
+  /** Whether #onActivity is listened for (#listenForActivity). */
+  #listening = false;
   /** The key of the slide whose photo is on screen (even if the slide has since had a new one), or null for none or the placeholder. */
   #figureKey: string | null = null;
   /** Where the photo was, springing back, when a drag caught it again: where the drag starts from. */
@@ -559,8 +563,23 @@ export class ClackShow extends HTMLElement {
     root.append(show, this.#live, this.#nameBox, probes);
 
     this.addEventListener("keydown", (e) => this.#onKey(e));
-    for (const type of ["pointermove", "pointerdown", "keydown", "focusin"] as const) {
-      this.addEventListener(type, this.#onActivity, { passive: true });
+  }
+
+  /** The events that are the visitor's activity (#onActivity), listened for only in a theme that reveals its controls for it. */
+  static readonly #activity = ["pointermove", "pointerdown", "keydown", "focusin", "focusout"] as const;
+
+  /** Listens for the visitor's activity, or stops, and puts the controls as they are without it. */
+  #listenForActivity(on: boolean): void {
+    if (on === this.#listening) return;
+    this.#listening = on;
+    for (const type of ClackShow.#activity) {
+      if (on) this.addEventListener(type, this.#onActivity, { passive: true });
+      else this.removeEventListener(type, this.#onActivity);
+    }
+    if (!on) {
+      clearTimeout(this.#idle);
+      this.#idle = undefined;
+      this.#box.classList.remove("active", "key-focus");
     }
   }
 
@@ -626,7 +645,7 @@ export class ClackShow extends HTMLElement {
     // The visitor's activity, here, is over.
     clearTimeout(this.#idle);
     this.#idle = undefined;
-    this.#box.classList.remove("active");
+    this.#box.classList.remove("active", "key-focus");
     // A drag the visitor was in the middle of ends here: its end will not
     // be heard.
     this.#endDrag();
@@ -968,6 +987,7 @@ export class ClackShow extends HTMLElement {
     for (const [name, value] of Object.entries(choices)) this.#box.dataset[name] = value;
     // Whether the credit is shown is the theme's to say.
     this.#markCaptions();
+    this.#listenForActivity(choices["reveal"] === "on-activity");
     // Its own air, its own mat, perhaps a mount where there was none.
     this.#relayout();
   }
@@ -1096,7 +1116,10 @@ export class ClackShow extends HTMLElement {
     this.#shown = now(shownSlide);
     // The slide on screen gone in the middle of a drag of its photo: the
     // drag ends here, and the rest of the gesture is not a swipe.
-    if (this.#shown < 0) this.#abandonDrag(this.#figure);
+    // Back in place, as it would be let go of: the photo that takes over
+    // from it, when it comes, takes it from wherever it has got to.
+    // (Not when there are no slides left: the photo goes with them.)
+    if (this.#shown < 0) this.#abandonDrag(this.#figure, slides.length > 0);
     if (this.#figure && this.#shown >= 0) {
       this.#figure.ariaLabel = text.of(this.#shown + 1, slides.length);
     }
@@ -1206,10 +1229,13 @@ export class ClackShow extends HTMLElement {
       this.#updateControls();
       return Promise.resolve(true);
     }
+    // From the slide whose photo is on screen, though it has had a new one
+    // since (#shown is -1 then): that is where the visitor sees it go from.
+    const from = this.#onScreen();
     if (direction) {
       this.#direction = direction;
-    } else if (this.#shown >= 0) {
-      this.#direction = target > this.#shown ? 1 : -1;
+    } else if (from >= 0) {
+      this.#direction = target > from ? 1 : -1;
     }
     this.#target = target;
     this.#updateControls();
@@ -1317,11 +1343,12 @@ export class ClackShow extends HTMLElement {
   // ---- Showing a slide -------------------------------------------------
 
   #display(index: number, photo: Photo, how: How): void {
-    this.#finishTransitions();
     const old = this.#figure;
-    // The slide whose photo is on screen, where it is now: still there
-    // though its photo has changed since (#shown is -1 then), or -1.
-    const from = old && this.#figureKey !== null ? (this.#indexByKey.get(this.#figureKey) ?? -1) : -1;
+    // A photo springing back from a drag goes on from where it is, not
+    // from the middle, where finishing the spring would put it.
+    const sprung = this.#springing && old ? new DOMMatrix(getComputedStyle(old).transform).m41 : 0;
+    this.#finishTransitions();
+    const from = this.#onScreen();
     const previous = from >= 0 && from !== index ? from : this.#shown;
     const slide = this.#slides[index]!;
     const figure = this.#makeFigure(index, slide, photo);
@@ -1343,7 +1370,7 @@ export class ClackShow extends HTMLElement {
     // The old photo held aside by a drag, and another slide shown by
     // other means -- a key, a button, the page: it leaves from where the
     // finger holds it, and the rest of the gesture is not a swipe.
-    const held = how.swipe ? null : this.#abandonDrag(old);
+    const held = how.swipe ? null : (this.#abandonDrag(old) ?? (sprung || null));
     if (old && transition) {
       const timing: KeyframeAnimationOptions = { duration: transition.ms, easing: "cubic-bezier(0.4, 0, 0.2, 1)" };
       const offset = how.swipe ? how.swipe.offset : held;
@@ -1487,11 +1514,24 @@ export class ClackShow extends HTMLElement {
    * shows them then whatever this says).
    */
   readonly #onActivity = (e: Event): void => {
-    if (this.#box.dataset["reveal"] !== "on-activity") return;
+    // How focus came, as it comes (the input before it); where it is once
+    // it has gone, which focusout is too early to say.
+    if (e.type === "focusin") this.#markKeyFocus(true);
+    if (e.type === "focusout") {
+      queueMicrotask(() => this.#markKeyFocus(false));
+      return;
+    }
+    if (e.type === "keydown") this.#lastInput = "key";
     if (e instanceof PointerEvent) {
       this.#lastPointer = e.pointerType;
-      // Unseen, they are not in the pointer's way (clack.css), so never on its path.
-      this.#pointerOn = e.composedPath().includes(this.#restingOn());
+      // Unseen, they are not in the pointer's way (clack.css), so never hovered.
+      this.#pointerOn = this.#restingOn().matches(":hover");
+      if (e.type === "pointerdown") {
+        this.#lastInput = "pointer";
+        // The visitor has taken up a pointer: focus the keyboard left on a
+        // control no longer keeps them up.
+        this.#box.classList.remove("key-focus");
+      }
     }
     this.#lastActivity = performance.now();
     this.#box.classList.add("active");
@@ -1514,6 +1554,20 @@ export class ClackShow extends HTMLElement {
       return;
     }
     this.#box.classList.remove("active");
+  }
+
+  /**
+   * Whether focus among the controls keeps them up (clack.css, .key-focus):
+   * if it came there by the keyboard -- not the focus a click or a tap
+   * leaves on a button, which would keep them up for good, nor that same
+   * focus once the browser takes it for the keyboard's after a key, as
+   * Chrome and Firefox do (:focus-visible). arrived: focus has just come
+   * somewhere; otherwise it has just gone from somewhere.
+   */
+  #markKeyFocus(arrived: boolean): void {
+    const among = this.#controls.contains(this.shadowRoot!.activeElement);
+    if (!among) this.#box.classList.remove("key-focus");
+    else if (arrived) this.#box.classList.toggle("key-focus", this.#lastInput !== "pointer");
   }
 
   /** What the pointer rests on, to keep controls shown for activity up: the controls, or in floating, the bar. */
@@ -1606,17 +1660,25 @@ export class ClackShow extends HTMLElement {
     figure.style.setProperty("--clack-drag", `${this.#caught + (free ? dx : dx * 0.25)}px`);
   }
 
+  /** The slide whose photo is on screen, where it is now -- still there though it has had a new photo since (#shown is -1 then) -- or -1 for none or the placeholder. */
+  #onScreen(): number {
+    return this.#figure && this.#figureKey !== null ? (this.#indexByKey.get(this.#figureKey) ?? -1) : -1;
+  }
+
   /**
    * Gives up a drag of figure's photo, if one holds it, when something
    * other than the finger moves the show on: the drag ends, and the rest of
-   * the gesture is not a swipe. Where the photo was held, in px, or null if
-   * no drag held it.
+   * the gesture is not a swipe. The photo springs back if spring (nothing
+   * else is to move it on yet), or is left where it is held, for what
+   * moves it on to take it from there. Where the photo was held, in px, or
+   * null if no drag held it.
    */
-  #abandonDrag(figure: HTMLElement | null): number | null {
+  #abandonDrag(figure: HTMLElement | null, spring = false): number | null {
     const held = figure?.style.getPropertyValue("--clack-drag");
     if (!held) return null;
     this.#swipes?.cancel();
-    this.#endDrag(figure);
+    if (spring) this.#springBack(figure!, parseFloat(held));
+    else this.#endDrag(figure);
     return parseFloat(held);
   }
 
@@ -1626,9 +1688,13 @@ export class ClackShow extends HTMLElement {
    * into it (none where there is no margin: the show's edge cuts it off).
    */
   #margin(): number {
-    const stage = this.#stage.getBoundingClientRect();
-    const show = this.#box.getBoundingClientRect();
-    const margin = Math.max(stage.left - show.left, show.right - stage.right, 0);
+    // As laid out, in the show's own px, untouched by any transform of the
+    // page's around it (as #measure reads it): the stage fills the show's
+    // one column, so its margin is the show's padding and its own.
+    const show = getComputedStyle(this.#box);
+    const stage = getComputedStyle(this.#stage);
+    const side = (s: string): number => parseFloat(show.getPropertyValue(`padding-${s}`)) + parseFloat(stage.getPropertyValue(`margin-${s}`));
+    const margin = Math.max(side("left"), side("right"), 0);
     return margin > 0.5 ? Math.ceil(margin) + shadowReach : 0;
   }
 

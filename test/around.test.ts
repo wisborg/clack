@@ -39,7 +39,7 @@ test("no card is drawn where there is no caption to put on one", async () => {
 
 // ---- Floating controls -----------------------------------------------------
 
-test("floating, the caption and controls are a bar over the foot of the photo, which has the whole stage", async () => {
+test("floating, the caption and controls are a bar over the foot of the stage, which the photo has all of", async () => {
   const show = makeShow([{ title: "Wide", width: 300, height: 100 }], { theme: "minimal" });
   show.style.width = "800px"; // wider than a narrow show's 640px
   await settledOn(show, "1 of 1");
@@ -49,7 +49,7 @@ test("floating, the caption and controls are a bar over the foot of the photo, w
   const bar = part(show, ".below").getBoundingClientRect();
   assert(bar.bottom < host.bottom && bar.top > host.top + host.height / 2, `the bar, ${bar.top}–${bar.bottom}, over the foot of ${host.top}–${host.bottom}`);
   assert(Math.abs(bar.left + bar.width / 2 - (host.left + host.width / 2)) < 1, "centred");
-  assertEqual(getComputedStyle(part(show, ".caption")).display, "block", "the caption on it");
+  assert(getComputedStyle(part(show, ".caption")).display !== "none", "the caption on it");
 });
 
 test("on a narrow show, the floating bar runs from side to side, the caption on a line of its own above the controls", async () => {
@@ -90,7 +90,10 @@ test("controls shown only for activity are still there for the keyboard, and sho
   // none, visibility hidden or inert would hide it.
   next.focus();
   assertEqual(show.shadowRoot!.activeElement, next, "focusable while unseen");
-  if (!document.hasFocus()) skip("this engine's window does not have focus, so nothing in it is focused as a visitor's keyboard would");
+  next.blur();
+  if (!document.hasFocus()) skip("this engine's window does not have focus, so focusing fires no focus event, as it would for a visitor's keyboard");
+  // Tabbed to: a key, then focus.
+  show.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
   next.focus();
   await waitFor(() => shown(part(show, ".controls")), "shown with focus among them");
   // Long after the activity that focusing them was.
@@ -103,17 +106,17 @@ test("floating controls shown only for activity go, and the bar with them, but t
   const show = makeShow([{ title: "A" }, {}], { theme: "minimal" });
   await settledOn(show, "1 of 2");
   assertEqual(getComputedStyle(part(show, ".controls")).opacity, "0", "the controls unseen");
-  const bar = getComputedStyle(part(show, ".below"));
-  assertEqual(bar.backgroundColor, "rgba(0, 0, 0, 0)", "no bar drawn");
-  assertEqual(bar.pointerEvents, "none", "nor in the pointer's way");
+  const below = part(show, ".below");
+  assertEqual(getComputedStyle(below, "::before").opacity, "0", "no bar drawn");
+  assertEqual(getComputedStyle(below).pointerEvents, "none", "nor in the pointer's way");
   const caption = part(show, ".caption");
-  assert(getComputedStyle(caption).opacity === "1" && getComputedStyle(part(show, ".below")).opacity === "1" && getComputedStyle(caption).visibility === "visible", "the caption still seen, as a caption is");
-  assert(getComputedStyle(caption).backgroundColor !== "rgba(0, 0, 0, 0)", "on a box of the bar's surface, not on the bare photo");
+  assert(getComputedStyle(caption).opacity === "1" && getComputedStyle(below).opacity === "1" && getComputedStyle(caption).visibility === "visible", "the caption still seen, as a caption is");
+  assertEqual(getComputedStyle(caption, "::before").opacity, "1", "on a box of the bar's surface, not on the bare photo");
   // Once the visitor is here, the bar is back, and the caption's box goes into it.
   const p = pointer(show);
   p.send("pointermove", p.left + 10, { buttons: 0 });
   await waitFor(() => shown(part(show, ".controls")), "the controls shown when the pointer moves");
-  await waitFor(() => getComputedStyle(caption).backgroundColor === "rgba(0, 0, 0, 0)", "the caption on the bar again");
+  await waitFor(() => getComputedStyle(caption, "::before").opacity === "0", "the caption on the bar again");
   const none = makeShow([{}, {}], { theme: "minimal" });
   await settledOn(none, "1 of 2");
   assert(!shown(part(none, ".below")), "a show with no captions: the whole bar unseen");
@@ -180,20 +183,21 @@ test("where the text runs right to left, the next slides in from the left", asyn
   assert(/^translateX\((calc\()?-100%/.test(incoming) && /^translateX\((calc\()?100%/.test(outgoing), `the next in from the left, the last out to the right: ${incoming}, ${outgoing}`);
 });
 
-test("controls focused by a click or a tap, not the keyboard, still go", async () => {
-  // Without the window's focus, nothing is focused as the keyboard focuses
-  // either, and the controls would go whatever the focus they hold.
-  if (!document.hasFocus()) skip("this engine's window does not have focus, so the keyboard's focus cannot be told from a click's");
-  const show = makeShow([{}, {}], { theme: "darkroom" });
-  await settledOn(show, "1 of 2");
+test("controls focused by a click or a tap, not the keyboard, still go -- though keys follow", async () => {
+  const show = makeShow([{}, {}, {}], { theme: "darkroom" });
+  await settledOn(show, "1 of 3");
   const p = pointer(show);
   p.send("pointermove", p.left + 10, { buttons: 0 });
-  // As a click leaves it: focused, but not as the keyboard focuses.
+  // As a click leaves it: pressed, then focused.
   const next = part(show, ".next") as HTMLButtonElement;
-  next.focus({ focusVisible: false } as FocusOptions);
+  next.dispatchEvent(new PointerEvent("pointerdown", { pointerType: "mouse", bubbles: true, composed: true }));
+  // Focus as the browser shows it once keys follow (Chrome and Firefox
+  // take it for the keyboard's then): that is not what keeps them up.
+  next.focus({ focusVisible: true } as FocusOptions);
   assertEqual(show.shadowRoot!.activeElement, next, "focused");
+  show.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
   await sleep(3300);
-  assert(!shown(part(show, ".controls")), "gone a few seconds after, focus or not");
+  assert(!shown(part(show, ".controls")), "gone a few seconds after the last key, focus or not");
   next.blur();
 });
 
@@ -229,14 +233,16 @@ test("the floating bar is in the stage, at its foot, whatever the layout's margi
 
 test("the floating bar is of one width whatever the title, so its controls stay under the pointer", async () => {
   const theme = themed("minimal-always-2", { extends: "minimal", controls: { reveal: "always" } });
-  const show = makeShow([{ title: "Houses above the harbour, at dusk" }, { title: "Dusk" }], { theme });
+  const long = "Houses above the harbour, at dusk, from the old customs house on the far side of the water";
+  const show = makeShow([{ title: long }, { title: "Dusk" }], { theme });
   show.style.width = "800px";
   await waitFor(() => box(show).dataset["reveal"] === "always", "the theme");
   await settledOn(show, "1 of 2");
-  const before = part(show, ".next").getBoundingClientRect().left;
+  const before = part(show, ".next").getBoundingClientRect();
   await show.next();
   await settledOn(show, "2 of 2");
-  assertEqual(part(show, ".next").getBoundingClientRect().left, before, "Next where it was");
+  const after = part(show, ".next").getBoundingClientRect();
+  assertEqual(`${after.left},${after.top}`, `${before.left},${before.top}`, "Next where it was, from a caption of two lines to one");
 });
 
 test("a floating bar with no captions is the controls alone, as wide as they are", async () => {
@@ -290,7 +296,7 @@ test("a change of theme redraws the caption card: none for a slide whose only wo
   assertEqual(getComputedStyle(caption).visibility, "visible", "a title, on its card, credit or not");
 });
 
-test("on the floating bar, a long title or credit is cut short of the controls", async () => {
+test("on the floating bar, a long title or credit is shown whole, on more lines, short of the controls", async () => {
   const theme = themed("minimal-credited", { extends: "minimal", caption: { credit: true }, controls: { reveal: "always" } });
   const long = "Photograph by Someone With a Long Name, courtesy of Some Very Long Archive Name Indeed";
   const show = makeShow([{ title: long, credit: long }], { theme });
@@ -303,8 +309,10 @@ test("on the floating bar, a long title or credit is cut short of the controls",
   for (const name of [".title", ".credit"]) {
     const r = part(show, name).getBoundingClientRect();
     assert(r.right <= controls.left, `${name} ends at ${r.right}, short of the controls at ${controls.left}`);
-    assertEqual(getComputedStyle(part(show, name)).overflowX, "hidden", `${name}: what is past its end not drawn`);
+    const e = part(show, name);
+    assert(e.scrollWidth <= e.clientWidth && r.height > 30, `${name}: whole, on more than one line (${r.height}px)`);
   }
+  assert(controls.bottom <= bar.bottom, "the controls on the bar, at its foot");
 });
 
 test("on the floating bar, over whatever photo, the counter and the credit are in the text's colour; on a card, in the card's", async () => {
@@ -353,7 +361,7 @@ test("a photo held aside by a drag when a key moves on slides on from where it i
   assertEqual(figures(show)[0]!.style.getPropertyValue("--clack-drag"), "", "the photo on screen not held aside");
 });
 
-test("a floating bar's caption too long for the show is cut short, and widens nothing", async () => {
+test("a floating bar's caption too long for one line widens nothing", async () => {
   const theme = themed("minimal-always-long", { extends: "minimal", controls: { reveal: "always" } });
   const long = "A very long title for a photograph of houses above the harbour at dusk, ".repeat(4).trim();
   const show = makeShow([{ title: long }], { theme });
@@ -366,7 +374,7 @@ test("a floating bar's caption too long for the show is cut short, and widens no
   const bar = part(show, ".below").getBoundingClientRect();
   assert(bar.width <= 560.5, `the bar at its width, ${bar.width}px`);
   const title = part(show, ".title");
-  assert(title.scrollWidth > title.clientWidth, "the title cut short");
+  assert(title.scrollWidth <= title.clientWidth, "the title on as many lines as it needs, within the bar");
 });
 
 test("a slide moves the photos past the show's margin: neither is seen in it as they come and go", async () => {
@@ -494,5 +502,141 @@ test("a slide moves a photo past the margin by as much as any shadow Clack draws
     await settledOn(show, "1 of 1");
     const r = reach(getComputedStyle(part(show, at)).boxShadow);
     assert(r > 0 && r <= shadowReach, `${theme}: its shadow reaches ${r}px, within the ${shadowReach}px a slide allows`);
+  }
+});
+
+test("a jump while the photo on screen is changing goes the way the slides lie", async () => {
+  if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
+  const theme = themed("sliding-jump", { transition: { type: "slide", duration: "600ms" } });
+  const slide = (id: string, url: string): SlideInput => ({ id, alt: id, width: 300, height: 200, sources: [{ url, width: 300 }] });
+  const show = makeShow([], { theme });
+  await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
+  show.style.setProperty("--clack-transition-duration", "600ms");
+  const [a, c] = [slide("a", img(300, 200)), slide("c", img(300, 200, "8866aa"))];
+  show.slides = [a, slide("b", img(300, 200, "aa8866")), c];
+  await settledOn(show, "1 of 3");
+  await show.next();
+  await settledOn(show, "2 of 3");
+  await sleep(200); // the first preloaded, behind
+  // The second slide's photo changes, and is slow to come; meanwhile, back to the first.
+  show.slides = [a, slide("b", img(300, 200, "66aa88", 3000)), c];
+  const leaving = figures(show).find((f) => f.getAnimations().length === 0)!;
+  void show.goTo(0);
+  await waitFor(() => leaving.getAnimations().length > 0, "the photos to move");
+  const coming = figures(show).find((f) => f !== leaving)!;
+  const first = String((coming.getAnimations()[0]!.effect as KeyframeEffect).getKeyframes()[0]!["transform"]);
+  assert(/^translateX\((calc\()?-100%/.test(first), `back: the first in from the left, ${first}`);
+  await settledOn(show, "1 of 3");
+});
+
+test("a slide past the margin measures it as laid out, whatever transform the page puts around the show", async () => {
+  if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
+  const theme = themed("gallery-sliding-scaled", { extends: "gallery", transition: { type: "slide", duration: "600ms" } });
+  const show = makeShow([{}, {}], { theme });
+  const scaled = document.createElement("div");
+  scaled.style.transform = "scale(0.5)";
+  show.replaceWith(scaled);
+  scaled.append(show);
+  await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
+  show.style.setProperty("--clack-transition-duration", "600ms");
+  await settledOn(show, "1 of 2");
+  await sleep(200); // the next preloaded
+  const want = Math.ceil(parseFloat(getComputedStyle(box(show)).paddingRight)) + shadowReach;
+  const leaving = figures(show)[0]!;
+  void show.next();
+  await waitFor(() => leaving.getAnimations().length > 0, "the photos to move");
+  const coming = figures(show).find((f) => f !== leaving)!;
+  const first = String((coming.getAnimations()[0]!.effect as KeyframeEffect).getKeyframes()[0]!["transform"]);
+  assertEqual(first, `translateX(calc(100% + ${want}px))`, "the margin in the show's own px, not halved");
+  await settledOn(show, "2 of 2");
+});
+
+test("a narrow floating bar with no captions is still the controls alone, as wide as they are", async () => {
+  const theme = themed("minimal-always-narrow-bare", { extends: "minimal", controls: { reveal: "always" } });
+  const show = makeShow([{}, {}], { theme });
+  show.style.width = "360px";
+  await waitFor(() => box(show).dataset["reveal"] === "always", "the theme");
+  await settledOn(show, "1 of 2");
+  const host = show.getBoundingClientRect();
+  const bar = part(show, ".below").getBoundingClientRect();
+  assert(bar.width < host.width / 2, `the bar ${bar.width}px wide, not from side to side of ${host.width}px`);
+  assert(Math.abs(bar.left + bar.width / 2 - (host.left + host.width / 2)) < 1, "centred");
+});
+
+test("a photo springing back from a drag when a key moves on goes on from where it has got to", async () => {
+  if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
+  const theme = themed("sliding-sprung", { transition: { type: "slide", duration: "600ms" } });
+  const show = makeShow([{}, {}, {}], { theme });
+  await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
+  show.style.setProperty("--clack-transition-duration", "600ms");
+  await settledOn(show, "1 of 3");
+  await sleep(200); // the next preloaded
+  const leaving = figures(show)[0]!;
+  const p = pointer(show);
+  const x = p.left + p.width / 2;
+  // A short, slow drag, let go: no swipe, so it springs back.
+  p.send("pointerdown", x);
+  for (let i = 1; i <= 4; i++) {
+    p.send("pointermove", x - i * 10);
+    await sleep(60);
+  }
+  await sleep(150);
+  p.send("pointerup", x - 40, { buttons: 0 });
+  await waitFor(() => leaving.getAnimations().length > 0, "the spring back");
+  show.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+  await waitFor(() => figures(show).length > 1, "the next coming");
+  const frames = (leaving.getAnimations()[0]!.effect as KeyframeEffect).getKeyframes();
+  const from = new DOMMatrix(String(frames[0]!["transform"])).m41;
+  assert(from < -1, `from where it had got to, ${from}px, not the middle`);
+  await settledOn(show, "2 of 3");
+});
+
+test("a photo held by a drag when the page takes its slide away springs back, and the next takes it from there", async () => {
+  if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
+  const show = makeShow([{}, {}]);
+  show.style.setProperty("--clack-transition-duration", "600ms");
+  await settledOn(show, "1 of 2");
+  const held = figures(show)[0]!;
+  const p = pointer(show);
+  const x = p.left + p.width / 2;
+  p.send("pointerdown", x);
+  p.send("pointermove", x - 60);
+  p.send("pointermove", x - 120);
+  await waitFor(() => held.style.getPropertyValue("--clack-drag") !== "", "the photo held aside");
+  show.slides = [{ id: "z", alt: "another", width: 300, height: 200, sources: [{ url: img(300, 200, "aa66aa", 600), width: 300 }] }];
+  const spring = held.getAnimations()[0];
+  assert(spring !== undefined, "springing back, not snapped to the middle");
+  assertEqual(String((spring!.effect as KeyframeEffect).getKeyframes()[0]!["transform"]), "translateX(-120px)", "from where it was held");
+  p.send("pointerup", x - 120, { buttons: 0 });
+  await settledOn(show, "1 of 1");
+});
+
+test("as the floating bar goes and comes back, its caption is never on less than the bar's surface", async () => {
+  const show = makeShow([{ title: "A" }, {}], { theme: "minimal" });
+  await settledOn(show, "1 of 2");
+  const caption = part(show, ".caption");
+  const below = part(show, ".below");
+  box(show).classList.add("active");
+  await waitFor(() => getComputedStyle(below, "::before").opacity === "1" && getComputedStyle(caption, "::before").opacity === "0", "the bar drawn, the caption on it");
+  // Going: the caption's box at once, while the bar fades.
+  box(show).classList.remove("active");
+  assertEqual(getComputedStyle(caption, "::before").opacity, "1", "the caption's box drawn at once");
+  // Coming back: the caption's box stays until the bar has faded in.
+  box(show).classList.add("active");
+  assertEqual(getComputedStyle(caption, "::before").opacity, "1", "the caption's box kept while the bar fades in");
+  await waitFor(() => getComputedStyle(caption, "::before").opacity === "0", "and gone once it has");
+  box(show).classList.remove("active");
+});
+
+test("the bar and the controls come and go by opacity alone, which is composited", async () => {
+  const show = makeShow([{ title: "A" }, {}], { theme: "minimal" });
+  await settledOn(show, "1 of 2");
+  for (const [what, style] of [
+    ["the bar", getComputedStyle(part(show, ".below"))],
+    ["its surface", getComputedStyle(part(show, ".below"), "::before")],
+    ["the caption's box", getComputedStyle(part(show, ".caption"), "::before")],
+    ["the controls", getComputedStyle(part(show, ".controls"))],
+  ] as const) {
+    assertEqual(style.transitionProperty, "opacity", what);
   }
 });
