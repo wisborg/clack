@@ -250,7 +250,10 @@ const barRules: [string, number][] = [
   ["controlActive", 3],
   ["accent", 3],
 ];
-const barOpacity = 0.72;
+export const barOpacity = 0.72;
+
+/** The least contrast a hovered control's icon needs on the hairline it is drawn on (formats.hoverMin). */
+const hoverMin = 3;
 
 /**
  * Every colour in a resolved theme that falls short of the contrast it
@@ -283,6 +286,16 @@ function checkContrast(resolved: Obj): Problem[] {
       const c = contrast(f, b);
       if (c < min) out.push({ path: at(fg), message: `on ${bg} is ${c.toFixed(2)}:1, needs ${min.toFixed(1)}:1` });
     }
+    // A hovered control, on the hairline over what it is drawn on.
+    const hairline = get("hairline");
+    const active = get("controlActive");
+    const hover = (beneath: RGBA, name: string): void => {
+      if (!hairline || !active) return;
+      const c = contrast(active, composite(hairline, beneath));
+      if (c < hoverMin) out.push({ path: at("controlActive"), message: `on hairline over ${name} is ${c.toFixed(2)}:1, needs ${hoverMin.toFixed(1)}:1` });
+    };
+    const canvas = get("canvas");
+    if (canvas) hover(canvas, "canvas");
     const controls = resolved["controls"] as Obj | undefined;
     if (controls?.["style"] !== "floating") continue;
     const surface = get("surface");
@@ -292,13 +305,14 @@ function checkContrast(resolved: Obj): Problem[] {
       ["white", [1, 1, 1, 1]],
     ];
     for (const [name, photo] of beneath) {
-      const bar = over([surface[0], surface[1], surface[2], barOpacity], photo);
+      const bar = composite([surface[0], surface[1], surface[2], barOpacity], photo);
       for (const [fg, min] of barRules) {
         const f = get(fg);
         if (!f) continue;
         const c = contrast(f, bar);
         if (c < min) out.push({ path: at(fg), message: `on the floating bar over ${name} is ${c.toFixed(2)}:1, needs ${min.toFixed(1)}:1` });
       }
+      hover(bar, `the floating bar over ${name}`);
     }
   }
   return out;
@@ -339,14 +353,14 @@ function luminance([r, g, b]: RGBA): number {
 }
 
 /** c composited over an opaque background. */
-function over(c: RGBA, bg: RGBA): RGBA {
+function composite(c: RGBA, bg: RGBA): RGBA {
   const mix = (f: number, b: number): number => f * c[3] + b * (1 - c[3]);
   return [mix(c[0], bg[0]), mix(c[1], bg[1]), mix(c[2], bg[2]), 1];
 }
 
 /** WCAG's contrast ratio of fg, composited over bg, against bg, which must be opaque. */
 export function contrast(fg: RGBA, bg: RGBA): number {
-  let a = luminance(over(fg, bg));
+  let a = luminance(composite(fg, bg));
   let b = luminance(bg);
   if (a < b) [a, b] = [b, a];
   return (a + 0.05) / (b + 0.05);
@@ -436,7 +450,7 @@ export function compile(t: Obj): Compiled {
     layout: String(get("layout.type")),
     bevel: String(get("layout.mat.bevel")),
     card: String(get("caption.card")),
-    credit: String(get("caption.credit")),
+    showCredit: String(get("caption.credit")),
     header: String(get("header.visible")),
     controls: String(get("controls.style")),
     reveal: String(get("controls.reveal")),

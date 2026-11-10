@@ -273,19 +273,29 @@ const revealFor = 3000;
 /**
  * How one photo gives way to the next: the keyframes of the one coming in
  * and the one going out. exit is the way the one going out leaves on
- * screen (-1 to the left); offset, where a swipe let go of it, if one did.
- * A crossfade fades one into the other (a swiped photo carrying on a
- * little the way the finger went); a slide moves both along by a whole
- * stage, the next coming in from the side the last leaves by.
+ * screen (-1 to the left); offset, where a swipe let go of it, or a drag
+ * holds it, if one did. A crossfade fades one into the other (a photo
+ * moved aside carrying on a little the way it went -- unless still, for
+ * reduced motion: then it fades where it is); a slide moves both along by
+ * a whole stage and beyond px more, the next coming in from the side the
+ * last leaves by -- beyond being the show's margin beside the stage, so
+ * neither is seen in it.
  */
-export function transitionFrames(type: "crossfade" | "slide", exit: -1 | 1, offset: number | null): { incoming: Keyframe[]; outgoing: Keyframe[] } {
+export function transitionFrames(
+  type: "crossfade" | "slide",
+  exit: -1 | 1,
+  offset: number | null,
+  o: { beyond?: number; still?: boolean } = {},
+): { incoming: Keyframe[]; outgoing: Keyframe[] } {
   const from = `translateX(${offset ?? 0}px)`;
   if (type === "slide") {
+    const beyond = o.beyond ?? 0;
+    const away = (sign: number): string => (beyond ? `calc(${sign * 100}% + ${sign * beyond}px)` : `${sign * 100}%`);
     // The next starts beside the last, where a swipe let go of it.
-    const beside = offset ? `translateX(calc(${offset}px + ${-exit * 100}%))` : `translateX(${-exit * 100}%)`;
+    const beside = offset ? `translateX(calc(${offset}px + ${away(-exit)}))` : `translateX(${away(-exit)})`;
     return {
       incoming: [{ transform: beside }, { transform: "translateX(0)" }],
-      outgoing: [{ transform: from }, { transform: `translateX(${exit * 100}%)` }],
+      outgoing: [{ transform: from }, { transform: `translateX(${away(exit)})` }],
     };
   }
   return {
@@ -295,10 +305,18 @@ export function transitionFrames(type: "crossfade" | "slide", exit: -1 | 1, offs
         ? [{ opacity: 1 }, { opacity: 0 }]
         : [
             { opacity: 1, transform: from },
-            { opacity: 0, transform: `translateX(${exit * 12}%)` },
+            { opacity: 0, transform: o.still ? from : `translateX(${exit * 12}%)` },
           ],
   };
 }
+
+/**
+ * The most a shadow under a photo reaches past its side: mat's frame's
+ * 48px blur (clack.css), more than the soft shadow's 36px. A slide moves
+ * a photo this much further than the show's margin, so not even its
+ * shadow is seen there.
+ */
+const shadowReach = 48;
 
 function el<K extends keyof HTMLElementTagNameMap>(name: K, className: string, part = ""): HTMLElementTagNameMap[K] {
   const e = document.createElement(name);
@@ -489,7 +507,8 @@ export class ClackShow extends HTMLElement {
     this.#stage.append(this.#notice);
 
     const below = (this.#below = el("div", "below", "below"));
-    const caption = el("p", "caption", "caption");
+    // Nothing in it yet, as #caption marks it.
+    const caption = el("p", "caption untitled uncredited", "caption");
     this.#title = el("span", "title");
     this.#credit = el("span", "credit");
     caption.append(this.#title, this.#credit);
@@ -1068,10 +1087,7 @@ export class ClackShow extends HTMLElement {
     this.#shown = now(shownSlide);
     // The slide on screen gone in the middle of a drag of its photo: the
     // drag ends here, and the rest of the gesture is not a swipe.
-    if (this.#shown < 0 && this.#figure?.style.getPropertyValue("--clack-drag")) {
-      this.#swipes?.cancel();
-      this.#endDrag();
-    }
+    if (this.#shown < 0) this.#abandonDrag(this.#figure);
     if (this.#figure && this.#shown >= 0) {
       this.#figure.ariaLabel = text.of(this.#shown + 1, slides.length);
     }
@@ -1313,20 +1329,22 @@ export class ClackShow extends HTMLElement {
     // The old photo held aside by a drag, and another slide shown by
     // other means -- a key, a button, the page: it leaves from where the
     // finger holds it, and the rest of the gesture is not a swipe.
-    const held = !how.swipe && old ? old.style.getPropertyValue("--clack-drag") : "";
-    if (held) this.#swipes?.cancel();
+    const held = how.swipe ? null : this.#abandonDrag(old);
     if (old && transition) {
       const timing: KeyframeAnimationOptions = { duration: transition.ms, easing: "cubic-bezier(0.4, 0, 0.2, 1)" };
-      const offset = how.swipe ? how.swipe.offset : held ? parseFloat(held) : null;
+      const offset = how.swipe ? how.swipe.offset : held;
       // The way the old photo leaves: the finger's, or the way the visitor
       // is going -- leftwards for the next, where the text runs left to
       // right. A crossfade in place has no way to go.
       let exit: -1 | 1 = -1;
       if (how.swipe) exit = how.swipe.exit;
       else if (transition.type === "slide" || offset !== null) exit = (-this.#direction * (this.#rtl() ? -1 : 1)) as -1 | 1;
-      const frames = transitionFrames(transition.type, exit, offset);
-      // Cut off at the show's sides while they slide (#settleMoving).
-      if (transition.type === "slide") this.#box.classList.add("moving");
+      const frames = transitionFrames(transition.type, exit, offset, {
+        beyond: transition.type === "slide" ? this.#margin() : 0,
+        still: matchMedia("(prefers-reduced-motion: reduce)").matches,
+      });
+      // Cut off at the show's sides while any moves (#settleMoving).
+      if (transition.type === "slide" || offset !== null) this.#box.classList.add("moving");
       const animations = [figure.animate(frames.incoming, timing), old.animate(frames.outgoing, timing)];
       const running: Running = {
         animations,
@@ -1338,12 +1356,9 @@ export class ClackShow extends HTMLElement {
       };
       this.#running.push(running);
       void Promise.all(animations.map((a) => a.finished)).then(running.done, running.done);
-      // Animated from where it was held, it no longer needs holding there.
-      if (held) this.#endDrag(old);
     } else {
       old?.remove();
-      if (held) this.#endDrag(old);
-      else this.#settleMoving();
+      this.#settleMoving();
     }
 
     this.dispatchEvent(
@@ -1444,7 +1459,7 @@ export class ClackShow extends HTMLElement {
     const credits = this.#slides.some((s) => s.credit);
     this.#box.dataset["titles"] = String(titles);
     this.#box.dataset["credits"] = String(credits);
-    this.#box.dataset["captioned"] = String(titles || (credits && this.#box.dataset["credit"] !== "false"));
+    this.#box.dataset["captioned"] = String(titles || (credits && this.#box.dataset["showCredit"] !== "false"));
   }
 
   /**
@@ -1561,6 +1576,32 @@ export class ClackShow extends HTMLElement {
     // page; only then, so nothing else at the sides is (#settleMoving).
     this.#box.classList.add("moving");
     figure.style.setProperty("--clack-drag", `${this.#caught + (free ? dx : dx * 0.25)}px`);
+  }
+
+  /**
+   * Gives up a drag of figure's photo, if one holds it, when something
+   * other than the finger moves the show on: the drag ends, and the rest of
+   * the gesture is not a swipe. Where the photo was held, in px, or null if
+   * no drag held it.
+   */
+  #abandonDrag(figure: HTMLElement | null): number | null {
+    const held = figure?.style.getPropertyValue("--clack-drag");
+    if (!held) return null;
+    this.#swipes?.cancel();
+    this.#endDrag(figure);
+    return parseFloat(held);
+  }
+
+  /**
+   * How far a photo moving out of the stage sideways still shows: the
+   * show's margin beside the stage, the wider side's, and a shadow's reach
+   * into it (none where there is no margin: the show's edge cuts it off).
+   */
+  #margin(): number {
+    const stage = this.#stage.getBoundingClientRect();
+    const show = this.#box.getBoundingClientRect();
+    const margin = Math.max(stage.left - show.left, show.right - stage.right, 0);
+    return margin > 0.5 ? Math.ceil(margin) + shadowReach : 0;
   }
 
   /** Ends a drag of figure's photo: back in place, and nothing cut off once nothing moves. */

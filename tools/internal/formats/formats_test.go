@@ -211,24 +211,74 @@ func TestResolve(t *testing.T) {
 
 func TestExamples(t *testing.T) {
 	themeSchema, manifestSchema := schemas(t)
-	// The examples, and the demo pages' manifest (design/demo).
-	for _, name := range []string{"schema/examples/manifest.json", "schema/examples/manifest-minimal.json", "design/demo/coastlines.json"} {
+	manifests := []string{"schema/examples/manifest.json", "schema/examples/manifest-minimal.json"}
+	themes := []string{"schema/examples/theme-annotated.json"}
+	// And every file the demo pages use (design/demo), by its format: a
+	// demo's theme or manifest that drifted from its schema would leave its
+	// page quietly showing something else.
+	demo, err := filepath.Glob(filepath.Join(root, "design/demo/*.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range demo {
+		name, _ := filepath.Rel(root, path)
+		switch format, _ := readJSON(t, name)["format"].(string); format {
+		case "clack-manifest/1":
+			manifests = append(manifests, name)
+		case "clack-theme/1":
+			themes = append(themes, name)
+		default:
+			t.Errorf("%s: format %q is neither a manifest's nor a theme's", name, format)
+		}
+	}
+	if len(manifests) < 3 || len(themes) < 2 {
+		t.Fatalf("the demo's manifest and theme were not found: %v %v", manifests, themes)
+	}
+	for _, name := range manifests {
 		doc, errs := LoadManifest(manifestSchema, filepath.Join(root, name))
 		errs = append(errs, CheckManifest(doc)...)
 		for _, e := range errs {
 			t.Errorf("%s: %v", name, e)
 		}
 	}
-	doc, errs := Load(themeSchema, filepath.Join(root, "schema/examples/theme-annotated.json"))
-	for _, e := range errs {
-		t.Errorf("theme-annotated.json: %v", e)
+	for _, name := range themes {
+		doc, errs := Load(themeSchema, filepath.Join(root, name))
+		for _, e := range errs {
+			t.Errorf("%s: %v", name, e)
+		}
+		if len(errs) > 0 {
+			continue
+		}
+		resolved, err := Resolve(doc, builtins(t, themeSchema))
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		for _, e := range CheckContrast(resolved) {
+			t.Errorf("%s: %v", name, e)
+		}
 	}
-	resolved, err := Resolve(doc, builtins(t, themeSchema))
-	if err != nil {
-		t.Fatal(err)
+}
+
+// TestBarOpacity holds the floating bar's opacity, as the checkers measure
+// it, to the browser's checker (src/theme.ts) and to the bar as it is drawn
+// (src/clack.css): one changed alone would check a bar that is not there.
+func TestBarOpacity(t *testing.T) {
+	read := func(rel string) string {
+		data, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
 	}
-	for _, e := range CheckContrast(resolved) {
-		t.Errorf("theme-annotated.json: %v", e)
+	ts := fmt.Sprintf("export const barOpacity = %s;", strconv.FormatFloat(barOpacity, 'f', -1, 64))
+	if !strings.Contains(read("src/theme.ts"), ts) {
+		t.Errorf("src/theme.ts does not say %q", ts)
+	}
+	percent := strconv.FormatFloat(math.Round(barOpacity*1000)/10, 'f', -1, 64)
+	css := fmt.Sprintf("background: color-mix(in srgb, var(--clack-surface) %s%%, transparent);", percent)
+	if !strings.Contains(read("src/clack.css"), css) {
+		t.Errorf("src/clack.css does not draw the bar as %q", css)
 	}
 }
 
@@ -523,7 +573,7 @@ func TestContrast(t *testing.T) {
 		"canvas": "#ffffff", "surface": "#ffffff", "text": "#777777", "muted": "#000000",
 		"accent": "#000000", "control": "#000000", "controlActive": "#000000",
 		"label": "#ffffff", "labelText": "#000000", "labelMuted": "#000000",
-		"film": "#000000", "edgePrint": "rgb(255 255 255 / 0.3)",
+		"film": "#000000", "edgePrint": "rgb(255 255 255 / 0.3)", "hairline": "rgb(0 0 0 / 0.08)",
 	}}}
 	var msgs []string
 	for _, e := range CheckContrast(theme) {

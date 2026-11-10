@@ -37,6 +37,10 @@
   box-sizing: border-box;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
+  /* One column, as wide as the show and no wider, whatever is in it: a
+     floating bar's long unbroken caption would otherwise widen it, and
+     the stage and photo with it. */
+  grid-template-columns: minmax(0, 1fr);
   width: 100%;
   height: 100%;
   aspect-ratio: 3 / 2;
@@ -321,7 +325,7 @@
 }
 
 .show:not([data-credits="true"]) .credit,
-.show[data-credit="false"] .credit {
+.show[data-show-credit="false"] .credit {
   display: none;
 }
 
@@ -528,7 +532,7 @@
 }
 
 .show[data-card="true"] .caption.untitled.uncredited,
-.show[data-card="true"][data-credit="false"] .caption.untitled {
+.show[data-card="true"][data-show-credit="false"] .caption.untitled {
   visibility: hidden;
 }
 
@@ -600,23 +604,29 @@
   display: none;
 }
 
-/* On a narrow show, the bar runs from side to side, and shows only the
-   controls; the caption is still there, unseen, for screen readers. */
+/* On a narrow show, the bar runs from side to side, the caption on a line
+   of its own above the controls: still shown, as a caption is, though
+   there is no room for both on one line. */
 @container (max-width: 640px) {
   .show[data-controls="floating"] .below {
     justify-self: stretch;
     width: auto;
     margin: 0 12px 12px;
+    flex-wrap: wrap;
     justify-content: center;
+    row-gap: 2px;
     padding-inline: 8px;
   }
 
+  .show[data-controls="floating"][data-captioned="true"] .below {
+    padding-top: 8px;
+    border-radius: 18px;
+  }
+
   .show[data-controls="floating"] .caption {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
+    flex-basis: 100%;
+    padding-inline: 10px;
+    text-align: center;
   }
 }
 
@@ -632,7 +642,9 @@
   transition: opacity 240ms var(--clack-ease);
 }
 
-.show[data-reveal="on-activity"]:not(.active) .controls:not(:has(:focus-visible)),
+/* In floating, the bar fades, and the controls on it with it: not each
+   on its own as well, which would fade them twice over. */
+.show[data-reveal="on-activity"]:not([data-controls="floating"], .active) .controls:not(:has(:focus-visible)),
 .show[data-reveal="on-activity"][data-controls="floating"]:not(.active) .below:not(:has(:focus-visible)) {
   opacity: 0;
   pointer-events: none;
@@ -643,9 +655,7 @@
   .show[data-controls="floating"] .below {
     transition: none;
   }
-}
 
-@media (prefers-reduced-motion: reduce) {
   .stage.loading::after {
     animation: clack-appear 200ms 400ms both;
   }

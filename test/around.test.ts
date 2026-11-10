@@ -52,14 +52,20 @@ test("floating, the caption and controls are a bar over the foot of the photo, w
   assertEqual(getComputedStyle(part(show, ".caption")).display, "block", "the caption on it");
 });
 
-test("on a narrow show, the floating bar runs from side to side, with only the controls", async () => {
-  const show = makeShow([{ title: "Narrow" }], { theme: "minimal" });
+test("on a narrow show, the floating bar runs from side to side, the caption on a line of its own above the controls", async () => {
+  const theme = themed("minimal-always-narrow", { extends: "minimal", controls: { reveal: "always" } });
+  const show = makeShow([{ title: "Narrow" }], { theme });
   show.style.width = "360px";
+  await waitFor(() => box(show).dataset["reveal"] === "always", "the theme");
   await settledOn(show, "1 of 1");
   const host = show.getBoundingClientRect();
   const bar = part(show, ".below").getBoundingClientRect();
   assert(Math.abs(bar.left - host.left - 12) < 1 && Math.abs(host.right - bar.right - 12) < 1, `the bar ${bar.left - host.left}px and ${host.right - bar.right}px from the sides`);
-  assertEqual(part(show, ".caption").getBoundingClientRect().width, 1, "no caption to be seen on it");
+  const caption = part(show, ".caption").getBoundingClientRect();
+  const controls = part(show, ".controls").getBoundingClientRect();
+  assert(caption.width > 200 && caption.bottom <= controls.top, `the caption, ${caption.width}px wide, above the controls`);
+  assert(caption.top >= bar.top && controls.bottom <= bar.bottom, "both on the bar");
+  assert(shown(part(show, ".caption")) && getComputedStyle(part(show, ".caption")).visibility === "visible", "seen, as a caption is");
 });
 
 // ---- Shown for the visitor's activity ---------------------------------------
@@ -144,7 +150,8 @@ test("a theme that slides moves the photos along, cut off at the show's sides as
   const show = makeShow([{}, {}], { theme });
   await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
   const { incoming, outgoing, cut } = await slideOn(show);
-  assertEqual(`${incoming} ${outgoing}`, "translateX(100%) translateX(-100%)", "the next in from the right, the last out to the left");
+  // A whole stage and more (past the show's margin: see below).
+  assert(/^translateX\((calc\()?100%/.test(incoming) && /^translateX\((calc\()?-100%/.test(outgoing), `the next in from the right, the last out to the left: ${incoming}, ${outgoing}`);
   assertEqual(cut, "clip", "cut off at the sides as they go");
   await settledOn(show, "2 of 2");
   await waitFor(() => getComputedStyle(box(show)).overflowX === "visible", "nothing cut off once they have gone");
@@ -156,7 +163,7 @@ test("where the text runs right to left, the next slides in from the left", asyn
   const show = makeShow([{}, {}], { theme, dir: "rtl" });
   await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
   const { incoming, outgoing } = await slideOn(show);
-  assertEqual(`${incoming} ${outgoing}`, "translateX(-100%) translateX(100%)", "the next in from the left, the last out to the right");
+  assert(/^translateX\((calc\()?-100%/.test(incoming) && /^translateX\((calc\()?100%/.test(outgoing), `the next in from the left, the last out to the right: ${incoming}, ${outgoing}`);
 });
 
 test("controls focused by a click or a tap, not the keyboard, still go", async () => {
@@ -229,14 +236,6 @@ test("a floating bar with no captions is the controls alone, as wide as they are
   assertEqual(getComputedStyle(part(show, ".caption")).display, "none", "no caption on it");
 });
 
-test("on a narrow show, the floating bar's caption is unseen, but still there for screen readers", async () => {
-  const show = makeShow([{ title: "Narrow" }], { theme: "minimal" });
-  show.style.width = "360px";
-  await settledOn(show, "1 of 1");
-  const caption = getComputedStyle(part(show, ".caption"));
-  assert(caption.display !== "none" && caption.visibility !== "hidden", "not taken from screen readers");
-  assertEqual(part(show, ".caption").getBoundingClientRect().width, 1, "unseen");
-});
 
 test("where the text runs right to left, the floating bar's wider side is the caption's", async () => {
   const theme = themed("minimal-always-rtl", { extends: "minimal", controls: { reveal: "always" } });
@@ -251,7 +250,7 @@ test("where the text runs right to left, the floating bar's wider side is the ca
 test("a theme that shows no credit draws no card for a slide with only a credit", async () => {
   const theme = themed("mat-uncredited", { extends: "mat", caption: { credit: false } });
   const show = makeShow([{ credit: "Someone" }, { credit: "Someone else" }], { theme });
-  await waitFor(() => box(show).dataset["credit"] === "false", "the theme");
+  await waitFor(() => box(show).dataset["showCredit"] === "false", "the theme");
   await settledOn(show, "1 of 2");
   assertEqual(getComputedStyle(part(show, ".caption")).backgroundColor, "rgba(0, 0, 0, 0)", "no card");
 });
@@ -262,12 +261,12 @@ test("a change of theme redraws the caption card: none for a slide whose only wo
   const caption = part(show, ".caption");
   assertEqual(getComputedStyle(caption).visibility, "visible", "mat shows the credit, on its card");
   show.theme = themed("mat-uncredited-2", { extends: "mat", caption: { credit: false } });
-  await waitFor(() => box(show).dataset["credit"] === "false", "the theme");
+  await waitFor(() => box(show).dataset["showCredit"] === "false", "the theme");
   assertEqual(getComputedStyle(caption).visibility, "hidden", "a theme that shows no credit: no card with nothing on it");
   show.theme = "mat";
   assertEqual(getComputedStyle(caption).visibility, "visible", "mat again: the credit on its card again");
   show.theme = themed("mat-uncredited-2", { extends: "mat", caption: { credit: false } });
-  await waitFor(() => box(show).dataset["credit"] === "false", "the theme again");
+  await waitFor(() => box(show).dataset["showCredit"] === "false", "the theme again");
   await show.next();
   await settledOn(show, "2 of 2");
   assertEqual(getComputedStyle(caption).visibility, "visible", "a title, on its card, credit or not");
@@ -278,7 +277,7 @@ test("on the floating bar, a long title or credit is cut short of the controls",
   const long = "Photograph by Someone With a Long Name, courtesy of Some Very Long Archive Name Indeed";
   const show = makeShow([{ title: long, credit: long }], { theme });
   show.style.width = "800px";
-  await waitFor(() => box(show).dataset["credit"] === "true" && box(show).dataset["reveal"] === "always", "the theme");
+  await waitFor(() => box(show).dataset["showCredit"] === "true" && box(show).dataset["reveal"] === "always", "the theme");
   await settledOn(show, "1 of 1");
   const controls = part(show, ".controls").getBoundingClientRect();
   const bar = part(show, ".below").getBoundingClientRect();
@@ -293,7 +292,7 @@ test("on the floating bar, a long title or credit is cut short of the controls",
 test("on the floating bar, over whatever photo, the counter and the credit are in the text's colour; on a card, in the card's", async () => {
   const theme = themed("minimal-credited-2", { extends: "minimal", caption: { credit: true } });
   const show = makeShow([{ title: "A", credit: "B" }, {}], { theme });
-  await waitFor(() => box(show).dataset["credit"] === "true", "the theme");
+  await waitFor(() => box(show).dataset["showCredit"] === "true", "the theme");
   await settledOn(show, "1 of 2");
   const text = getComputedStyle(part(show, ".title")).color;
   assertEqual(getComputedStyle(part(show, ".counter")).color, text, "the counter");
@@ -334,4 +333,71 @@ test("a photo held aside by a drag when a key moves on slides on from where it i
   await sleep(100);
   assertEqual(show.index, 1, "the second, and not on to the third: the letting go was no swipe");
   assertEqual(figures(show)[0]!.style.getPropertyValue("--clack-drag"), "", "the photo on screen not held aside");
+});
+
+test("a floating bar's caption too long for the show is cut short, and widens nothing", async () => {
+  const theme = themed("minimal-always-long", { extends: "minimal", controls: { reveal: "always" } });
+  const long = "A very long title for a photograph of houses above the harbour at dusk, ".repeat(4).trim();
+  const show = makeShow([{ title: long }], { theme });
+  show.style.width = "800px";
+  await waitFor(() => box(show).dataset["reveal"] === "always", "the theme");
+  await settledOn(show, "1 of 1");
+  const host = show.getBoundingClientRect();
+  const stage = part(show, ".stage").getBoundingClientRect();
+  assert(stage.width <= host.width + 0.5, `the stage, ${stage.width}px, no wider than the show, ${host.width}px`);
+  const bar = part(show, ".below").getBoundingClientRect();
+  assert(bar.width <= 560.5, `the bar at its width, ${bar.width}px`);
+  const title = part(show, ".title");
+  assert(title.scrollWidth > title.clientWidth, "the title cut short");
+});
+
+test("a slide moves the photos past the show's margin: neither is seen in it as they come and go", async () => {
+  if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
+  const theme = themed("gallery-sliding", { extends: "gallery", transition: { type: "slide", duration: "600ms" } });
+  const show = makeShow([{ width: 600, height: 200 }, { width: 600, height: 200 }], { theme });
+  await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
+  show.style.setProperty("--clack-transition-duration", "600ms");
+  await settledOn(show, "1 of 2");
+  await sleep(200); // the next preloaded
+  const host = box(show).getBoundingClientRect();
+  const stage = part(show, ".stage").getBoundingClientRect();
+  assert(stage.right < host.right - 8, "a margin beside the stage, for this to show anything");
+  const leaving = figures(show)[0]!;
+  void show.next();
+  await waitFor(() => leaving.getAnimations().length > 0, "the photos to move");
+  const coming = figures(show).find((f) => f !== leaving)!;
+  const all = [...leaving.getAnimations(), ...coming.getAnimations()];
+  for (const a of all) a.pause();
+  const at = (t: number): void => all.forEach((a) => (a.currentTime = t));
+  at(0);
+  const first = coming.querySelector("img")!.getBoundingClientRect();
+  // Gallery's soft shadow reaches 36px past the photo.
+  assert(first.left >= host.right + 36, `as it starts, the next photo, from ${first.left}, and its shadow are past the show's edge, ${host.right}`);
+  at(599);
+  const last = leaving.querySelector("img")!.getBoundingClientRect();
+  assert(last.right <= host.left - 35, `as it ends, the last photo, to ${last.right}, and its shadow are past the show's other edge, ${host.left}`);
+  for (const a of all) a.finish();
+  await settledOn(show, "2 of 2");
+});
+
+test("no empty caption card is drawn while the first photo loads", async () => {
+  const show = makeShow([{ title: "Slow", delay: 1500 }], { theme: "mat" });
+  await waitFor(() => box(show).dataset["captioned"] === "true", "the slides");
+  assertEqual(getComputedStyle(part(show, ".caption")).visibility, "hidden", "no card, with nothing on it yet");
+  await settledOn(show, "1 of 1");
+  assertEqual(getComputedStyle(part(show, ".caption")).visibility, "visible", "the card, once there is a caption for it");
+});
+
+test("with reduced motion, a photo moved aside fades where it is, carrying on no further", () => {
+  const still = transitionFrames("crossfade", -1, -120, { still: true });
+  assertEqual(`${still.outgoing[0]!.transform} ${still.outgoing[1]!.transform}`, "translateX(-120px) translateX(-120px)", "where it is held, to the end");
+  const moving = transitionFrames("crossfade", -1, -120);
+  assertEqual(moving.outgoing[1]!.transform, "translateX(-12%)", "otherwise, on a little the way it went");
+});
+
+test("floating, the bar fades as one: the controls on it are not faded again", async () => {
+  const show = makeShow([{ title: "A" }, {}], { theme: "minimal" });
+  await settledOn(show, "1 of 2");
+  assert(!shown(part(show, ".below")), "the bar unseen");
+  assertEqual(getComputedStyle(part(show, ".controls")).opacity, "1", "the controls on it, not faded of their own");
 });

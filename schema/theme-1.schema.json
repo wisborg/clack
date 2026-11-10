@@ -183,7 +183,7 @@
       "properties": {
         "type": {
           "enum": ["gallery", "stage", "matted", "full-bleed"],
-          "description": "gallery: generous margins, caption beneath, like a museum wall. stage: dark surround, the photo the only light. matted: each photo in a mat board and frame. full-bleed: the photo as large as the show, controls floating over it. Layouts are Clack's code; a theme chooses and tunes one."
+          "description": "gallery: generous margins, caption beneath, like a museum wall. stage: dark surround, the photo the only light. matted: each photo in a mat board and frame. full-bleed: the photo as large as the show, edge to edge; the caption and controls beneath it, or over it on a floating bar (controls.style). Layouts are Clack's code; a theme chooses and tunes one."
         },
         "padding": {
           "type": "object",

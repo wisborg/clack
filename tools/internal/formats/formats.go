@@ -454,7 +454,12 @@ var barRules = []struct {
 	{"accent", 3},
 }
 
-const barOpacity = 0.72
+const barOpacity = 0.72 // TestBarOpacity holds src/theme.ts and src/clack.css to it
+
+// hoverMin is the least contrast a hovered control's icon (controlActive)
+// needs on what is beneath it: the hairline it is drawn on (.controls
+// button:hover in src/clack.css), over the canvas or the floating bar.
+const hoverMin = 3.0
 
 // CheckContrast returns every pair of roles in a resolved theme that falls
 // short of the contrast it needs, in each scheme the theme is shown in,
@@ -499,6 +504,20 @@ func CheckContrast(resolved map[string]any) []error {
 				errs = append(errs, jsonschema.Error{Path: at(r.fg), Message: fmt.Sprintf("on %s is %.2f:1, needs %.1f:1", r.bg, c, r.min)})
 			}
 		}
+		// A hovered control, on the hairline over what it is drawn on.
+		hairline, okHairline := get("hairline")
+		active, okActive := get("controlActive")
+		hover := func(beneath RGBA, name string) {
+			if !okHairline || !okActive {
+				return
+			}
+			if c := Contrast(active, hairline.Over(beneath)); c < hoverMin {
+				errs = append(errs, jsonschema.Error{Path: at("controlActive"), Message: fmt.Sprintf("on hairline over %s is %.2f:1, needs %.1f:1", name, c, hoverMin)})
+			}
+		}
+		if canvas, ok := get("canvas"); ok {
+			hover(canvas, "canvas")
+		}
 		controls, _ := resolved["controls"].(map[string]any)
 		if controls["style"] != "floating" {
 			continue
@@ -522,6 +541,7 @@ func CheckContrast(resolved map[string]any) []error {
 					errs = append(errs, jsonschema.Error{Path: at(r.fg), Message: fmt.Sprintf("on the floating bar over %s is %.2f:1, needs %.1f:1", beneath.name, c, r.min)})
 				}
 			}
+			hover(bar, "the floating bar over "+beneath.name)
 		}
 	}
 	return errs

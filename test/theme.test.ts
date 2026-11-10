@@ -146,7 +146,7 @@ test("every built-in theme compiles to values CSS takes, every one of them", () 
   assertEqual(gallery.get("color-scheme"), "light dark", "gallery follows the visitor");
   assertEqual(gallery.get("--clack-surface"), "light-dark(#fbfbfa, #232323)", "a colour in each scheme");
   assertEqual(gallery.get("--clack-padding-inline"), "clamp(16px, 5cqi, 72px)", "a fluid length");
-  assertEqual(compile(builtinTheme("minimal")).choices["credit"], "false", "no credit");
+  assertEqual(compile(builtinTheme("minimal")).choices["showCredit"], "false", "no credit");
 });
 
 test("no theme, however broken, makes the checker throw other than a ThemeError", async () => {

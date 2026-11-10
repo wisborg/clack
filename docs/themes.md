@@ -87,7 +87,7 @@ to `auto` gets base's light colours for the scheme Darkroom leaves out.
 | `muted` | credits, counters, labels | 4.5:1 on canvas and on surface |
 | `hairline` | rules, the progress track, a hovered control's backdrop | — |
 | `accent` | the focus ring, the active state | 3:1 on canvas, and on the floating bar |
-| `control`, `controlActive` | control icons, at rest and hovered | 3:1 on canvas, and on the floating bar |
+| `control`, `controlActive` | control icons, at rest and hovered | 3:1 on canvas, and on the floating bar; `controlActive` also on the hairline beneath a hovered control, over either |
 | `mat`, `frame` | the mat board and picture frame (`matted`) | — |
 | `label`, `labelText`, `labelMuted` | the caption card (`caption.card`) | 4.5:1 for both texts on label |
 | `film`, `edgePrint`, `mark` | the contact sheet's film, frame numbers, and pick mark | 4.5:1 for edgePrint on film |
@@ -103,7 +103,7 @@ A theme whose controls float (`controls.style: "floating"`) is also checked on i
 is the surface at 72% over whatever photo lies beneath: over a black photo and over a white
 one, the two ends of what a photo can put beneath it, so a colour that has its contrast at
 both has it over any photo. On the bar, `text`, `control`, `controlActive` and `accent` are
-held to their contrasts, and the counter and the credit are drawn in `text`, not `muted`: no
+held to their contrasts (a hovered control's `controlActive` on the hairline over the bar, too), and the counter and the credit are drawn in `text`, not `muted`: no
 muted colour keeps 4.5:1 on a translucent bar over both. Such a shortfall reads
 `/colors/dark/text: on the floating bar over white is 4.12:1, needs 4.5:1`.
 
@@ -133,7 +133,7 @@ a separate set of values for small screens.
 
 | token | values |
 |---|---|
-| `type` | `gallery` (margins, caption beneath), `stage` (dark surround), `matted` (mat and frame), `full-bleed` (as large as the show, controls over it) |
+| `type` | `gallery` (margins, caption beneath), `stage` (dark surround), `matted` (mat and frame), `full-bleed` (as large as the show, edge to edge; the controls beneath, or floating over it with `controls.style`) |
 | `padding.inline`, `.top`, `.bottom` | fluid lengths |
 | `shadow` | `none`, or `soft`: a shadow under the photo, tuned for each scheme |
 | `mat.width` | fluid length (`matted`) |
@@ -146,7 +146,7 @@ not.
 ### `caption` and `header`
 
 The caption sits beneath the photo, or on the floating bar with the controls, in any layout
-(`controls.style: "floating"`; on a show 640px wide or less, only for screen readers); the
+(`controls.style: "floating"`; on a show 640px wide or less, on a line of its own above them); the
 header is the line above it, with the manifest's title and how many photos it has (shown only when the manifest has a title; a page's `label` is for screen readers, not shown). Both take:
 
 | token | values |
@@ -230,14 +230,18 @@ change of theme draws or takes away the card at once. Floating controls are a ba
 foot of the photo, in any layout, holding the caption and the controls, of one width
 whatever the title, so a control does not move from under the pointer: a title or credit
 longer than the room the controls leave is cut short with an ellipsis. On a show 640px wide
-or less, it runs from side to side and shows only the controls, the caption still there for
-screen readers. Controls shown `on-activity` appear
+or less, it runs from side to side, the caption on a line of its own above the controls. In
+`floating`, the caption comes and goes with the bar when the controls are shown
+`on-activity`: that is the theme's choice, and a theme that wants the caption always seen
+says `controls.reveal: "always"`. Controls shown `on-activity` appear
 when the pointer moves or presses, a key is pressed, or focus arrives, and go three seconds
 after the last of it, unless a mouse or pen rests on them or the keyboard's focus is among
 them; until then they are not in the pointer's way, but are always in the keyboard's. A
 slide moves the photos along only from one slide to another; the first photo, and a new
 photo of the slide on screen, fade in. A photo held aside by a drag when a key or a button
-moves on leaves from where it is held, and the rest of the drag is not a swipe.
+moves on leaves from where it is held, and the rest of the drag is not a swipe; with reduced
+motion, it fades where it is, as a swiped one does. A slide moves the photos past the show's
+margin, so neither is seen in it as they come and go.
 In `floating`, the whole bar comes and goes; in `plain`, the controls do, and the caption
 stays.
 

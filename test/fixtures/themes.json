@@ -418,6 +418,30 @@
    "error": "/colors/dark/surface"
   },
   {
+   "name": "a hovered control lost on a hairline as dark as it is",
+   "set": {
+    "/colors/light/hairline": "#333333"
+   },
+   "error": "/colors/light/controlActive"
+  },
+  {
+   "name": "a hovered control enough on its hairline over the canvas",
+   "set": {
+    "/colors/dark/hairline": "rgb(255 255 255 / 0.5)"
+   },
+   "error": null
+  },
+  {
+   "name": "the same hairline lost on the floating bar over a white photo",
+   "set": {
+    "/controls": {
+     "style": "floating"
+    },
+    "/colors/dark/hairline": "rgb(255 255 255 / 0.5)"
+   },
+   "error": "/colors/dark/controlActive"
+  },
+  {
    "name": "a whole document that is a list",
    "set": {
     "": []
