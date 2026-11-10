@@ -249,7 +249,7 @@
       "properties": {
         "style": {
           "enum": ["plain", "floating"],
-          "description": "plain: icons on the canvas. floating: a translucent bar over the photo, for full-bleed."
+          "description": "plain: icons on the canvas. floating: a translucent bar over the foot of the photo, in any layout, with the caption on it; its text, controls and focus ring are held to their contrasts on it over black and over white."
         },
         "size": {
           "$ref": "#/$defs/length",

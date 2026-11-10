@@ -436,6 +436,26 @@ var contrastRules = []contrastRule{
 // opaque for the measure to mean anything.
 var opaque = []string{"canvas", "surface", "label", "film"}
 
+// barRules are the roles drawn on the floating bar (controls.style
+// floating), the least contrast each needs, and barOpacity the bar's: the
+// surface at 72%, over whatever photo lies beneath (the bar's background
+// in src/clack.css). The bar is held to them over black and over white,
+// the two ends of what a photo can put beneath it: a colour that has its
+// contrast at both has it over anything between. Muted is not among them
+// -- the bar draws its counter and credit in text -- as no muted colour
+// keeps 4.5:1 on a translucent bar over both ends.
+var barRules = []struct {
+	fg  string
+	min float64
+}{
+	{"text", 4.5},
+	{"control", 3},
+	{"controlActive", 3},
+	{"accent", 3},
+}
+
+const barOpacity = 0.72
+
 // CheckContrast returns every pair of roles in a resolved theme that falls
 // short of the contrast it needs, in each scheme the theme is shown in,
 // each at the place of the colour that falls short (in the resolved theme:
@@ -477,6 +497,30 @@ func CheckContrast(resolved map[string]any) []error {
 			}
 			if c := Contrast(fg, bg); c < r.min {
 				errs = append(errs, jsonschema.Error{Path: at(r.fg), Message: fmt.Sprintf("on %s is %.2f:1, needs %.1f:1", r.bg, c, r.min)})
+			}
+		}
+		controls, _ := resolved["controls"].(map[string]any)
+		if controls["style"] != "floating" {
+			continue
+		}
+		surface, ok := get("surface")
+		if !ok || surface.A != 1 {
+			continue
+		}
+		surface.A = barOpacity
+		for _, beneath := range []struct {
+			name  string
+			color RGBA
+		}{{"black", RGBA{0, 0, 0, 1}}, {"white", RGBA{1, 1, 1, 1}}} {
+			bar := surface.Over(beneath.color)
+			for _, r := range barRules {
+				fg, ok := get(r.fg)
+				if !ok {
+					continue
+				}
+				if c := Contrast(fg, bar); c < r.min {
+					errs = append(errs, jsonschema.Error{Path: at(r.fg), Message: fmt.Sprintf("on the floating bar over %s is %.2f:1, needs %.1f:1", beneath.name, c, r.min)})
+				}
 			}
 		}
 	}

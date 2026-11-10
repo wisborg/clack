@@ -2,12 +2,12 @@
 // ParseTheme), from the shared cases; what a theme compiles to; and the
 // theme attribute, with built-in themes and theme files.
 import type { ClackShow } from "../src/clack";
-import { crossfade } from "../src/show";
+import { transitionLength } from "../src/show";
 import { builtinNames as clacksBuiltins, builtinTheme, compile, contrast, parseColor, readTheme, readThemeBytes, stripComments, ThemeError } from "../src/theme";
 import themeSchema from "../schema/theme-1.schema.json";
 import fixture from "./fixtures/themes.json";
 import { assert, assertEqual, assertThrows, skip, sleep, test } from "./harness";
-import { checkRaw, comparePlaces, echo, figures, imageLog, makeShow, places, quietly, random, resetImageLog, setPointer, settledOn, showBox as box, waitFor } from "./util";
+import { checkRaw, comparePlaces, echo, figures, imageLog, makeShow, places, quietly, random, resetImageLog, setPointer, settledOn, showBox as box, themed, waitFor } from "./util";
 
 /** The built-ins, as the schema names them: those a theme may extend, the tools' (formats.Builtins) too. */
 const builtinNames = themeSchema.properties.extends.enum;
@@ -211,9 +211,8 @@ test("the page's own value for a token wins over the theme's", () => {
 });
 
 test("a theme file is fetched, checked and taken up; the show keeps its theme meanwhile", async () => {
-  const harbour = JSON.stringify({ format: "clack-theme/1", name: "Harbour", extends: "mat", colors: { light: { canvas: "#eef0f1" }, dark: { canvas: "#16191b" } } });
   const show = makeShow([{}], { theme: "minimal" });
-  show.theme = echo(harbour, { path: "harbour.json", delay: 300 });
+  show.theme = themed("Harbour", { extends: "mat", colors: { light: { canvas: "#eef0f1" }, dark: { canvas: "#16191b" } } }, { delay: 300 });
   assertEqual(box(show).dataset["layout"], "full-bleed", "minimal's, until the file is here");
   await waitFor(() => box(show).dataset["layout"] === "matted", "the theme file's layout (mat's, which it extends)");
   assertEqual(token(show, "canvas"), "light-dark(#eef0f1, #16191b)", "its own colours");
@@ -240,9 +239,8 @@ test("a theme file that is refused, or cannot be had, leaves the theme there was
 });
 
 test("a theme asked for while another is on its way replaces it", async () => {
-  const slow = JSON.stringify({ format: "clack-theme/1", name: "Slow", extends: "minimal" });
   const show = makeShow([{}]);
-  show.theme = echo(slow, { path: "slow.json", delay: 400 });
+  show.theme = themed("Slow", { extends: "minimal" }, { delay: 400 });
   show.theme = "mat";
   assertEqual(box(show).dataset["layout"], "matted", "mat, at once");
   await sleep(600);
@@ -327,7 +325,7 @@ test("a 0 without a unit, as a theme may write it, still makes valid CSS", async
 
 test("a theme file is fetched only once its show is in the page", async () => {
   await resetImageLog();
-  const url = echo(JSON.stringify({ format: "clack-theme/1", name: "Later", extends: "mat" }), { path: "later.json" });
+  const url = themed("Later", { extends: "mat" });
   const show = document.createElement("clack-show") as ClackShow;
   show.theme = url;
   await sleep(200);
@@ -423,10 +421,9 @@ test("each show has a theme sheet of its own, so a page that changes one changes
 
 test("a theme file on its way is not forgotten, however many others arrive meanwhile", async () => {
   await resetImageLog();
-  const file = (name: string): string => JSON.stringify({ format: "clack-theme/1", name, extends: "mat" });
-  const first = echo(file("First"), { path: "first.json", delay: 1500 });
+  const first = themed("First", { extends: "mat" }, { delay: 1500 });
   const a = makeShow([{}], { theme: first });
-  const others = Array.from({ length: 9 }, (_, i) => echo(file(`Other ${i}`), { path: `other-${i}.json` }));
+  const others = Array.from({ length: 9 }, (_, i) => themed(`Other ${i}`, { extends: "mat" }));
   const shows = others.map((theme) => makeShow([{}], { theme }));
   await waitFor(() => shows.every((s) => box(s).dataset["layout"] === "matted"), "the others");
   const b = makeShow([{}], { theme: first });
@@ -467,15 +464,15 @@ test("a theme file that failed while its show was out of the page is fetched aga
   });
 });
 
-test("a crossfade is 700ms for a time CSS cannot read, and short when motion is reduced, either way", () => {
-  assertEqual(crossfade(NaN, false), 700, "not a time");
-  assertEqual(crossfade(NaN, true), 200, "not a time, motion reduced");
-  assertEqual(crossfade(450, false), 450, "as the theme says");
-  assertEqual(crossfade(450, true), 200, "motion reduced");
-  assertEqual(crossfade(100, true), 100, "already short");
-  assertEqual(crossfade(0, false), 0, "none");
-  assertEqual(crossfade(9000, false), 3000, "never more than 3 s");
-  assertEqual(crossfade(-500, false), 700, "less than none: not a time either");
+test("a transition is 700ms for a time CSS cannot read, and short when motion is reduced, either way", () => {
+  assertEqual(transitionLength(NaN, false), 700, "not a time");
+  assertEqual(transitionLength(NaN, true), 200, "not a time, motion reduced");
+  assertEqual(transitionLength(450, false), 450, "as the theme says");
+  assertEqual(transitionLength(450, true), 200, "motion reduced");
+  assertEqual(transitionLength(100, true), 100, "already short");
+  assertEqual(transitionLength(0, false), 0, "none");
+  assertEqual(transitionLength(9000, false), 3000, "never more than 3 s");
+  assertEqual(transitionLength(-500, false), 700, "less than none: not a time either");
 });
 
 test("a theme that is not one says so only once its show is in the page", async () => {

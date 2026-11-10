@@ -196,7 +196,8 @@ its value wins over the theme's. The font families, `fonts.*`, are `--clack-seri
 `--clack-sans` and `--clack-mono`, for now always the visitor's own. Its choices of layout — `layout.type`, `mat.bevel`,
 `caption.card` and `credit`, `header.visible`, `controls.style` and `reveal`, `progress.position`,
 `details.position` and `index.style` — are not properties: they choose among Clack's own
-styles, inside the element, so a page chooses them with a theme, not with CSS. With a theme that follows the visitor's light or dark setting (`scheme:
+styles, inside the element, so a page chooses them with a theme, not with CSS: to hide
+credits, say, a theme file that extends the one it uses with `"caption": { "credit": false }`. With a theme that follows the visitor's light or dark setting (`scheme:
 "auto"`, as most do), `color-scheme` on the element forces one; a theme that forces a scheme
 itself, such as `darkroom`, has only that scheme's colours, so `color-scheme` changes
 nothing of it but the browser's own controls. Parts

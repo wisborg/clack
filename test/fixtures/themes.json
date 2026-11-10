@@ -348,6 +348,76 @@
    "error": null
   },
   {
+   "name": "floating controls in the example's colours, enough on the bar over black and over white",
+   "set": {
+    "/controls": {
+     "style": "floating"
+    }
+   },
+   "error": null
+  },
+  {
+   "name": "a floating bar too light for its text over a white photo",
+   "set": {
+    "/controls": {
+     "style": "floating"
+    },
+    "/colors/dark/surface": "#3a3a3a",
+    "/colors/dark/muted": "#b0b0b0"
+   },
+   "error": [
+    "/colors/dark/text",
+    "/colors/dark/control"
+   ]
+  },
+  {
+   "name": "a floating bar too dark for its text over a black photo",
+   "set": {
+    "/controls": {
+     "style": "floating"
+    },
+    "/colors/light/surface": "#b0b0b0",
+    "/colors/light/muted": "#3a3a3a"
+   },
+   "error": [
+    "/colors/light/text",
+    "/colors/light/control"
+   ]
+  },
+  {
+   "name": "a focus ring and a hovered control enough on the canvas, but lost on the floating bar",
+   "set": {
+    "/controls": {
+     "style": "floating"
+    },
+    "/colors/dark/accent": "#777777",
+    "/colors/dark/controlActive": "#888888"
+   },
+   "error": [
+    "/colors/dark/accent",
+    "/colors/dark/controlActive"
+   ]
+  },
+  {
+   "name": "the same colours with plain controls, which have no bar",
+   "set": {
+    "/colors/dark/surface": "#3a3a3a",
+    "/colors/dark/muted": "#b0b0b0"
+   },
+   "error": null
+  },
+  {
+   "name": "a translucent surface under floating controls, refused for that alone, not for the bar it would make",
+   "set": {
+    "/controls": {
+     "style": "floating"
+    },
+    "/colors/dark/surface": "#3a3a3a80",
+    "/colors/dark/muted": "#b0b0b0"
+   },
+   "error": "/colors/dark/surface"
+  },
+  {
    "name": "a whole document that is a list",
    "set": {
     "": []

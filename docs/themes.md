@@ -83,11 +83,11 @@ to `auto` gets base's light colours for the scheme Darkroom leaves out.
 |---|---|---|
 | `canvas` | behind everything: the wall | — (must be opaque) |
 | `surface` | panels, such as the details panel | — (must be opaque) |
-| `text` | titles and captions | 4.5:1 on canvas and on surface |
+| `text` | titles and captions; everything on the floating bar | 4.5:1 on canvas and on surface, and on the floating bar |
 | `muted` | credits, counters, labels | 4.5:1 on canvas and on surface |
 | `hairline` | rules, the progress track, a hovered control's backdrop | — |
-| `accent` | the focus ring, the active state | 3:1 on canvas |
-| `control`, `controlActive` | control icons, at rest and hovered | 3:1 on canvas |
+| `accent` | the focus ring, the active state | 3:1 on canvas, and on the floating bar |
+| `control`, `controlActive` | control icons, at rest and hovered | 3:1 on canvas, and on the floating bar |
 | `mat`, `frame` | the mat board and picture frame (`matted`) | — |
 | `label`, `labelText`, `labelMuted` | the caption card (`caption.card`) | 4.5:1 for both texts on label |
 | `film`, `edgePrint`, `mark` | the contact sheet's film, frame numbers, and pick mark | 4.5:1 for edgePrint on film |
@@ -98,6 +98,14 @@ translucent colours composited over the colour beneath them first. A theme that 
 is refused with the pair, the scheme and the ratio it reached, such as `/colors/light/muted: on
 canvas is 3.95:1, needs 4.5:1`. (This check found three such pairs in the first draft of the
 built-in themes.)
+
+A theme whose controls float (`controls.style: "floating"`) is also checked on its bar, which
+is the surface at 72% over whatever photo lies beneath: over a black photo and over a white
+one, the two ends of what a photo can put beneath it, so a colour that has its contrast at
+both has it over any photo. On the bar, `text`, `control`, `controlActive` and `accent` are
+held to their contrasts, and the counter and the credit are drawn in `text`, not `muted`: no
+muted colour keeps 4.5:1 on a translucent bar over both. Such a shortfall reads
+`/colors/dark/text: on the floating bar over white is 4.12:1, needs 4.5:1`.
 
 Colours are written `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb(r g b)` or
 `rgb(r g b / alpha)`, with alpha from 0 to 1 or as a percentage. Keep the colours behind
@@ -137,7 +145,8 @@ not.
 
 ### `caption` and `header`
 
-The caption sits beneath the photo (or in the floating controls, in `full-bleed`); the
+The caption sits beneath the photo, or on the floating bar with the controls, in any layout
+(`controls.style: "floating"`; on a show 640px wide or less, only for screen readers); the
 header is the line above it, with the manifest's title and how many photos it has (shown only when the manifest has a title; a page's `label` is for screen readers, not shown). Both take:
 
 | token | values |
@@ -215,16 +224,20 @@ whether it shows the credit, and its card, the controls' style, size and reveal,
 transition. The progress line (with auto-play), the details panel and the index are still
 to come.
 
-The caption card is drawn only in a show with captions; a slide with none keeps its place,
-with no card. Floating controls are a bar over the foot of the photo, holding the caption
-and the controls, of one width whatever the title, so a control does not move from under
-the pointer; on a show 640px wide or less, it runs from side to side and shows only the
-controls, the caption still there for screen readers. Controls shown `on-activity` appear
+The caption card is drawn only in a show with captions, as the theme shows them (a credit
+counts only if it shows credits); a slide with none keeps its place, with no card, and a
+change of theme draws or takes away the card at once. Floating controls are a bar over the
+foot of the photo, in any layout, holding the caption and the controls, of one width
+whatever the title, so a control does not move from under the pointer: a title or credit
+longer than the room the controls leave is cut short with an ellipsis. On a show 640px wide
+or less, it runs from side to side and shows only the controls, the caption still there for
+screen readers. Controls shown `on-activity` appear
 when the pointer moves or presses, a key is pressed, or focus arrives, and go three seconds
 after the last of it, unless a mouse or pen rests on them or the keyboard's focus is among
 them; until then they are not in the pointer's way, but are always in the keyboard's. A
 slide moves the photos along only from one slide to another; the first photo, and a new
-photo of the slide on screen, fade in.
+photo of the slide on screen, fade in. A photo held aside by a drag when a key or a button
+moves on leaves from where it is held, and the rest of the drag is not a swipe.
 In `floating`, the whole bar comes and goes; in `plain`, the controls do, and the caption
 stays.
 

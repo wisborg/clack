@@ -162,6 +162,16 @@ export function echo(body: string, o: { path?: string; type?: string; status?: n
   return `/echo/${o.path ?? "manifest.json"}?${q}`;
 }
 
+/**
+ * A theme file on the test server, named name, made of these tokens (it
+ * extends base unless they say otherwise), at a path of its name:
+ * "Other 0" at other-0.json.
+ */
+export function themed(name: string, tokens: Record<string, unknown> = {}, o: { delay?: number } = {}): string {
+  const path = `${name.toLowerCase().replaceAll(" ", "-")}.json`;
+  return echo(JSON.stringify({ format: "clack-theme/1", name, ...tokens }), { path, ...o });
+}
+
 /** Runs fn with console.error collected rather than shown, and returns what was said. */
 export async function quietly(fn: (errors: string[]) => Promise<void>): Promise<string[]> {
   const errors: string[] = [];

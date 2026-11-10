@@ -237,6 +237,22 @@ const contrastRules: [string, string, number][] = [
 const opaque = ["canvas", "surface", "label", "film"];
 
 /**
+ * The roles drawn on the floating bar (controls.style floating), the least
+ * contrast each needs, and the bar's opacity: the surface at 72%, over
+ * whatever photo lies beneath (clack.css). Held to them over black and
+ * over white, the two ends of what a photo can put beneath it
+ * (formats.barRules). Muted is not among them: the bar draws its counter
+ * and credit in text.
+ */
+const barRules: [string, number][] = [
+  ["text", 4.5],
+  ["control", 3],
+  ["controlActive", 3],
+  ["accent", 3],
+];
+const barOpacity = 0.72;
+
+/**
  * Every colour in a resolved theme that falls short of the contrast it
  * needs, in each scheme it is shown in (formats.CheckContrast), at its
  * place in the theme as resolved.
@@ -266,6 +282,23 @@ function checkContrast(resolved: Obj): Problem[] {
       if (!f || !b) continue;
       const c = contrast(f, b);
       if (c < min) out.push({ path: at(fg), message: `on ${bg} is ${c.toFixed(2)}:1, needs ${min.toFixed(1)}:1` });
+    }
+    const controls = resolved["controls"] as Obj | undefined;
+    if (controls?.["style"] !== "floating") continue;
+    const surface = get("surface");
+    if (!surface || surface[3] !== 1) continue;
+    const beneath: [string, RGBA][] = [
+      ["black", [0, 0, 0, 1]],
+      ["white", [1, 1, 1, 1]],
+    ];
+    for (const [name, photo] of beneath) {
+      const bar = over([surface[0], surface[1], surface[2], barOpacity], photo);
+      for (const [fg, min] of barRules) {
+        const f = get(fg);
+        if (!f) continue;
+        const c = contrast(f, bar);
+        if (c < min) out.push({ path: at(fg), message: `on the floating bar over ${name} is ${c.toFixed(2)}:1, needs ${min.toFixed(1)}:1` });
+      }
     }
   }
   return out;
@@ -305,11 +338,15 @@ function luminance([r, g, b]: RGBA): number {
   return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
 }
 
+/** c composited over an opaque background. */
+function over(c: RGBA, bg: RGBA): RGBA {
+  const mix = (f: number, b: number): number => f * c[3] + b * (1 - c[3]);
+  return [mix(c[0], bg[0]), mix(c[1], bg[1]), mix(c[2], bg[2]), 1];
+}
+
 /** WCAG's contrast ratio of fg, composited over bg, against bg, which must be opaque. */
 export function contrast(fg: RGBA, bg: RGBA): number {
-  const mix = (f: number, b: number): number => f * fg[3] + b * (1 - fg[3]);
-  const over: RGBA = [mix(fg[0], bg[0]), mix(fg[1], bg[1]), mix(fg[2], bg[2]), 1];
-  let a = luminance(over);
+  let a = luminance(over(fg, bg));
   let b = luminance(bg);
   if (a < b) [a, b] = [b, a];
   return (a + 0.05) / (b + 0.05);

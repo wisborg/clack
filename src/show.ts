@@ -245,23 +245,24 @@ function builtinCompiled(name: string): Compiled {
 }
 
 /**
- * The transition's length in ms, from the theme's as CSS computes it (NaN
- * when it is not a time): 700 if it is not one, or is less than none; at
- * most 200 when motion is reduced, and never more than 3 s.
+ * The transition's length in ms -- a crossfade's or a slide's -- from the
+ * theme's as CSS computes it (NaN when it is not a time): 700 if it is not
+ * one, or is less than none; at most 200 when motion is reduced, and never
+ * more than 3 s.
  */
-export function crossfade(ms: number, reduced: boolean): number {
+export function transitionLength(ms: number, reduced: boolean): number {
   const given = ms >= 0 ? ms : 700;
   return Math.min(given, reduced ? 200 : 3000);
 }
 
 /**
  * The transition a theme asks for (transition.type, and its duration in
- * ms as CSS computes it: see crossfade), as it is played: none for none,
+ * ms as CSS computes it: see transitionLength), as it is played: none for none,
  * or none long; and with reduced motion, nothing slides -- a short
  * crossfade instead.
  */
 export function transitionOf(type: string, ms: number, reduced: boolean): { type: "crossfade" | "slide"; ms: number } | null {
-  const length = crossfade(ms, reduced);
+  const length = transitionLength(ms, reduced);
   if (type === "none" || length <= 0) return null;
   return { type: type === "slide" && !reduced ? "slide" : "crossfade", ms: length };
 }
@@ -353,6 +354,9 @@ export class ClackShow extends HTMLElement {
   readonly #previous: HTMLButtonElement;
   readonly #next: HTMLButtonElement;
   readonly #live: HTMLDivElement;
+  /** The caption and the controls beneath the photo -- in floating, the bar. */
+  readonly #below: HTMLDivElement;
+  readonly #controls: HTMLDivElement;
   /** Unseen, and no part: where what the theme's tokens come to is read (#measure, #transition). */
   readonly #probe: HTMLDivElement;
   /** The line above the stage, and its two parts: the show's title, and how many photos it has. */
@@ -484,13 +488,13 @@ export class ClackShow extends HTMLElement {
     this.#noticeOff();
     this.#stage.append(this.#notice);
 
-    const below = el("div", "below", "below");
+    const below = (this.#below = el("div", "below", "below"));
     const caption = el("p", "caption", "caption");
     this.#title = el("span", "title");
     this.#credit = el("span", "credit");
     caption.append(this.#title, this.#credit);
 
-    const controls = el("div", "controls", "controls");
+    const controls = (this.#controls = el("div", "controls", "controls"));
     this.#previous = this.#button(text.previous, "previous", () => this.#user(-1));
     this.#next = this.#button(text.next, "next", () => this.#user(1));
     this.#counter = el("span", "counter", "counter");
@@ -934,6 +938,8 @@ export class ClackShow extends HTMLElement {
     root.adoptedStyleSheets = [this.#sheet, styles(), ...pages];
     const { choices } = compiled;
     for (const [name, value] of Object.entries(choices)) this.#box.dataset[name] = value;
+    // Whether the credit is shown is the theme's to say.
+    this.#markCaptions();
     // Its own air, its own mat, perhaps a mount where there was none.
     this.#relayout();
   }
@@ -1052,8 +1058,7 @@ export class ClackShow extends HTMLElement {
     // credit, for which every caption keeps a line: before any photo is
     // asked for, as either may change the stage's height.
     this.#headerCount.textContent = slides.length ? text.photos(slides.length) : "";
-    this.#box.dataset["titles"] = String(slides.some((s) => s.title));
-    this.#box.dataset["credits"] = String(slides.some((s) => s.credit));
+    this.#markCaptions();
 
     // Where a slide is now, if it is still there with the same photo.
     const now = (slide: Keyed | undefined): number => {
@@ -1302,14 +1307,24 @@ export class ClackShow extends HTMLElement {
 
     let transition = old ? this.#transition() : null;
     // A slide only from one slide to another: a photo replacing its
-    // placeholder, or a new photo of the slide on screen, fades in place.
-    if (transition?.type === "slide" && (previous < 0 || previous === index)) transition = { ...transition, type: "crossfade" };
+    // placeholder, or a new photo of the slide on screen (#shown is -1
+    // once its photo changes), fades in place.
+    if (transition?.type === "slide" && previous < 0) transition = { ...transition, type: "crossfade" };
+    // The old photo held aside by a drag, and another slide shown by
+    // other means -- a key, a button, the page: it leaves from where the
+    // finger holds it, and the rest of the gesture is not a swipe.
+    const held = !how.swipe && old ? old.style.getPropertyValue("--clack-drag") : "";
+    if (held) this.#swipes?.cancel();
     if (old && transition) {
       const timing: KeyframeAnimationOptions = { duration: transition.ms, easing: "cubic-bezier(0.4, 0, 0.2, 1)" };
+      const offset = how.swipe ? how.swipe.offset : held ? parseFloat(held) : null;
       // The way the old photo leaves: the finger's, or the way the visitor
-      // is going -- leftwards for the next, where the text runs left to right.
-      const exit = how.swipe ? how.swipe.exit : ((-this.#direction * (this.#rtl() ? -1 : 1)) as -1 | 1);
-      const frames = transitionFrames(transition.type, exit, how.swipe ? how.swipe.offset : null);
+      // is going -- leftwards for the next, where the text runs left to
+      // right. A crossfade in place has no way to go.
+      let exit: -1 | 1 = -1;
+      if (how.swipe) exit = how.swipe.exit;
+      else if (transition.type === "slide" || offset !== null) exit = (-this.#direction * (this.#rtl() ? -1 : 1)) as -1 | 1;
+      const frames = transitionFrames(transition.type, exit, offset);
       // Cut off at the show's sides while they slide (#settleMoving).
       if (transition.type === "slide") this.#box.classList.add("moving");
       const animations = [figure.animate(frames.incoming, timing), old.animate(frames.outgoing, timing)];
@@ -1323,9 +1338,12 @@ export class ClackShow extends HTMLElement {
       };
       this.#running.push(running);
       void Promise.all(animations.map((a) => a.finished)).then(running.done, running.done);
+      // Animated from where it was held, it no longer needs holding there.
+      if (held) this.#endDrag(old);
     } else {
       old?.remove();
-      this.#settleMoving();
+      if (held) this.#endDrag(old);
+      else this.#settleMoving();
     }
 
     this.dispatchEvent(
@@ -1407,9 +1425,26 @@ export class ClackShow extends HTMLElement {
     applyLang(this.#credit, slide ? slide.creditLang : null);
     this.#title.textContent = slide?.title ?? "";
     this.#credit.textContent = slide?.credit ?? "";
-    // Nothing to say: its place kept, but no card drawn for it.
-    const credited = !!slide?.credit && this.#box.dataset["credit"] !== "false";
-    this.#title.parentElement!.classList.toggle("blank", !slide?.title && !credited);
+    // Which it has, for the card (clack.css): whether the theme shows a
+    // credit is CSS's to add, so a change of theme needs nothing redone.
+    const caption = this.#title.parentElement!;
+    caption.classList.toggle("untitled", !slide?.title);
+    caption.classList.toggle("uncredited", !slide?.credit);
+  }
+
+  /**
+   * Whether any slide has a title, or a credit, for which every caption
+   * keeps a line; and whether the show has captions at all, as the theme
+   * shows them -- a credit only if it shows credits -- for the caption's
+   * card and the floating bar's width (clack.css). From the slides and
+   * the theme, so whenever either changes.
+   */
+  #markCaptions(): void {
+    const titles = this.#slides.some((s) => s.title);
+    const credits = this.#slides.some((s) => s.credit);
+    this.#box.dataset["titles"] = String(titles);
+    this.#box.dataset["credits"] = String(credits);
+    this.#box.dataset["captioned"] = String(titles || (credits && this.#box.dataset["credit"] !== "false"));
   }
 
   /**
@@ -1438,7 +1473,7 @@ export class ClackShow extends HTMLElement {
     this.#idle = undefined;
     const left = revealFor - (performance.now() - this.#lastActivity);
     const floating = this.#box.dataset["controls"] === "floating";
-    const resting = this.#lastPointer !== "touch" && this.#box.querySelector(floating ? ".below" : ".controls")!.matches(":hover");
+    const resting = this.#lastPointer !== "touch" && (floating ? this.#below : this.#controls).matches(":hover");
     if (left > 0 || resting) {
       this.#idle = setTimeout(() => this.#onIdle(), left > 0 ? left : revealFor);
       return;

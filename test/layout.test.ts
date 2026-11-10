@@ -2,13 +2,12 @@
 // draws, and that the mat and frame are measured as the schema says.
 import type { ClackShow } from "../src/clack";
 import { assert, assertEqual, fixture, skip, sleep, test } from "./harness";
-import { contentBox, echo, figures, img, imageLog, makeShow, part, pointer, resetImageLog, settledOn, showBox as box, waitFor } from "./util";
+import { contentBox, echo, figures, img, imageLog, makeShow, part, pointer, resetImageLog, settledOn, showBox as box, themed, waitFor } from "./util";
 
 
 /** A theme file that extends mat, with these lengths for the mat and frame. */
 function matted(mat: string, frame: string, bevel = false): string {
-  const theme = { format: "clack-theme/1", name: "Framed", extends: "mat", layout: { mat: { width: mat, bevel }, frame: { width: frame } } };
-  return echo(JSON.stringify(theme), { path: `framed-${mat}-${frame}-${bevel}.json` });
+  return themed(`Framed ${mat} ${frame} ${bevel}`, { extends: "mat", layout: { mat: { width: mat, bevel }, frame: { width: frame } } });
 }
 
 const near = (a: number, b: number): boolean => Math.abs(a - b) < 0.6;
@@ -142,7 +141,7 @@ test("in every layout but matted, there is no mount: the photo is the box", asyn
 });
 
 test("full-bleed with plain controls: the photo has the whole width, and the caption beneath is kept off the edges", async () => {
-  const theme = echo(JSON.stringify({ format: "clack-theme/1", name: "Bleed", extends: "minimal", controls: { style: "plain", reveal: "always" } }), { path: "bleed-plain.json" });
+  const theme = themed("Bleed plain", { extends: "minimal", controls: { style: "plain", reveal: "always" } });
   const show = makeShow([{ width: 300, height: 100, title: "Wide" }], { theme });
   await waitFor(() => box(show).dataset["controls"] === "plain" && box(show).dataset["layout"] === "full-bleed", "the theme");
   await settledOn(show, "1 of 1");

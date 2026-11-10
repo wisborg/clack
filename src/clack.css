@@ -513,9 +513,13 @@
 /* ---- Around the photo: the caption card, floating controls ------------ */
 
 /* The caption on a printed card, in the label's colours whatever the
-   wall: a museum label (caption.card). Only in a show with captions; a
-   slide with none keeps its place, with no card drawn. */
-.show[data-card="true"]:is([data-titles="true"], [data-credits="true"][data-credit="true"]) .caption {
+   wall: a museum label (caption.card). Only in a show with captions, as
+   the theme shows them (data-captioned: #markCaptions); a slide with none
+   keeps its place, with no card drawn -- worked out here, from what the
+   caption holds (#caption marks it) and what the theme shows, so a change
+   of theme needs nothing redone. Marked, not :has(> :empty): Safari does
+   not match that again when the text arrives. */
+.show[data-card="true"][data-captioned="true"] .caption {
   justify-self: start;
   padding: 10px 14px 11px;
   background: var(--clack-label);
@@ -523,7 +527,8 @@
   color: var(--clack-label-text);
 }
 
-.show[data-card="true"] .caption.blank {
+.show[data-card="true"] .caption.untitled.uncredited,
+.show[data-card="true"][data-credit="false"] .caption.untitled {
   visibility: hidden;
 }
 
@@ -565,9 +570,20 @@
   flex: 1;
 }
 
-.show[data-controls="floating"] .title {
+.show[data-controls="floating"] :is(.title, .credit) {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* The bar is translucent, so whatever the photo beneath it, its text is
+   the theme's text, not muted: the theme check holds text (and the
+   controls and the focus ring) to their contrasts on the bar over black
+   and over white, as it can hold nothing muted to. Its 72% is the check's
+   (formats.CheckContrast, checkContrast in theme.ts). A caption on its
+   card keeps the card's colours, which are opaque. */
+.show[data-controls="floating"] .counter,
+.show[data-controls="floating"]:not([data-card="true"]) .credit {
+  color: var(--clack-text);
 }
 
 .show[data-controls="floating"] .counter {
@@ -575,12 +591,12 @@
 }
 
 /* A show with no captions: a bar of the controls alone, as wide as they are. */
-.show[data-controls="floating"]:not([data-titles="true"], [data-credits="true"][data-credit="true"]) .below {
+.show[data-controls="floating"]:not([data-captioned="true"]) .below {
   width: auto;
   padding-inline: 8px;
 }
 
-.show[data-controls="floating"]:not([data-titles="true"], [data-credits="true"][data-credit="true"]) .caption {
+.show[data-controls="floating"]:not([data-captioned="true"]) .caption {
   display: none;
 }
 

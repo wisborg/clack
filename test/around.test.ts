@@ -4,12 +4,7 @@
 import type { ClackShow } from "../src/clack";
 import { transitionFrames, transitionOf } from "../src/show";
 import { assert, assertEqual, skip, sleep, test } from "./harness";
-import { echo, figures, img, makeShow, part, pointer, settledOn, showBox as box, waitFor } from "./util";
-
-/** A theme file extending base, made of these tokens. */
-function themed(name: string, tokens: Record<string, unknown>): string {
-  return echo(JSON.stringify({ format: "clack-theme/1", name, ...tokens }), { path: `${name}.json` });
-}
+import { figures, img, makeShow, part, pointer, settledOn, showBox as box, themed, waitFor } from "./util";
 
 /** Whether the visitor could see and point at the controls now. */
 function shown(e: Element): boolean {
@@ -85,7 +80,10 @@ test("controls shown only for activity are still there for the keyboard, and sho
   const show = makeShow([{}, {}], { theme: "darkroom" });
   await settledOn(show, "1 of 2");
   const next = part(show, ".next") as HTMLButtonElement;
-  assertEqual(next.tabIndex, 0, "in the tab order");
+  // Focusable, unseen as it is: not hidden from the keyboard, as display
+  // none, visibility hidden or inert would hide it.
+  next.focus();
+  assertEqual(show.shadowRoot!.activeElement, next, "focusable while unseen");
   if (!document.hasFocus()) skip("this engine's window does not have focus, so nothing in it is focused as a visitor's keyboard would");
   next.focus();
   await waitFor(() => shown(part(show, ".controls")), "shown with focus among them");
@@ -162,14 +160,20 @@ test("where the text runs right to left, the next slides in from the left", asyn
 });
 
 test("controls focused by a click or a tap, not the keyboard, still go", async () => {
+  // Without the window's focus, nothing is focused as the keyboard focuses
+  // either, and the controls would go whatever the focus they hold.
+  if (!document.hasFocus()) skip("this engine's window does not have focus, so the keyboard's focus cannot be told from a click's");
   const show = makeShow([{}, {}], { theme: "darkroom" });
   await settledOn(show, "1 of 2");
   const p = pointer(show);
   p.send("pointermove", p.left + 10, { buttons: 0 });
   // As a click leaves it: focused, but not as the keyboard focuses.
-  (part(show, ".next") as HTMLButtonElement).focus({ focusVisible: false } as FocusOptions);
+  const next = part(show, ".next") as HTMLButtonElement;
+  next.focus({ focusVisible: false } as FocusOptions);
+  assertEqual(show.shadowRoot!.activeElement, next, "focused");
   await sleep(3300);
   assert(!shown(part(show, ".controls")), "gone a few seconds after, focus or not");
+  next.blur();
 });
 
 test("the first photo, and a new photo of the slide on screen, fade in rather than slide", async () => {
@@ -250,4 +254,84 @@ test("a theme that shows no credit draws no card for a slide with only a credit"
   await waitFor(() => box(show).dataset["credit"] === "false", "the theme");
   await settledOn(show, "1 of 2");
   assertEqual(getComputedStyle(part(show, ".caption")).backgroundColor, "rgba(0, 0, 0, 0)", "no card");
+});
+
+test("a change of theme redraws the caption card: none for a slide whose only words the theme does not show, and back", async () => {
+  const show = makeShow([{ credit: "Someone" }, { title: "Titled" }], { theme: "mat" });
+  await settledOn(show, "1 of 2");
+  const caption = part(show, ".caption");
+  assertEqual(getComputedStyle(caption).visibility, "visible", "mat shows the credit, on its card");
+  show.theme = themed("mat-uncredited-2", { extends: "mat", caption: { credit: false } });
+  await waitFor(() => box(show).dataset["credit"] === "false", "the theme");
+  assertEqual(getComputedStyle(caption).visibility, "hidden", "a theme that shows no credit: no card with nothing on it");
+  show.theme = "mat";
+  assertEqual(getComputedStyle(caption).visibility, "visible", "mat again: the credit on its card again");
+  show.theme = themed("mat-uncredited-2", { extends: "mat", caption: { credit: false } });
+  await waitFor(() => box(show).dataset["credit"] === "false", "the theme again");
+  await show.next();
+  await settledOn(show, "2 of 2");
+  assertEqual(getComputedStyle(caption).visibility, "visible", "a title, on its card, credit or not");
+});
+
+test("on the floating bar, a long title or credit is cut short of the controls", async () => {
+  const theme = themed("minimal-credited", { extends: "minimal", caption: { credit: true }, controls: { reveal: "always" } });
+  const long = "Photograph by Someone With a Long Name, courtesy of Some Very Long Archive Name Indeed";
+  const show = makeShow([{ title: long, credit: long }], { theme });
+  show.style.width = "800px";
+  await waitFor(() => box(show).dataset["credit"] === "true" && box(show).dataset["reveal"] === "always", "the theme");
+  await settledOn(show, "1 of 1");
+  const controls = part(show, ".controls").getBoundingClientRect();
+  const bar = part(show, ".below").getBoundingClientRect();
+  assert(controls.right <= bar.right, `the controls, to ${controls.right}, still on the bar, to ${bar.right}: not pushed off it`);
+  for (const name of [".title", ".credit"]) {
+    const r = part(show, name).getBoundingClientRect();
+    assert(r.right <= controls.left, `${name} ends at ${r.right}, short of the controls at ${controls.left}`);
+    assertEqual(getComputedStyle(part(show, name)).overflowX, "hidden", `${name}: what is past its end not drawn`);
+  }
+});
+
+test("on the floating bar, over whatever photo, the counter and the credit are in the text's colour; on a card, in the card's", async () => {
+  const theme = themed("minimal-credited-2", { extends: "minimal", caption: { credit: true } });
+  const show = makeShow([{ title: "A", credit: "B" }, {}], { theme });
+  await waitFor(() => box(show).dataset["credit"] === "true", "the theme");
+  await settledOn(show, "1 of 2");
+  const text = getComputedStyle(part(show, ".title")).color;
+  assertEqual(getComputedStyle(part(show, ".counter")).color, text, "the counter");
+  assertEqual(getComputedStyle(part(show, ".credit")).color, text, "the credit");
+  const card = themed("minimal-carded", { extends: "minimal", caption: { credit: true, card: true } });
+  const carded = makeShow([{ title: "A", credit: "B" }, {}], { theme: card });
+  await waitFor(() => box(carded).dataset["card"] === "true", "the theme");
+  await settledOn(carded, "1 of 2");
+  carded.style.setProperty("--clack-label-muted", "rgb(1, 2, 3)");
+  assertEqual(getComputedStyle(part(carded, ".credit")).color, "rgb(1, 2, 3)", "on a card, the credit in the card's own muted colour");
+});
+
+test("a photo held aside by a drag when a key moves on slides on from where it is held, and the rest of the drag is no swipe", async () => {
+  if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
+  const theme = themed("sliding-held", { transition: { type: "slide", duration: "600ms" } });
+  const show = makeShow([{}, {}, {}], { theme });
+  await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
+  show.style.setProperty("--clack-transition-duration", "600ms");
+  await settledOn(show, "1 of 3");
+  await sleep(200); // the next preloaded
+  const leaving = figures(show)[0]!;
+  const p = pointer(show);
+  const x = p.left + p.width / 2;
+  p.send("pointerdown", x);
+  p.send("pointermove", x - 60);
+  p.send("pointermove", x - 120);
+  await waitFor(() => leaving.style.getPropertyValue("--clack-drag") !== "", "the photo held aside");
+  const held = leaving.style.getPropertyValue("--clack-drag");
+  show.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+  await waitFor(() => leaving.getAnimations().length > 0, "the photos to move");
+  const frames = (leaving.getAnimations()[0]!.effect as KeyframeEffect).getKeyframes();
+  assertEqual(String(frames[0]!["transform"]), `translateX(${held})`, "from where it was held, not from the middle");
+  // The finger goes on moving, and lets go as a swipe would.
+  p.send("pointermove", x - 200);
+  assert(leaving.isConnected && leaving.getAnimations().length > 0, "the slide is not cut short by the rest of the drag");
+  p.send("pointerup", x - 200, { buttons: 0 });
+  await settledOn(show, "2 of 3");
+  await sleep(100);
+  assertEqual(show.index, 1, "the second, and not on to the third: the letting go was no swipe");
+  assertEqual(figures(show)[0]!.style.getPropertyValue("--clack-drag"), "", "the photo on screen not held aside");
 });
