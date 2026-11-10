@@ -1,8 +1,8 @@
 // What a theme puts around the photo: the caption card, floating controls,
 // controls shown only for the visitor's activity, and how one photo gives
 // way to the next.
-import type { ClackShow } from "../src/clack";
-import { transitionFrames, transitionOf } from "../src/show";
+import type { ClackShow, SlideInput } from "../src/clack";
+import { shadowReach, transitionFrames, transitionOf } from "../src/show";
 import { assert, assertEqual, skip, sleep, test } from "./harness";
 import { figures, img, makeShow, part, pointer, settledOn, showBox as box, themed, waitFor } from "./util";
 
@@ -99,10 +99,24 @@ test("controls shown only for activity are still there for the keyboard, and sho
   next.blur();
 });
 
-test("floating controls shown only for activity hide the whole bar", async () => {
+test("floating controls shown only for activity go, and the bar with them, but the caption stays, in a box of its own", async () => {
   const show = makeShow([{ title: "A" }, {}], { theme: "minimal" });
   await settledOn(show, "1 of 2");
-  assert(!shown(part(show, ".below")), "the bar, caption and all, unseen");
+  assertEqual(getComputedStyle(part(show, ".controls")).opacity, "0", "the controls unseen");
+  const bar = getComputedStyle(part(show, ".below"));
+  assertEqual(bar.backgroundColor, "rgba(0, 0, 0, 0)", "no bar drawn");
+  assertEqual(bar.pointerEvents, "none", "nor in the pointer's way");
+  const caption = part(show, ".caption");
+  assert(getComputedStyle(caption).opacity === "1" && getComputedStyle(part(show, ".below")).opacity === "1" && getComputedStyle(caption).visibility === "visible", "the caption still seen, as a caption is");
+  assert(getComputedStyle(caption).backgroundColor !== "rgba(0, 0, 0, 0)", "on a box of the bar's surface, not on the bare photo");
+  // Once the visitor is here, the bar is back, and the caption's box goes into it.
+  const p = pointer(show);
+  p.send("pointermove", p.left + 10, { buttons: 0 });
+  await waitFor(() => shown(part(show, ".controls")), "the controls shown when the pointer moves");
+  await waitFor(() => getComputedStyle(caption).backgroundColor === "rgba(0, 0, 0, 0)", "the caption on the bar again");
+  const none = makeShow([{}, {}], { theme: "minimal" });
+  await settledOn(none, "1 of 2");
+  assert(!shown(part(none, ".below")), "a show with no captions: the whole bar unseen");
   const always = makeShow([{ title: "A" }, {}], { theme: themed("minimal-always", { extends: "minimal", controls: { reveal: "always" } }) });
   await waitFor(() => box(always).dataset["reveal"] === "always", "the theme");
   await settledOn(always, "1 of 2");
@@ -243,8 +257,12 @@ test("where the text runs right to left, the floating bar's wider side is the ca
   show.style.width = "800px";
   await waitFor(() => box(show).dataset["reveal"] === "always", "the theme");
   await settledOn(show, "1 of 1");
-  const bar = getComputedStyle(part(show, ".below"));
-  assertEqual(`${bar.paddingRight} ${bar.paddingLeft}`, "18px 8px", "18px on the right, where the caption is");
+  const bar = part(show, ".below").getBoundingClientRect();
+  const caption = part(show, ".caption").getBoundingClientRect();
+  const controls = part(show, ".controls").getBoundingClientRect();
+  assert(Math.abs(bar.right - caption.right - 8) < 1, `the caption at the right, ${bar.right - caption.right}px in`);
+  assert(Math.abs(controls.left - bar.left - 8) < 1, `the controls at the left, ${controls.left - bar.left}px in`);
+  assertEqual(getComputedStyle(part(show, ".caption")).paddingRight, "10px", "its text 18px in, with the caption's own 10px");
 });
 
 test("a theme that shows no credit draws no card for a slide with only a credit", async () => {
@@ -396,8 +414,85 @@ test("with reduced motion, a photo moved aside fades where it is, carrying on no
 });
 
 test("floating, the bar fades as one: the controls on it are not faded again", async () => {
-  const show = makeShow([{ title: "A" }, {}], { theme: "minimal" });
+  const show = makeShow([{}, {}], { theme: "minimal" });
   await settledOn(show, "1 of 2");
   assert(!shown(part(show, ".below")), "the bar unseen");
   assertEqual(getComputedStyle(part(show, ".controls")).opacity, "1", "the controls on it, not faded of their own");
+});
+
+test("as the floating bar comes and goes, the caption does not move", async () => {
+  const show = makeShow([{ title: "Still here" }, {}], { theme: "minimal" });
+  show.style.setProperty("--clack-transition-duration", "0s");
+  show.style.width = "800px";
+  await settledOn(show, "1 of 2");
+  const before = part(show, ".title").getBoundingClientRect();
+  const p = pointer(show);
+  p.send("pointermove", p.left + 10, { buttons: 0 });
+  await waitFor(() => shown(part(show, ".controls")), "the bar shown");
+  const after = part(show, ".title").getBoundingClientRect();
+  assertEqual(`${after.left},${after.top}`, `${before.left},${before.top}`, "the title where it was");
+});
+
+test("the controls do not move as the slide's number gains a digit", async () => {
+  const theme = themed("minimal-always-count", { extends: "minimal", controls: { reveal: "always" } });
+  // "99 / 120" to "100 / 120": past what the counter's least width holds.
+  const show = makeShow(Array.from({ length: 120 }, (_, i) => ({ title: `Slide ${i + 1}` })), { theme });
+  show.style.width = "800px";
+  await waitFor(() => box(show).dataset["reveal"] === "always", "the theme");
+  await settledOn(show, "1 of 120");
+  await show.goTo(98);
+  await settledOn(show, "99 of 120");
+  const before = part(show, ".previous").getBoundingClientRect().left;
+  await show.goTo(99);
+  await settledOn(show, "100 of 120");
+  assertEqual(part(show, ".previous").getBoundingClientRect().left, before, "Previous where it was");
+});
+
+test("a step slides though the photo on screen changed while the next loaded, and says where it came from", async () => {
+  if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
+  const theme = themed("sliding-changed", { transition: { type: "slide", duration: "600ms" } });
+  const slide = (id: string, url: string): SlideInput => ({ id, alt: id, width: 300, height: 200, sources: [{ url, width: 300 }] });
+  const show = makeShow([], { theme });
+  await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
+  show.style.setProperty("--clack-transition-duration", "600ms");
+  const second = slide("b", img(300, 200, "aa8866", 800));
+  show.slides = [slide("a", img(300, 200)), second];
+  await settledOn(show, "1 of 2");
+  const seen: number[] = [];
+  show.addEventListener("slidechange", (e) => seen.push((e as CustomEvent<{ previous: number }>).detail.previous));
+  const leaving = figures(show)[0]!;
+  void show.next();
+  // The first slide's photo changes while the second is on its way.
+  show.slides = [slide("a", img(300, 200, "88aa66")), second];
+  await waitFor(() => leaving.getAnimations().length > 0, "the photos to move");
+  const coming = figures(show).find((f) => f !== leaving)!;
+  const frames = (coming.getAnimations()[0]!.effect as KeyframeEffect).getKeyframes();
+  assert(String(frames[0]!["transform"] ?? "").startsWith("translateX"), `slid in: ${JSON.stringify(frames[0])}`);
+  assertEqual(seen.join(), "0", "from the first slide");
+  await settledOn(show, "2 of 2");
+});
+
+test("after a swipe, the next keeps the wall's width from the last as both go, as after a key", () => {
+  const swiped = transitionFrames("slide", -1, -200, { beyond: 88 });
+  assertEqual(swiped.incoming[0]!.transform, "translateX(calc(-200px + calc(100% + 88px)))", "a stage and the margin from where the last was let go");
+  assertEqual(swiped.outgoing[1]!.transform, "translateX(calc(-100% - 88px))", "and the last as far beyond, the other way");
+});
+
+test("a slide moves a photo past the margin by as much as any shadow Clack draws under it reaches", async () => {
+  const reach = (shadow: string): number => {
+    let most = 0;
+    // Each layer, as computed: a colour, then x, y, blur and spread in px.
+    for (const layer of shadow.split(/,(?![^(]*\))/)) {
+      if (layer.includes("inset") || layer.trim() === "none") continue;
+      const [x, , blur, spread] = (layer.match(/-?[\d.]+px/g) ?? []).map(parseFloat);
+      most = Math.max(most, Math.abs(x ?? 0) + (blur ?? 0) + (spread ?? 0));
+    }
+    return most;
+  };
+  for (const [theme, at] of [["gallery", ".slide img"], ["mat", ".slide .mount"]] as const) {
+    const show = makeShow([{}], { theme });
+    await settledOn(show, "1 of 1");
+    const r = reach(getComputedStyle(part(show, at)).boxShadow);
+    assert(r > 0 && r <= shadowReach, `${theme}: its shadow reaches ${r}px, within the ${shadowReach}px a slide allows`);
+  }
 });

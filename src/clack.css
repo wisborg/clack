@@ -383,7 +383,9 @@
 }
 
 .counter {
-  min-width: 64px;
+  /* Room for the widest it will be, "120 / 120": its digits are of one
+     width (tabular), a ch each, the space and slash less than one each. */
+  min-width: max(64px, calc((2 * var(--clack-count-digits, 1) + 3) * 1ch));
   text-align: center;
   font-size: 13px;
   font-variant-numeric: tabular-nums;
@@ -531,8 +533,10 @@
   color: var(--clack-label-text);
 }
 
-.show[data-card="true"] .caption.untitled.uncredited,
-.show[data-card="true"][data-show-credit="false"] .caption.untitled {
+/* On a card or on the floating bar, which draw a box for the caption, a
+   slide with nothing to say keeps its place, but no empty box. */
+.show:is([data-card="true"], [data-controls="floating"]) .caption.untitled.uncredited,
+.show:is([data-card="true"], [data-controls="floating"])[data-show-credit="false"] .caption.untitled {
   visibility: hidden;
 }
 
@@ -547,6 +551,13 @@
    one width whatever the title, so a control does not move from under
    the pointer from one slide to the next: the title takes what room the
    controls leave, and is cut short if it needs more. */
+.show[data-controls="floating"] {
+  /* The bar's surface, translucent over the photo: the caption's too, when
+     the bar is not drawn. The theme checkers hold their colours to it at
+     72% (formats.barOpacity; TestBarOpacity holds the three to one). */
+  --clack-bar: color-mix(in srgb, var(--clack-surface) 72%, transparent);
+}
+
 .show[data-controls="floating"] .below {
   /* The stage's cell, row and column: not a column of its own beside it. */
   grid-area: 2 / 1;
@@ -559,9 +570,10 @@
   box-sizing: border-box;
   margin-bottom: clamp(12px, 2cqi, 20px);
   padding-block: 6px;
-  padding-inline: 18px 8px;
+  /* 18px before the caption's text, with the caption's own 10px. */
+  padding-inline: 8px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--clack-surface) 72%, transparent);
+  background: var(--clack-bar);
   -webkit-backdrop-filter: blur(18px) saturate(1.4);
   backdrop-filter: blur(18px) saturate(1.4);
   box-shadow:
@@ -570,8 +582,18 @@
   white-space: nowrap;
 }
 
+/* The caption as wide as what it says, up to the room the controls leave
+   it, which are at the bar's far end; with a box of its own, which is
+   drawn when the bar is not (on-activity, below), and so the same box
+   whether the bar is drawn or not: nothing moves as it comes and goes. */
 .show[data-controls="floating"] .caption {
-  flex: 1;
+  flex: 0 1 auto;
+  padding: 3px 10px;
+  border-radius: 999px;
+}
+
+.show[data-controls="floating"] .controls {
+  margin-inline-start: auto;
 }
 
 .show[data-controls="floating"] :is(.title, .credit) {
@@ -591,13 +613,12 @@
 }
 
 .show[data-controls="floating"] .counter {
-  min-width: 48px;
+  min-width: max(48px, calc((2 * var(--clack-count-digits, 1) + 3) * 1ch));
 }
 
 /* A show with no captions: a bar of the controls alone, as wide as they are. */
 .show[data-controls="floating"]:not([data-captioned="true"]) .below {
   width: auto;
-  padding-inline: 8px;
 }
 
 .show[data-controls="floating"]:not([data-captioned="true"]) .caption {
@@ -615,7 +636,6 @@
     flex-wrap: wrap;
     justify-content: center;
     row-gap: 2px;
-    padding-inline: 8px;
   }
 
   .show[data-controls="floating"][data-captioned="true"] .below {
@@ -625,34 +645,64 @@
 
   .show[data-controls="floating"] .caption {
     flex-basis: 100%;
-    padding-inline: 10px;
+    border-radius: 12px;
     text-align: center;
+  }
+
+  .show[data-controls="floating"] .controls {
+    margin-inline-start: 0;
   }
 }
 
 /* Shown only for the visitor's activity (controls.reveal: #onActivity):
-   the controls -- in floating, the whole bar -- unseen and not in the
-   pointer's way until the pointer moves or a key or focus arrives, and
-   again a few seconds after. Still there for the keyboard, and shown
-   while it is among them: focus the keyboard brought (:focus-visible),
-   not the focus a click or a tap leaves on a button, which would keep
-   them up for good. */
+   the controls unseen and not in the pointer's way until the pointer
+   moves or a key or focus arrives, and again a few seconds after. Still
+   there for the keyboard, and shown while it is among them: focus the
+   keyboard brought (:focus-visible), not the focus a click or a tap leaves
+   on a button, which would keep them up for good. The caption stays, as a
+   caption is shown: in floating, the bar goes, and the caption keeps a box
+   of the bar's own (so the bar's contrasts hold for it); a show with no
+   captions loses the whole bar. */
 .controls,
-.show[data-controls="floating"] .below {
-  transition: opacity 240ms var(--clack-ease);
+.show[data-controls="floating"] :is(.below, .caption) {
+  transition:
+    opacity 240ms var(--clack-ease),
+    background-color 240ms var(--clack-ease),
+    box-shadow 240ms var(--clack-ease),
+    -webkit-backdrop-filter 240ms var(--clack-ease),
+    backdrop-filter 240ms var(--clack-ease);
 }
 
-/* In floating, the bar fades, and the controls on it with it: not each
-   on its own as well, which would fade them twice over. */
+/* Plain: the controls go. Floating with captions: the controls go, from
+   a bar that is no longer drawn. Floating without: the whole bar goes --
+   and only the bar, or the controls on it would fade twice over. */
 .show[data-reveal="on-activity"]:not([data-controls="floating"], .active) .controls:not(:has(:focus-visible)),
-.show[data-reveal="on-activity"][data-controls="floating"]:not(.active) .below:not(:has(:focus-visible)) {
+.show[data-reveal="on-activity"][data-controls="floating"][data-captioned="true"]:not(.active) .below:not(:has(:focus-visible)) .controls,
+.show[data-reveal="on-activity"][data-controls="floating"]:not([data-captioned="true"], .active) .below:not(:has(:focus-visible)) {
   opacity: 0;
   pointer-events: none;
 }
 
+.show[data-reveal="on-activity"][data-controls="floating"][data-captioned="true"]:not(.active) .below:not(:has(:focus-visible)) {
+  background-color: transparent;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  pointer-events: none;
+}
+
+.show[data-reveal="on-activity"][data-controls="floating"][data-captioned="true"]:not([data-card="true"], .active)
+  .below:not(:has(:focus-visible))
+  .caption {
+  background: var(--clack-bar);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  backdrop-filter: blur(18px) saturate(1.4);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.12);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .controls,
-  .show[data-controls="floating"] .below {
+  .show[data-controls="floating"] :is(.below, .caption) {
     transition: none;
   }
 

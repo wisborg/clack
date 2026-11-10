@@ -442,6 +442,33 @@
    "error": "/colors/dark/controlActive"
   },
   {
+   "name": "a hovered control lost on its hairline over a mid-grey canvas",
+   "set": {
+    "/colors/light/canvas": "#808080",
+    "/colors/light/text": "#000000",
+    "/colors/light/muted": "#000000",
+    "/colors/light/control": "#000000",
+    "/colors/light/controlActive": "#000000",
+    "/colors/light/hairline": "rgb(0 0 0 / 0.5)"
+   },
+   "error": "/colors/light/controlActive"
+  },
+  {
+   "name": "the same colours with floating controls, which are never on the canvas, enough on the bar",
+   "set": {
+    "/colors/light/canvas": "#808080",
+    "/colors/light/text": "#000000",
+    "/colors/light/muted": "#000000",
+    "/colors/light/control": "#000000",
+    "/colors/light/controlActive": "#000000",
+    "/colors/light/hairline": "rgb(0 0 0 / 0.5)",
+    "/controls": {
+     "style": "floating"
+    }
+   },
+   "error": null
+  },
+  {
    "name": "a whole document that is a list",
    "set": {
     "": []

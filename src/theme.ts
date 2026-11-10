@@ -294,10 +294,13 @@ function checkContrast(resolved: Obj): Problem[] {
       const c = contrast(active, composite(hairline, beneath));
       if (c < hoverMin) out.push({ path: at("controlActive"), message: `on hairline over ${name} is ${c.toFixed(2)}:1, needs ${hoverMin.toFixed(1)}:1` });
     };
-    const canvas = get("canvas");
-    if (canvas) hover(canvas, "canvas");
+    // Plain controls are drawn on the canvas, floating ones only ever on the bar.
     const controls = resolved["controls"] as Obj | undefined;
-    if (controls?.["style"] !== "floating") continue;
+    if (controls?.["style"] !== "floating") {
+      const canvas = get("canvas");
+      if (canvas) hover(canvas, "canvas");
+      continue;
+    }
     const surface = get("surface");
     if (!surface || surface[3] !== 1) continue;
     const beneath: [string, RGBA][] = [

@@ -515,11 +515,13 @@ func CheckContrast(resolved map[string]any) []error {
 				errs = append(errs, jsonschema.Error{Path: at("controlActive"), Message: fmt.Sprintf("on hairline over %s is %.2f:1, needs %.1f:1", name, c, hoverMin)})
 			}
 		}
-		if canvas, ok := get("canvas"); ok {
-			hover(canvas, "canvas")
-		}
+		// Plain controls are drawn on the canvas, floating ones only ever
+		// on the bar.
 		controls, _ := resolved["controls"].(map[string]any)
 		if controls["style"] != "floating" {
+			if canvas, ok := get("canvas"); ok {
+				hover(canvas, "canvas")
+			}
 			continue
 		}
 		surface, ok := get("surface")

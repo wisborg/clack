@@ -276,7 +276,7 @@ func TestBarOpacity(t *testing.T) {
 		t.Errorf("src/theme.ts does not say %q", ts)
 	}
 	percent := strconv.FormatFloat(math.Round(barOpacity*1000)/10, 'f', -1, 64)
-	css := fmt.Sprintf("background: color-mix(in srgb, var(--clack-surface) %s%%, transparent);", percent)
+	css := fmt.Sprintf("--clack-bar: color-mix(in srgb, var(--clack-surface) %s%%, transparent);", percent)
 	if !strings.Contains(read("src/clack.css"), css) {
 		t.Errorf("src/clack.css does not draw the bar as %q", css)
 	}

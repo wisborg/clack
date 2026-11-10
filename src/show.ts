@@ -290,7 +290,7 @@ export function transitionFrames(
   const from = `translateX(${offset ?? 0}px)`;
   if (type === "slide") {
     const beyond = o.beyond ?? 0;
-    const away = (sign: number): string => (beyond ? `calc(${sign * 100}% + ${sign * beyond}px)` : `${sign * 100}%`);
+    const away = (sign: number): string => (beyond ? `calc(${sign * 100}% ${sign < 0 ? "-" : "+"} ${beyond}px)` : `${sign * 100}%`);
     // The next starts beside the last, where a swipe let go of it.
     const beside = offset ? `translateX(calc(${offset}px + ${away(-exit)}))` : `translateX(${away(-exit)})`;
     return {
@@ -316,7 +316,7 @@ export function transitionFrames(
  * a photo this much further than the show's margin, so not even its
  * shadow is seen there.
  */
-const shadowReach = 48;
+export const shadowReach = 48;
 
 function el<K extends keyof HTMLElementTagNameMap>(name: K, className: string, part = ""): HTMLElementTagNameMap[K] {
   const e = document.createElement(name);
@@ -465,6 +465,15 @@ export class ClackShow extends HTMLElement {
   /** When the visitor was last active here, and with what kind of pointer, if one. */
   #lastActivity = 0;
   #lastPointer = "";
+  /**
+   * Whether the pointer last moved or pressed on the controls (in
+   * floating, the bar) while they were shown: only then does it rest on
+   * them (#onIdle). Controls that appear under a pointer left still
+   * there -- shown by a key -- are hovered, but not rested on.
+   */
+  #pointerOn = false;
+  /** The key of the slide whose photo is on screen (even if the slide has since had a new one), or null for none or the placeholder. */
+  #figureKey: string | null = null;
   /** Where the photo was, springing back, when a drag caught it again: where the drag starts from. */
   #caught = 0;
   /** The photo springing back after a drag that went nowhere, while it does. */
@@ -1100,6 +1109,7 @@ export class ClackShow extends HTMLElement {
       this.#endDrag();
       this.#figure?.remove();
       this.#figure = null;
+      this.#figureKey = null;
       this.#caption(null);
       this.#updateControls();
       return;
@@ -1308,12 +1318,16 @@ export class ClackShow extends HTMLElement {
 
   #display(index: number, photo: Photo, how: How): void {
     this.#finishTransitions();
-    const previous = this.#shown;
     const old = this.#figure;
+    // The slide whose photo is on screen, where it is now: still there
+    // though its photo has changed since (#shown is -1 then), or -1.
+    const from = old && this.#figureKey !== null ? (this.#indexByKey.get(this.#figureKey) ?? -1) : -1;
+    const previous = from >= 0 && from !== index ? from : this.#shown;
     const slide = this.#slides[index]!;
     const figure = this.#makeFigure(index, slide, photo);
     this.#stage.append(figure);
     this.#figure = figure;
+    this.#figureKey = slide.key;
     this.#shown = index;
     this.#caption(slide);
     this.#updateControls();
@@ -1322,10 +1336,10 @@ export class ClackShow extends HTMLElement {
     }
 
     let transition = old ? this.#transition() : null;
-    // A slide only from one slide to another: a photo replacing its
-    // placeholder, or a new photo of the slide on screen (#shown is -1
-    // once its photo changes), fades in place.
-    if (transition?.type === "slide" && previous < 0) transition = { ...transition, type: "crossfade" };
+    // A slide only from one slide to another -- though the one on screen
+    // has had a new photo meanwhile: a photo replacing its placeholder, or
+    // a new photo of the slide on screen, fades in place.
+    if (transition?.type === "slide" && (from < 0 || from === index)) transition = { ...transition, type: "crossfade" };
     // The old photo held aside by a drag, and another slide shown by
     // other means -- a key, a button, the page: it leaves from where the
     // finger holds it, and the rest of the gesture is not a swipe.
@@ -1341,7 +1355,7 @@ export class ClackShow extends HTMLElement {
       else if (transition.type === "slide" || offset !== null) exit = (-this.#direction * (this.#rtl() ? -1 : 1)) as -1 | 1;
       const frames = transitionFrames(transition.type, exit, offset, {
         beyond: transition.type === "slide" ? this.#margin() : 0,
-        still: matchMedia("(prefers-reduced-motion: reduce)").matches,
+        still: transition.reduced,
       });
       // Cut off at the show's sides while any moves (#settleMoving).
       if (transition.type === "slide" || offset !== null) this.#box.classList.add("moving");
@@ -1411,7 +1425,7 @@ export class ClackShow extends HTMLElement {
    * a hidden page at all, which would leave the old slide in place until
    * the page is shown again.
    */
-  #transition(): { type: "crossfade" | "slide"; ms: number } | null {
+  #transition(): { type: "crossfade" | "slide"; ms: number; reduced: boolean } | null {
     if (document.visibilityState === "hidden") {
       return null;
     }
@@ -1430,7 +1444,10 @@ export class ClackShow extends HTMLElement {
     // an engine that has it), is told from 0s; computed, it is always
     // seconds. A show out of the page has no computed style at all.
     const s = parseFloat(style.animationDuration);
-    return transitionOf(type, s > 0 ? Math.round(s * 1000) - 1000 : NaN, matchMedia("(prefers-reduced-motion: reduce)").matches);
+    // Asked once, for the transition and for how a photo moved aside goes.
+    const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const played = transitionOf(type, s > 0 ? Math.round(s * 1000) - 1000 : NaN, reduced);
+    return played && { ...played, reduced };
   }
 
   #caption(slide: Keyed | null): void {
@@ -1471,7 +1488,11 @@ export class ClackShow extends HTMLElement {
    */
   readonly #onActivity = (e: Event): void => {
     if (this.#box.dataset["reveal"] !== "on-activity") return;
-    if (e instanceof PointerEvent) this.#lastPointer = e.pointerType;
+    if (e instanceof PointerEvent) {
+      this.#lastPointer = e.pointerType;
+      // Unseen, they are not in the pointer's way (clack.css), so never on its path.
+      this.#pointerOn = e.composedPath().includes(this.#restingOn());
+    }
     this.#lastActivity = performance.now();
     this.#box.classList.add("active");
     // One timer for all of it, however many events: it looks again when
@@ -1487,8 +1508,7 @@ export class ClackShow extends HTMLElement {
   #onIdle(): void {
     this.#idle = undefined;
     const left = revealFor - (performance.now() - this.#lastActivity);
-    const floating = this.#box.dataset["controls"] === "floating";
-    const resting = this.#lastPointer !== "touch" && (floating ? this.#below : this.#controls).matches(":hover");
+    const resting = this.#lastPointer !== "touch" && this.#pointerOn && this.#restingOn().matches(":hover");
     if (left > 0 || resting) {
       this.#idle = setTimeout(() => this.#onIdle(), left > 0 ? left : revealFor);
       return;
@@ -1496,10 +1516,18 @@ export class ClackShow extends HTMLElement {
     this.#box.classList.remove("active");
   }
 
+  /** What the pointer rests on, to keep controls shown for activity up: the controls, or in floating, the bar. */
+  #restingOn(): HTMLElement {
+    return this.#box.dataset["controls"] === "floating" ? this.#below : this.#controls;
+  }
+
   #updateControls(): void {
     const count = this.#slides.length;
     const at = Math.max(this.#target, 0);
     this.#counter.textContent = count ? `${at + 1} / ${count}` : "";
+    // As wide as the widest it will be in this show, so the controls beside
+    // it do not move as the slide's number gains a digit (clack.css).
+    this.#counter.style.setProperty("--clack-count-digits", String(String(count).length));
     for (const [button, delta] of [[this.#previous, -1], [this.#next, 1]] as const) {
       // aria-disabled rather than disabled: a disabled button drops the
       // keyboard focus, and the visitor who pressed it would lose their place.
