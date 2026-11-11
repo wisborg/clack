@@ -528,6 +528,11 @@ test("a shadow's reach is measured as drawn, to three standard deviations of its
   assertEqual(reach({ outline: "6px solid red", outlineOffset: "3px" }), 9, "an outline");
   // An ancestor's drop shadow is cast from what is drawn in it.
   assertEqual(reach({ outline: "8px solid white" }, "drop-shadow(0 0 6px black)"), 26, "an outline inside a drop shadow");
+  // A descendant a page moves past the element's side, its shadow from there.
+  e.style.position = "relative";
+  e.style.left = "40px";
+  assertEqual(reach({ boxShadow: "0 0 20px black" }), 70, "a descendant moved 40px past the side");
+  e.style.position = e.style.left = "";
   e.style.display = "none";
   assertEqual(reach({ boxShadow: "0 0 40px black" }), 0, "nothing of what is not displayed");
 });
@@ -790,6 +795,16 @@ test("a step while the last is still sliding in hurries it into place, then slid
   await waitFor(() => first.getAnimations().length > 0, "the photos to move");
   const second = figures(show).find((f) => f !== first)!;
   await sleep(100);
+  // How far the second gets, frame by frame, before it is in place: to its
+  // end, hurried there -- not cut off part way, and snapped.
+  const coming = second.getAnimations()[0]!;
+  let furthest = 0;
+  const watch = (): void => {
+    if (coming.playState === "finished") return;
+    furthest = Math.max(furthest, coming.effect?.getComputedTiming().progress ?? 0);
+    requestAnimationFrame(watch);
+  };
+  requestAnimationFrame(watch);
   const pressed = performance.now();
   void show.next();
   await sleep(0);
@@ -807,6 +822,7 @@ test("a step while the last is still sliding in hurries it into place, then slid
   // In a moment (120ms, give or take frames), not the rest of the slide's 2s.
   const waited = performance.now() - pressed;
   assert(waited < 1000, `the next slide ${Math.round(waited)}ms after the step`);
+  assert(furthest > 0.6, `seen nearly in place before the next, at ${furthest.toFixed(2)} of the way, not snapped there`);
   assert(most <= 2, `one slide at a time: ${most} photos at once`);
   const out = String((second.getAnimations()[0]!.effect as KeyframeEffect).getKeyframes()[0]!["transform"]);
   assertEqual(out, "translateX(0px)", "the second leaves from in place");
@@ -1006,7 +1022,7 @@ test("steps quicker than a slide, as a key held down, never pile photos up past 
   await waitFor(() => figures(show).length === 1, "one, once they have stopped");
 });
 
-test("a swipe during a slide moves on at once, from where the finger let go: the photo leaving goes", async () => {
+test("a swipe during a slide moves on at once, from where the finger let go, the photo leaving hurrying on out", async () => {
   if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
   const theme = themed("sliding-swiped", { transition: { type: "slide", duration: "2000ms" } });
   const show = makeShow([{}, {}, {}], { theme });
@@ -1020,15 +1036,43 @@ test("a swipe during a slide moves on at once, from where the finger let go: the
   const second = figures(show).find((f) => f !== first)!;
   await sleep(100);
   const p = pointer(show);
-  p.swipe(p.left + p.width * 0.8, p.left + p.width * 0.2);
+  const [from, to] = [p.left + p.width * 0.8, p.left + p.width * 0.2];
+  p.send("pointerdown", from);
+  for (let i = 1; i <= 8; i++) p.send("pointermove", from + ((to - from) * i) / 8);
+  const held = parseFloat(second.style.getPropertyValue("--clack-drag"));
+  p.send("pointerup", to, { buttons: 0 });
   await sleep(0);
-  assert(!first.isConnected, "the photo leaving gone at once");
-  assertEqual(figures(show).length, 2, "the next coming at once, the second leaving");
+  // The next at once; the first not gone from where it is, but hurrying.
+  assertEqual(figures(show).length, 3, "the next coming at once, beside the two leaving");
+  assert(first.isConnected && first.getAnimations().length === 1, "the first still leaving, not gone from where it was");
   const out = String((second.getAnimations()[0]!.effect as KeyframeEffect).getKeyframes()[0]!["transform"]);
-  assert(new DOMMatrix(out).m41 > 0, `the second from where the finger let it go, ${out}`);
+  assert(Math.abs(new DOMMatrix(out).m41 - held) < 1, `the second from where the finger let it go, ${held}px: ${out}`);
+  await waitFor(() => !first.isConnected, "the first gone once it has left", 1000);
   await settledOn(show, "3 of 3");
 });
 
+test("a swipe back to the slide whose photo is still leaving brings that photo back, not an empty frame", async () => {
+  if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
+  const theme = themed("sliding-swiped-back", { transition: { type: "slide", duration: "2000ms" } });
+  const show = makeShow([{}, {}, {}], { theme });
+  await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
+  show.style.setProperty("--clack-transition-duration", "2000ms");
+  await settledOn(show, "1 of 3");
+  await sleep(300); // the next preloaded
+  const first = figures(show)[0]!;
+  void show.next();
+  await waitFor(() => first.getAnimations().length > 0, "the photos to move");
+  await sleep(100);
+  const p = pointer(show);
+  p.swipe(p.left + p.width * 0.2, p.left + p.width * 0.8);
+  await sleep(0);
+  // One photo element to a slide: the figure leaving with it is gone, and
+  // the one coming back has it.
+  assert(!first.isConnected, "the figure leaving with it gone");
+  const back = figures(show).find((f) => f.getAnimations().some((a) => String((a.effect as KeyframeEffect).getKeyframes().at(-1)!["transform"]) === "translateX(0px)"))!;
+  assert(back?.querySelector("img") !== null, "the photo back in the one coming");
+  await settledOn(show, "1 of 3");
+});
 test("a slide that does not end -- paused by the page -- does not keep the next waiting", async () => {
   if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
   const theme = themed("sliding-paused", { transition: { type: "slide", duration: "600ms" } });
@@ -1086,5 +1130,60 @@ test("focus the keyboard brought to a control while the theme always showed them
   show.setAttribute("theme", "darkroom");
   await waitFor(() => box(show).dataset["reveal"] === "on-activity", "a theme that reveals them for activity");
   assert(box(show).classList.contains("key-focus"), "kept up, by the keyboard's focus, unheard as it came");
+  next.blur();
+});
+
+test("a slide clears a drop shadow the page puts on the stage, which falls from the photos in it", async () => {
+  if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
+  const page = new CSSStyleSheet();
+  page.replaceSync("clack-show.stage-shadow::part(stage) { filter: drop-shadow(0 0 10px black); }");
+  document.adoptedStyleSheets = [...document.adoptedStyleSheets, page];
+  try {
+    const theme = themed("bleed-sliding-stage", { extends: "minimal", transition: { type: "slide", duration: "600ms" } });
+    const show = makeShow([{ width: 600, height: 200 }, { width: 600, height: 200 }], { theme, class: "stage-shadow" });
+    await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
+    show.style.setProperty("--clack-transition-duration", "600ms");
+    await settledOn(show, "1 of 2");
+    await sleep(200); // the next preloaded
+    const leaving = figures(show)[0]!;
+    void show.next();
+    await waitFor(() => leaving.getAnimations().length > 0, "the photos to move");
+    const coming = figures(show).find((f) => f !== leaving)!;
+    const first = String((coming.getAnimations()[0]!.effect as KeyframeEffect).getKeyframes()[0]!["transform"]);
+    assertEqual(first, "translateX(calc(100% + 30px))", "no margin, no shadow of Clack's: three of the drop shadow's deviations");
+    await settledOn(show, "2 of 2");
+  } finally {
+    document.adoptedStyleSheets = document.adoptedStyleSheets.filter((x) => x !== page);
+  }
+});
+
+test("focus is heard in every theme: tabbed back to a control while the theme showed them, it keeps them up after", async () => {
+  const show = makeShow([{}, {}], { theme: "darkroom" });
+  await settledOn(show, "1 of 2");
+  const next = part(show, ".next");
+  focusAs(next, false);
+  show.setAttribute("theme", "base");
+  await waitFor(() => box(show).dataset["reveal"] === "always", "the theme that always shows them");
+  // Away and back by the keyboard.
+  next.blur();
+  focusAs(next, true);
+  show.setAttribute("theme", "darkroom");
+  await waitFor(() => box(show).dataset["reveal"] === "on-activity", "and back");
+  assert(box(show).classList.contains("key-focus"), "kept up, by the keyboard's focus");
+  next.blur();
+});
+
+test("a pointer taken up while the theme showed the controls lets go of the keyboard's focus there", async () => {
+  const show = makeShow([{}, {}], { theme: "darkroom" });
+  await settledOn(show, "1 of 2");
+  const next = part(show, ".next");
+  focusAs(next, true);
+  show.setAttribute("theme", "base");
+  await waitFor(() => box(show).dataset["reveal"] === "always", "the theme that always shows them");
+  pointer(show).send("pointerdown", pointer(show).left + 10);
+  pointer(show).send("pointerup", pointer(show).left + 10, { buttons: 0 });
+  show.setAttribute("theme", "darkroom");
+  await waitFor(() => box(show).dataset["reveal"] === "on-activity", "and back");
+  assert(!box(show).classList.contains("key-focus"), "not kept up for good after the pointer");
   next.blur();
 });

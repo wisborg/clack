@@ -319,12 +319,12 @@ function calls(value: string, name: string): string[] {
   const out: string[] = [];
   for (let at = value.indexOf(`${name}(`); at >= 0; at = value.indexOf(`${name}(`, at + 1)) {
     let depth = 0;
-    let end = at + name.length;
-    for (; end < value.length; end++) {
-      if (value[end] === "(") depth++;
-      else if (value[end] === ")" && --depth === 0) break;
+    let close = at + name.length;
+    for (; close < value.length; close++) {
+      if (value[close] === "(") depth++;
+      else if (value[close] === ")" && --depth === 0) break;
     }
-    out.push(value.slice(at + name.length + 1, end));
+    out.push(value.slice(at + name.length + 1, close));
   }
   return out;
 }
@@ -335,38 +335,58 @@ function pxs(value: string): number[] {
 }
 
 /**
- * How far what e and everything in it draw reaches past e's sides, in px:
- * Clack's or a page's, as computed. A blur's reach is three standard
- * deviations, past which nothing of it shows: a box shadow's blur radius is
- * two of them, so a layer reaches its sideways offset, one and a half
- * times its blur, and its spread (one drawn inside reaches nothing); an
- * outline, its width and offset. A filter acts on all that is drawn in its
- * element, its descendants' shadows too, one function after another: each
- * drop shadow adds its offset and three times its deviation, a blur three
- * times its own. More than is drawn, where a descendant is inside e's
- * sides; never less.
+ * How far a filter spreads what is drawn in its element, in px: its
+ * functions one after another, so their reaches add up -- each drop shadow
+ * its offset and three times its blur, a standard deviation (past three,
+ * nothing of it shows); a blur three times its own.
+ */
+function filterReach(filter: string): number {
+  let reach = 0;
+  for (const shadow of calls(filter, "drop-shadow")) {
+    const [x = 0, , deviation = 0] = pxs(shadow);
+    reach += Math.abs(x) + 3 * deviation;
+  }
+  for (const blur of calls(filter, "blur")) reach += 3 * (pxs(blur)[0] ?? 0);
+  return reach;
+}
+
+/**
+ * How far what e and everything in it draw reaches past e's sides, in px,
+ * as laid out (untouched by a transform around e): Clack's or a page's, as
+ * computed. A descendant's own box, if a page moves it past e's sides; a
+ * box shadow's layers, each by its sideways offset, one and a half times
+ * its blur (its radius is two standard deviations, and past three nothing
+ * shows) and its spread, not one drawn inside; an outline, its width and
+ * offset. A filter spreads all that is drawn in its element, descendants
+ * too (filterReach). Measured from each element's own sides, where they
+ * are inside e's: more than is drawn there, never less.
  */
 export function shadowReach(e: Element): number {
-  const style = getComputedStyle(e);
-  if (style.display === "none") return 0;
-  let drawn = 0;
-  // Layers, at the commas: a colour's own split off a layer only what is
-  // before its lengths, as a computed layer gives its colour first.
-  for (const layer of style.boxShadow.split(",")) {
-    if (/\binset\b/.test(layer)) continue;
-    // A colour, then x, y, blur and spread.
-    const [x = 0, , blur = 0, spread = 0] = pxs(layer);
-    drawn = Math.max(drawn, Math.abs(x) + 1.5 * blur + spread);
-  }
-  if (style.outlineStyle !== "none") drawn = Math.max(drawn, (parseFloat(style.outlineWidth) || 0) + (parseFloat(style.outlineOffset) || 0));
-  for (const child of e.children) drawn = Math.max(drawn, shadowReach(child));
-  let filtered = 0;
-  for (const shadow of calls(style.filter, "drop-shadow")) {
-    const [x = 0, , deviation = 0] = pxs(shadow);
-    filtered += Math.abs(x) + 3 * deviation;
-  }
-  for (const blur of calls(style.filter, "blur")) filtered += 3 * (pxs(blur)[0] ?? 0);
-  return drawn + filtered;
+  const sides = e.getBoundingClientRect();
+  const scale = e instanceof HTMLElement && sides.width > 0 ? e.offsetWidth / sides.width : 1;
+  const reach = (n: Element): number => {
+    const style = getComputedStyle(n);
+    if (style.display === "none") return 0;
+    let past = 0;
+    if (n !== e && style.display !== "contents") {
+      const r = n.getBoundingClientRect();
+      past = Math.max(sides.left - r.left, r.right - sides.right, 0) * scale;
+    }
+    let own = 0;
+    // Layers, at the commas: a colour's own split off a layer only what is
+    // before its lengths, as a computed layer gives its colour first.
+    for (const layer of style.boxShadow.split(",")) {
+      if (/\binset\b/.test(layer)) continue;
+      // A colour, then x, y, blur and spread.
+      const [x = 0, , blur = 0, spread = 0] = pxs(layer);
+      own = Math.max(own, Math.abs(x) + 1.5 * blur + spread);
+    }
+    if (style.outlineStyle !== "none") own = Math.max(own, (parseFloat(style.outlineWidth) || 0) + (parseFloat(style.outlineOffset) || 0));
+    let drawn = past + own;
+    for (const child of n.children) drawn = Math.max(drawn, reach(child));
+    return drawn + filterReach(style.filter);
+  };
+  return reach(e);
 }
 
 function noop(): void {}
@@ -423,7 +443,8 @@ function impression(hash: string): HTMLCanvasElement | null {
 interface Running {
   type: "crossfade" | "slide";
   coming: { figure: HTMLElement; animation: Animation } | null;
-  leaving: { figure: HTMLElement; animation: Animation };
+  /** The photo it takes away, and the key of its slide (null for the placeholder). */
+  leaving: { figure: HTMLElement; animation: Animation; key: string | null };
   done: () => void;
 }
 
@@ -642,38 +663,39 @@ export class ClackShow extends HTMLElement {
     root.append(show, this.#live, this.#nameBox, probes);
 
     this.addEventListener("keydown", (e) => this.#onKey(e));
+    // How focus comes to the controls, heard in every theme, so that it is
+    // known whatever the theme was as it came (#markKeyFocus): in the
+    // shadow tree, where focus moving within it is heard (it never reaches
+    // the host, which it has neither left nor come to); and on the host,
+    // for a host the page made focusable itself. Rare, so cheap.
+    for (const t of [this, root]) {
+      t.addEventListener("focusin", this.#onFocus);
+      t.addEventListener("focusout", this.#onFocus);
+    }
+    root.addEventListener("pointerdown", this.#onFocus, { passive: true });
   }
 
   /** The events that are the visitor's activity (#onActivity), listened for only in a theme that reveals its controls for it. */
-  static readonly #activity = ["pointermove", "pointerdown", "keydown", "focusin", "focusout"] as const;
+  static readonly #activity = ["pointermove", "pointerdown", "keydown", "focusin"] as const;
 
   /** Listens for the visitor's activity, or stops, and puts the controls as they are without it. */
   #listenForActivity(on: boolean): void {
     if (on === this.#listening) return;
     this.#listening = on;
     for (const type of ClackShow.#activity) {
-      // In the shadow tree: focus moving within it, from the stage to a
-      // control, never reaches the host, which it has neither left nor
-      // come to; and a pointer's target there is what it is over (the
-      // page's own padding around the show is not the show). Keys where
-      // the show hears them (#onKey), on the host; and focus there too, for
-      // a host the page made focusable itself (#onActivity).
-      const at = type === "keydown" ? [this] : type.startsWith("focus") ? [this, this.shadowRoot!] : [this.shadowRoot!];
+      // In the shadow tree, where a pointer's target is what it is over
+      // (the page's own padding around the show is not the show). Keys
+      // where the show hears them (#onKey), on the host; focus where it is
+      // heard for #onFocus.
+      const at = type === "keydown" ? [this] : type === "focusin" ? [this, this.shadowRoot!] : [this.shadowRoot!];
       for (const t of at) {
         if (on) t.addEventListener(type, this.#onActivity, { passive: true });
         else t.removeEventListener(type, this.#onActivity);
       }
     }
-    if (!on) {
-      // How focus came to a control is kept: listened for again (a theme
-      // that reveals them, back), it is as it was.
-      this.#inactive(false);
-      return;
-    }
-    // Focus that moved, unheard, while not listened for is judged as it
-    // is now: hidden keyboard focus is worse than controls kept up.
-    // (#markKeyFocus leaves focus it knows as it was.)
-    this.#markKeyFocus(true);
+    // How focus came to the controls is kept: it is heard whatever the
+    // theme (#onFocus).
+    if (!on) this.#inactive(false);
   }
 
   /**
@@ -1365,9 +1387,7 @@ export class ClackShow extends HTMLElement {
         return false;
       }
       // A slide still going is hurried to its end first: one at a time.
-      // Not after a swipe: the finger has taken the photo coming, and the
-      // one leaving goes at once, so the next goes on from the finger.
-      const going = how.swipe ? null : this.#hurry();
+      const going = this.#slidesOver();
       if (going) {
         await going;
         if (stale()) return false;
@@ -1459,18 +1479,22 @@ export class ClackShow extends HTMLElement {
 
   #display(index: number, photo: Photo, how: How): void {
     const old = this.#figure;
+    const oldKey = this.#figureKey;
     const from = this.#onScreen();
     let transition = old ? this.#transition() : null;
     // A slide only from one slide to another -- though the one on screen
     // has had a new photo meanwhile: a photo replacing its placeholder, or
     // a new photo of the slide on screen, fades in place.
     if (transition?.type === "slide" && (from < 0 || from === index)) transition = { ...transition, type: "crossfade" };
-    // One transition at a time, so no more than two photos are ever on the
-    // stage: what is still going gets where it was going, at once -- a fade;
-    // a slide's photo leaving, which a finger let go of the other of; a
-    // slide hurried (#request) that did not end in time. A spring back is
-    // taken from where it has got to, below, if there is a transition.
-    this.#finishTransitions({ spring: !transition });
+    // One transition at a time: what is still going gets where it was
+    // going, at once -- a fade; a slide hurried (#request) that did not end
+    // in time. All of it, with no transition next. A photo only leaving, a
+    // finger having caught the one a slide brought in (#drag), hurries on
+    // out beside the next -- unless the next is its own slide, which has
+    // one photo element for one figure at a time (#makeFigure). A spring
+    // back is taken from where it has got to, below.
+    const key = this.#slides[index]!.key;
+    this.#finishTransitions(!transition, (r) => !transition || r.type === "crossfade" || r.coming !== null || r.leaving.key === key);
     // A photo springing back from a drag leaves from where it has got to,
     // not from the middle.
     const moving = old && this.#springing ? this.#takeOver(old) : null;
@@ -1509,7 +1533,7 @@ export class ClackShow extends HTMLElement {
       const running: Running = {
         type: transition.type,
         coming: { figure, animation: figure.animate(frames.incoming, timing) },
-        leaving: { figure: old, animation: old.animate(frames.outgoing, timing) },
+        leaving: { figure: old, animation: old.animate(frames.outgoing, timing), key: oldKey },
         done: () => {
           if (!this.#running.includes(running)) return; // once
           old.remove();
@@ -1557,44 +1581,53 @@ export class ClackShow extends HTMLElement {
   }
 
   /**
-   * Ends running transitions at once, at their end: all, or only those of
-   * type; and the spring back, unless not spring -- the photo where it was
-   * going, in place.
+   * Ends at once, at their end, the running transitions which picks (all),
+   * and the spring back if spring: the photos where they were going.
    */
-  #finishTransitions(o: { type?: "crossfade"; spring?: boolean } = {}): void {
-    if (o.spring ?? !o.type) end(this.#springing ?? undefined);
+  #finishTransitions(spring = true, which: (r: Running) => boolean = () => true): void {
+    if (spring) end(this.#springing ?? undefined);
     for (const r of [...this.#running]) {
-      if (o.type && r.type !== o.type) continue;
+      if (!which(r)) continue;
       end(r.coming?.animation);
       end(r.leaving.animation);
       r.done();
     }
   }
 
-  /**
-   * Hurries any slide still going to its end, as the next is asked for:
-   * what is left of it in hurryMs at most, so the next starts from the
-   * photo in place -- one slide at a time, nothing snapped into place or
-   * taken from the middle of the stage. Settled once they are over; null
-   * if none is going.
-   */
-  #hurry(): Promise<void> | null {
-    const animations = this.#running.filter((r) => r.type === "slide").flatMap((r) => [r.coming?.animation, r.leaving.animation]);
-    // Only those running: one paused (by the page, say) would never end,
-    // and is finished with the rest (#display).
-    const going = animations.filter((a): a is Animation => a?.playState === "running");
-    if (going.length === 0) return null;
-    for (const a of going) {
-      const timing = a.effect?.getComputedTiming();
-      const left = (Number(timing?.endTime ?? 0) - Number(a.currentTime ?? 0)) / a.playbackRate;
-      // (Stood still, at a rate of 0, it has no end to hurry to: waited on, below.)
-      if (Number.isFinite(left) && left > hurryMs) a.updatePlaybackRate((a.playbackRate * left) / hurryMs);
+  /** Speeds every slide still going on to its end, in hurryMs at most: one paused, or stood still at a rate of 0, has no end to hurry to. */
+  #hurry(): void {
+    for (const r of this.#running) {
+      if (r.type !== "slide") continue;
+      for (const a of [r.coming?.animation, r.leaving.animation]) {
+        if (a?.playState !== "running") continue;
+        const left = (Number(a.effect?.getComputedTiming().endTime ?? 0) - Number(a.currentTime ?? 0)) / a.playbackRate;
+        if (Number.isFinite(left) && left > hurryMs) a.updatePlaybackRate((a.playbackRate * left) / hurryMs);
+      }
     }
-    // Not waited on for long, should time stand still for them (a frame
-    // the browser has stopped drawing, as it may in a page out of sight).
-    const over = Promise.all(going.map((a) => a.finished.then(noop, noop)));
-    return Promise.race([over, new Promise((resolve) => setTimeout(resolve, 4 * hurryMs))]).then(noop);
   }
+
+  /**
+   * Hurries the slides still going (#hurry), and settles once those still
+   * bringing a photo in are over -- one slide at a time, the next starting
+   * from the photo in place, nothing snapped there or taken from the middle
+   * of the stage. Not those only taking one away, a finger having caught
+   * the other (#drag): they hurry on out beside the next. Not for long,
+   * should time stand still for them (in a page the browser stops drawing,
+   * or at a rate of 0): #display ends what is left. Null if there is none.
+   */
+  #slidesOver(): Promise<void> | null {
+    this.#hurry();
+    const going = this.#running
+      .filter((r) => r.type === "slide" && r.coming)
+      .flatMap((r) => [r.coming!.animation, r.leaving.animation])
+      .filter((a) => a.playState === "running");
+    if (going.length === 0) return null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<void>((resolve) => (timer = setTimeout(resolve, 4 * hurryMs)));
+    const over = Promise.all(going.map((a) => a.finished.then(noop, noop))).then(noop);
+    return Promise.race([over, late]).finally(() => clearTimeout(timer));
+  }
+
 
   /**
    * Takes figure's photo from what moves it sideways -- a spring back, a
@@ -1691,24 +1724,12 @@ export class ClackShow extends HTMLElement {
    * shows them then whatever this says).
    */
   readonly #onActivity = (e: Event): void => {
-    // Focus heard on the host is the host's own, not the shadow tree's,
-    // which its shadow root hears (#listenForActivity).
-    if (e.type.startsWith("focus") && e.currentTarget === this && e.composedPath()[0] !== this) return;
-    // How focus came, as it comes; where it is once it has gone, which
-    // focusout is too early to say.
-    if (e.type === "focusin") this.#markKeyFocus(true);
-    if (e.type === "focusout") {
-      queueMicrotask(() => this.#markKeyFocus(false));
-      return;
-    }
+    if (this.#heardTwice(e)) return;
     if (e instanceof PointerEvent) {
       this.#lastPointer = e.pointerType;
       // Over them, as the shadow tree has it (#listenForActivity): unseen,
       // they are not in the pointer's way (clack.css), so never under it.
       this.#pointerOn = e.target instanceof Node && this.#restingOn().contains(e.target);
-      // The visitor has taken up a pointer: focus the keyboard left on a
-      // control no longer keeps them up.
-      if (e.type === "pointerdown") this.#box.classList.remove("key-focus");
     }
     this.#lastActivity = performance.now();
     // Many times a second as a mouse moves: the class only when it changes.
@@ -1717,6 +1738,29 @@ export class ClackShow extends HTMLElement {
     // it runs (#onIdle).
     this.#idle ??= setTimeout(() => this.#onIdle(), revealFor);
   };
+
+  /**
+   * Focus arriving or going, or a pointer pressed, in any theme: how focus
+   * came to the controls, as it comes (#markKeyFocus); where it is once it
+   * has gone, which focusout is too early to say. A pointer taken up:
+   * focus the keyboard left on a control no longer keeps them up.
+   */
+  readonly #onFocus = (e: Event): void => {
+    if (this.#heardTwice(e)) return;
+    if (e.type === "focusin") this.#markKeyFocus(true);
+    else if (e.type === "focusout") {
+      // Gone from the control it was on, as focusout says at once: no
+      // longer there to come back to with the window, which leaves focus
+      // where it was as it goes.
+      if (this.shadowRoot!.activeElement !== this.#focusAt) this.#focusAt = null;
+      queueMicrotask(() => this.#markKeyFocus(false));
+    } else this.#box.classList.remove("key-focus");
+  };
+
+  /** Whether e, focus heard on the host, is the shadow tree's, which its shadow root hears too: only the host's own is the host's. */
+  #heardTwice(e: Event): boolean {
+    return e.currentTarget === this && e.type.startsWith("focus") && e.composedPath()[0] !== this;
+  }
 
   /**
    * A few seconds after the activity that showed the controls: hidden, if
@@ -1743,6 +1787,8 @@ export class ClackShow extends HTMLElement {
    * Chrome and Firefox take a clicked button's focus for the keyboard's
    * once keys follow, and arrow keys are how a show is used -- nor when
    * focus comes back to the control it was on, with the window (#focusAt).
+   * Heard in every theme (#onFocus), so what it says holds when a theme
+   * that reveals the controls for activity comes in.
    * arrived: focus has just come somewhere; otherwise it has just gone
    * from somewhere.
    */
@@ -1836,9 +1882,9 @@ export class ClackShow extends HTMLElement {
     const caught = this.#takeOver(figure);
     if (caught !== null) {
       this.#caught = caught;
-      void this.#hurry();
+      this.#hurry();
     }
-    this.#finishTransitions({ type: "crossfade" });
+    this.#finishTransitions(false, (r) => r.type === "crossfade");
     // Where there is nowhere to go, the photo resists.
     const delta = (dx < 0 ? 1 : -1) * (this.#rtl() ? -1 : 1);
     const free = canStep(this.#from(), this.#slides.length, delta, this.loop);
@@ -1893,7 +1939,10 @@ export class ClackShow extends HTMLElement {
     const margin = Math.max(side("left"), side("right"), 0);
     let reach = 0;
     for (const f of figures) reach = Math.max(reach, shadowReach(f));
-    return Math.ceil(margin + reach);
+    // And the stage's own filter, which spreads the photos in it (one on
+    // the show, beyond what it cuts off as they move, spreads only what is
+    // left of them).
+    return Math.ceil(margin + reach + filterReach(stage.filter));
   }
 
   /** Ends a drag of figure's photo: back in place, and nothing cut off once nothing moves. */
