@@ -366,24 +366,32 @@ function filterReach(filter: string): number {
  * radius is two standard deviations, and past three nothing shows) and its
  * spread, not one drawn inside; an outline, its width and offset. A filter
  * spreads all that is drawn in its element, descendants too
- * (filterReach). Where the boxes are is for the caller (#beyond); a page
- * moving or scaling a descendant past e is not counted.
+ * (filterReach). Each as large as a page scales its element, in e's px.
+ * Where the boxes are is for the caller (#beyond).
  */
 export function shadowReach(e: Element): number {
-  const style = getComputedStyle(e);
-  if (style.display === "none") return 0;
-  let drawn = 0;
-  // Layers, at the commas: a colour's own split off a layer only what is
-  // before its lengths, as a computed layer gives its colour first.
-  for (const layer of style.boxShadow.split(",")) {
-    if (/\binset\b/.test(layer)) continue;
-    // A colour, then x, y, blur and spread.
-    const [x = 0, , blur = 0, spread = 0] = pxs(layer);
-    drawn = Math.max(drawn, Math.abs(x) + 1.5 * blur + spread);
-  }
-  if (style.outlineStyle !== "none") drawn = Math.max(drawn, (parseFloat(style.outlineWidth) || 0) + (parseFloat(style.outlineOffset) || 0));
-  for (const child of e.children) drawn = Math.max(drawn, shadowReach(child));
-  return drawn + filterReach(style.filter);
+  const base = screenScale(e);
+  const reach = (n: Element, scale: number): number => {
+    const style = getComputedStyle(n);
+    if (style.display === "none") return 0;
+    // As large as the page scales n, in e's px; with no box of its own,
+    // as its parent.
+    if (n !== e && style.display !== "contents") scale = screenScale(n) / base;
+    let drawn = 0;
+    // Layers, at the commas: a colour's own split off a layer only what is
+    // before its lengths, as a computed layer gives its colour first.
+    for (const layer of style.boxShadow.split(",")) {
+      if (/\binset\b/.test(layer)) continue;
+      // A colour, then x, y, blur and spread.
+      const [x = 0, , blur = 0, spread = 0] = pxs(layer);
+      drawn = Math.max(drawn, Math.abs(x) + 1.5 * blur + spread);
+    }
+    if (style.outlineStyle !== "none") drawn = Math.max(drawn, (parseFloat(style.outlineWidth) || 0) + (parseFloat(style.outlineOffset) || 0));
+    drawn *= scale;
+    for (const child of n.children) drawn = Math.max(drawn, reach(child, scale));
+    return drawn + filterReach(style.filter) * scale;
+  };
+  return reach(e, 1);
 }
 
 function noop(): void {}
@@ -454,6 +462,8 @@ interface Running {
   /** The photo it takes away, and the key of its slide (null for the placeholder). */
   leaving: { figure: HTMLElement; animation: Animation; key: string | null };
   done: () => void;
+  /** Once a finger has caught the photo it brings, when it ends what is left of it, however it is (#takeOver). */
+  deadline?: ReturnType<typeof setTimeout>;
 }
 
 /** The `<clack-show>` element. */
@@ -1546,6 +1556,10 @@ export class ClackShow extends HTMLElement {
         leaving: { figure: old, animation: old.animate(frames.outgoing, timing), key: oldKey },
         done: () => {
           if (!this.#running.includes(running)) return; // once
+          clearTimeout(running.deadline);
+          // The photo it brings in place with it, if a page has kept it
+          // from getting there (made it endless, say).
+          end(running.coming?.animation);
           old.remove();
           this.#running = this.#running.filter((r) => r !== running);
           this.#settleMoving();
@@ -1615,8 +1629,10 @@ export class ClackShow extends HTMLElement {
   /** Speeds every slide still going on to its end, in hurryMs at most: one paused, or stood still, has no end to hurry to. */
   #hurry(): void {
     for (const a of this.#sliding()) {
-      const left = (Number(a.effect?.getComputedTiming().endTime) - Number(a.currentTime ?? 0)) / a.playbackRate;
-      if (left > hurryMs) a.updatePlaybackRate((a.playbackRate * left) / hurryMs);
+      // What is left of it, in its own time: at the rate that gets through
+      // that in hurryMs, if that is quicker than it goes.
+      const rest = Number(a.effect?.getComputedTiming().endTime) - Number(a.currentTime ?? 0);
+      if (rest / a.playbackRate > hurryMs) a.updatePlaybackRate(rest / hurryMs);
     }
   }
 
@@ -1640,7 +1656,6 @@ export class ClackShow extends HTMLElement {
     return Promise.race([over, late]).finally(() => clearTimeout(timer));
   }
 
-
   /**
    * Takes figure's photo from what moves it sideways -- a spring back, a
    * slide bringing it in -- for something else to move on: a finger (a
@@ -1661,10 +1676,13 @@ export class ClackShow extends HTMLElement {
       at = this.#offsetOf(figure);
       r.coming.animation.cancel();
       r.coming = null;
+      // What is left, the photo leaving, hurries out (#hurry, #drag): and
+      // goes in a while whatever a page does to it -- pauses it, sends it
+      // back, makes it endless -- rather than stay on the stage.
+      r.deadline = setTimeout(() => this.#finishTransitions(false, (x) => x === r), 4 * hurryMs);
     }
     return at;
   }
-
 
   /**
    * How one photo gives way to the next, from the theme -- a crossfade or a
@@ -1944,38 +1962,52 @@ export class ClackShow extends HTMLElement {
    * photos, as far as it reaches (shadowReach), with a filter on the stage,
    * which spreads what is in it (one further out spreads only what the
    * show leaves of them). With none, none: the photos go edge to edge. Not
-   * a slide a page rotates, whose corners reach further than its box.
+   * a slide a page rotates, whose corners reach further than its box; nor
+   * what a page draws in pseudo-elements, which have no boxes to measure;
+   * nor where a page's own transition or :hover has a slide for a moment.
    */
   #beyond(old: HTMLElement, coming: HTMLElement): number {
     const show = this.#box.getBoundingClientRect();
-    // How far f is from the show's sides, at its far side, and how far
-    // what is in it reaches past its own, in its own px. Both at rest: a
-    // drag of old's photo has been let go, and a spring back taken over
-    // (#display), before this.
-    const clear = (f: HTMLElement): number => {
+    // How far f is from the show's sides, at its far side, and how far the
+    // boxes in it reach past its own (no further than one that clips them),
+    // in its own px; and its own px's size on the screen. As the page
+    // places it: not where a finger holds it (--clack-drag), which a swipe
+    // leaves on the photo it takes over from.
+    const clear = (f: HTMLElement): { far: number; scale: number } => {
       const box = f.getBoundingClientRect();
       const scale = screenScale(f, box);
+      const held = (parseFloat(f.style.getPropertyValue("--clack-drag")) || 0) * scale;
       let left = box.left;
       let right = box.right;
-      for (const e of f.querySelectorAll("*")) {
-        const r = e.getBoundingClientRect();
-        if (r.width === 0 && r.height === 0) continue; // no box (display: contents, none)
-        left = Math.min(left, r.left);
-        right = Math.max(right, r.right);
-      }
-      const gap = Math.max(box.left - show.left, show.right - box.right, 0);
+      const clips = (style: CSSStyleDeclaration): boolean => style.overflowX !== "visible" && style.display !== "contents";
+      const walk = (n: Element, from: number, to: number): void => {
+        for (const e of n.children) {
+          const style = getComputedStyle(e);
+          if (style.display === "none") continue;
+          const r = e.getBoundingClientRect();
+          const boxed = r.width > 0 || r.height > 0; // not display: contents
+          if (boxed) {
+            left = Math.min(left, Math.max(r.left, from));
+            right = Math.max(right, Math.min(r.right, to));
+          }
+          walk(e, boxed && clips(style) ? Math.max(from, r.left) : from, boxed && clips(style) ? Math.min(to, r.right) : to);
+        }
+      };
+      const own = clips(getComputedStyle(f));
+      walk(f, own ? box.left : -Infinity, own ? box.right : Infinity);
+      const gap = Math.max(box.left - held - show.left, show.right - (box.right - held), 0);
       const over = Math.max(box.left - left, right - box.right, 0);
-      return (gap + over) / scale;
+      return { far: (gap + over) / scale, scale };
     };
+    const [was, next] = [clear(old), clear(coming)];
     const drawn = Math.max(shadowReach(old), shadowReach(coming));
     // The stage's filter, in its px, as the slide's.
-    const stage = filterReach(getComputedStyle(this.#stage).filter) * (screenScale(this.#stage) / screenScale(coming));
-    const total = Math.max(clear(old), clear(coming)) + drawn + stage;
+    const spread = filterReach(getComputedStyle(this.#stage).filter);
+    const stage = spread && (spread * screenScale(this.#stage)) / next.scale;
+    const total = Math.max(was.far, next.far) + drawn + stage;
     // Whole px, not a rounding error's more.
     return Math.ceil(Math.round(total * 100) / 100);
   }
-
-
 
   /** Ends a drag of figure's photo: back in place, and nothing cut off once nothing moves. */
   #endDrag(figure = this.#figure): void {
@@ -2001,9 +2033,6 @@ export class ClackShow extends HTMLElement {
     if (!figure) {
       return;
     }
-    // A photo the finger left leaving that does not move -- paused by the
-    // page -- would stay on the stage for good: it goes now.
-    this.#finishTransitions(false, (r) => r.type === "slide" && !r.coming && !moves(r.leaving.animation));
     const offset = parseFloat(figure.style.getPropertyValue("--clack-drag")) || 0;
     this.#caught = 0; // the gesture's own: its next starts afresh
     const delta = ((outcome === -1 ? 1 : -1) * (this.#rtl() ? -1 : 1)) as 1 | -1;

@@ -255,7 +255,8 @@ the last hurrying out, and a swipe then moves on at once. A slide starts and end
 margin, if it has one, and the reach of what is drawn around it — a shadow, a drop shadow,
 an outline, Clack's or a page's own through `::part(slide)` or `::part(photo)`, a filter
 on `::part(stage)`, and however a page moves, scales, pads or borders the stage, the slide
-or the photo in it (not a slide it rotates, whose corners reach further) — and they
+or the photo in it (not a slide it rotates, whose corners reach further, nor what it draws
+in pseudo-elements, nor a transition or `:hover` of its own under way) — and they
 cross the margin a margin apart, as prints moved along a wall — after a swipe too, from
 where it let go. With neither margin nor shadow, they go edge to edge.
 

@@ -537,6 +537,11 @@ test("a shadow's reach is measured as drawn, to three standard deviations of its
   assertEqual(reach({ outline: "6px solid red", outlineOffset: "3px" }), 9, "an outline");
   // An ancestor's drop shadow is cast from what is drawn in it.
   assertEqual(reach({ outline: "8px solid white" }, "drop-shadow(0 0 6px black)"), 26, "an outline inside a drop shadow");
+  // As large as a page scales it.
+  outer.style.width = "100px";
+  e.style.scale = "1.5";
+  assertEqual(reach({ boxShadow: "0 0 40px black" }), 90, "a descendant scaled by half again: its shadow too");
+  outer.style.width = e.style.scale = "";
   e.style.display = "none";
   assertEqual(reach({ boxShadow: "0 0 40px black" }), 0, "nothing of what is not displayed");
 });
@@ -817,7 +822,10 @@ test("a step while the last is still sliding in hurries it into place, then slid
   // (A new rate is taken up a frame later.)
   const both = [...first.getAnimations(), ...second.getAnimations()];
   await Promise.all(both.map((a) => a.ready));
-  for (const a of both) assert(a.playbackRate > 1, `hurried: ${a.playbackRate}`);
+  for (const a of both) {
+    const left = (Number(a.effect!.getComputedTiming().endTime) - Number(a.currentTime)) / a.playbackRate;
+    assert(a.playbackRate > 1 && left <= 125, `hurried to its end in a moment: ${Math.round(left)}ms left, at ${a.playbackRate}`);
+  }
   let most = 0;
   await waitFor(() => {
     most = Math.max(most, figures(show).length);
@@ -1292,6 +1300,7 @@ for (const [what, css, sizes] of [
   ["borders the photo past its slide", "clack-show.cleared::part(photo) { border: 12px solid white; }", [600, 600]],
   ["sizes slides to their photos, the last narrower", "clack-show.cleared::part(slide) { justify-self: center; width: max-content; }", [200, 600]],
   ["scales a slide on a stage it gives a drop shadow", "clack-show.cleared::part(slide) { scale: 0.5; } clack-show.cleared::part(stage) { filter: drop-shadow(0 0 10px black); }", [600, 600]],
+  ["scales up a photo with a shadow", "clack-show.cleared::part(photo) { scale: 1.5; box-shadow: 0 0 20px black; }", [300, 300]],
 ] as const) {
   test(`a slide clears the show's sides where the page ${what}`, async () => {
     if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
@@ -1315,7 +1324,7 @@ for (const [what, css, sizes] of [
       for (const a of all) a.currentTime = 0;
       // Everything in it, and for a drop shadow on the stage, three of its deviations more.
       const extent = (f: Element): DOMRect[] => [f, ...f.querySelectorAll("*")].map((e) => e.getBoundingClientRect()).filter((r) => r.width || r.height);
-      const spread = what.includes("drop shadow") ? 30 : 0;
+      const spread = what.includes("drop shadow") ? 30 : what.includes("with a shadow") ? 45 : 0;
       const first = Math.min(...extent(coming).map((r) => r.left));
       assert(first >= host.right + spread - 0.5, `as it starts, the next, from ${first}, is past the show's edge, ${host.right}, and the shadow's ${spread}px`);
       for (const a of all) a.currentTime = 599.9;
@@ -1329,7 +1338,7 @@ for (const [what, css, sizes] of [
   });
 }
 
-test("a photo the finger left leaving that does not move goes when the finger lets go, though nothing moves on", async () => {
+test("a photo the finger left leaving that does not move goes in a while, though nothing moves on", async () => {
   if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
   const theme = themed("sliding-left-paused-sprung", { transition: { type: "slide", duration: "2000ms" } });
   const show = makeShow([{}, {}, {}], { theme });
@@ -1348,7 +1357,7 @@ test("a photo the finger left leaving that does not move goes when the finger le
   first.getAnimations()[0]!.pause();
   // A short drag: no swipe, so it springs back, and nothing moves on.
   p.send("pointerup", x - 10, { buttons: 0 });
-  assert(!first.isConnected, "the paused one gone as the finger lets go");
+  await waitFor(() => !first.isConnected, "the paused one gone in a while", 1000);
   await waitFor(() => getComputedStyle(box(show)).overflowX === "visible", "nothing cut off once nothing moves");
 });
 
@@ -1368,7 +1377,7 @@ test("a slide a page has made endless does not stop the show: the next comes aft
   await settledOn(show, "3 of 3");
 });
 
-test("a photo the finger left leaving that a page sends back goes as the finger lets go, not back over the stage", async () => {
+test("a photo the finger left leaving that a page sends back goes in a while, not back over the stage", async () => {
   if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
   const theme = themed("sliding-left-reversed", { transition: { type: "slide", duration: "2000ms" } });
   const show = makeShow([{}, {}, {}], { theme });
@@ -1385,15 +1394,13 @@ test("a photo the finger left leaving that a page sends back goes as the finger 
   p.send("pointerdown", x);
   p.send("pointermove", x - 10);
   const out = first.getAnimations()[0]!;
-  // Slowed first, so it is still leaving however long this takes here.
-  out.playbackRate = 0.05;
   out.playbackRate = -0.05;
   assert(first.isConnected, "still leaving, sent back");
   p.send("pointerup", x - 10, { buttons: 0 });
-  assert(!first.isConnected, "gone, not sent back to the middle");
+  await waitFor(() => !first.isConnected, "gone in a while, not sent back to the middle", 1000);
 });
 
-test("a photo the finger left leaving that a page makes endless goes as the finger lets go", async () => {
+test("a photo the finger left leaving that a page makes endless goes in a while", async () => {
   if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
   const theme = themed("sliding-left-endless", { transition: { type: "slide", duration: "2000ms" } });
   const show = makeShow([{}, {}, {}], { theme });
@@ -1414,5 +1421,66 @@ test("a photo the finger left leaving that a page makes endless goes as the fing
   out.effect!.updateTiming({ iterations: Infinity });
   assert(first.isConnected, "still leaving, without end");
   p.send("pointerup", x - 10, { buttons: 0 });
-  assert(!first.isConnected, "gone, not crossing the stage again and again");
+  await waitFor(() => !first.isConnected, "gone in a while, not crossing the stage again and again", 1000);
+});
+
+test("a swipe in a theme with neither margin nor shadow brings the next in edge to edge with the last, from where it was let go", async () => {
+  if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
+  const theme = themed("bleed-sliding-swiped", { extends: "minimal", transition: { type: "slide", duration: "600ms" } });
+  const show = makeShow([{ width: 600, height: 200 }, { width: 600, height: 200 }], { theme });
+  await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
+  show.style.setProperty("--clack-transition-duration", "600ms");
+  await settledOn(show, "1 of 2");
+  await sleep(200); // the next preloaded
+  const leaving = figures(show)[0]!;
+  const p = pointer(show);
+  p.swipe(p.left + p.width * 0.8, p.left + p.width * 0.4);
+  await waitFor(() => leaving.getAnimations().length > 0, "the photos to move");
+  const coming = figures(show).find((f) => f !== leaving)!;
+  const first = String((coming.getAnimations()[0]!.effect as KeyframeEffect).getKeyframes()[0]!["transform"]);
+  // (As each engine writes it: the offset, and a stage's width, no more.)
+  assert(/^translateX\(calc\((-[\d.]+px \+ 100%|100% - [\d.]+px)\)\)$/.test(first), `beside the last, nothing between: ${first}`);
+  await settledOn(show, "2 of 2");
+});
+
+test("a slide does not count what a page's slide clips off a photo it zooms", async () => {
+  if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
+  const page = new CSSStyleSheet();
+  page.replaceSync("clack-show.zoomed::part(slide) { overflow: hidden; } clack-show.zoomed::part(photo) { scale: 1.2; }");
+  document.adoptedStyleSheets = [...document.adoptedStyleSheets, page];
+  try {
+    const theme = themed("bleed-sliding-zoomed", { extends: "minimal", transition: { type: "slide", duration: "600ms" } });
+    const show = makeShow([{ width: 600, height: 200 }, { width: 600, height: 200 }], { theme, class: "zoomed", fit: "cover" });
+    await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
+    show.style.setProperty("--clack-transition-duration", "600ms");
+    await settledOn(show, "1 of 2");
+    await sleep(200); // the next preloaded
+    const leaving = figures(show)[0]!;
+    void show.next();
+    await waitFor(() => leaving.getAnimations().length > 0, "the photos to move");
+    const coming = figures(show).find((f) => f !== leaving)!;
+    assertEqual(String((coming.getAnimations()[0]!.effect as KeyframeEffect).getKeyframes()[0]!["transform"]), "translateX(100%)", "edge to edge: what is clipped off is not seen");
+    await settledOn(show, "2 of 2");
+  } finally {
+    document.adoptedStyleSheets = document.adoptedStyleSheets.filter((x) => x !== page);
+  }
+});
+
+test("a photo coming in that a page makes endless is put in place once the last has gone", async () => {
+  if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
+  const theme = themed("sliding-coming-endless", { transition: { type: "slide", duration: "300ms" } });
+  const show = makeShow([{}, {}], { theme });
+  await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
+  show.style.setProperty("--clack-transition-duration", "300ms");
+  await settledOn(show, "1 of 2");
+  await sleep(200); // the next preloaded
+  const first = figures(show)[0]!;
+  void show.next();
+  await waitFor(() => first.getAnimations().length > 0, "the photos to move");
+  const second = figures(show).find((f) => f !== first)!;
+  second.getAnimations()[0]!.effect!.updateTiming({ iterations: Infinity });
+  await waitFor(() => !first.isConnected, "the first gone");
+  await sleep(0);
+  assertEqual(second.getAnimations().length, 0, "the second in place, not sliding in again and again");
+  assertEqual(getComputedStyle(box(show)).overflowX, "visible", "nothing cut off once nothing moves");
 });
