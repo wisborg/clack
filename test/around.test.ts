@@ -2,7 +2,7 @@
 // controls shown only for the visitor's activity, and how one photo gives
 // way to the next.
 import type { ClackShow, SlideInput } from "../src/clack";
-import { shadowReach, transitionFrames, transitionOf } from "../src/show";
+import { alongside, shadowReach, transitionFrames, transitionOf } from "../src/show";
 import { assert, assertEqual, fixture, skip, sleep, test } from "./harness";
 import { figures, imageLog, img, logged, makeShow, part, pointer, resetImageLog, settledOn, showBox as box, themed, waitFor } from "./util";
 
@@ -504,25 +504,19 @@ test("after a swipe, the next keeps the wall's width from the last as both go, a
   assertEqual(swiped.outgoing[1]!.transform, "translateX(calc(-100% - 88px))", "and the last as far beyond, the other way");
 });
 
-test("a slide moves a photo past the margin by as much as any shadow Clack draws under it reaches", async () => {
-  const reach = (shadow: string): number => {
-    let most = 0;
-    // Each layer, as computed: a colour, then x, y, blur and spread in px.
-    for (const layer of shadow.split(/,(?![^(]*\))/)) {
-      if (layer.includes("inset") || layer.trim() === "none") continue;
-      const [x, , blur, spread] = (layer.match(/-?[\d.]+px/g) ?? []).map(parseFloat);
-      most = Math.max(most, Math.abs(x ?? 0) + (blur ?? 0) + (spread ?? 0));
-    }
-    return most;
-  };
-  for (const [theme, at] of [["gallery", ".slide img"], ["mat", ".slide .mount"]] as const) {
-    const show = makeShow([{}], { theme });
-    await settledOn(show, "1 of 1");
-    const r = reach(getComputedStyle(part(show, at)).boxShadow);
-    assert(r > 0 && r <= shadowReach, `${theme}: its shadow reaches ${r}px, within the ${shadowReach}px a slide allows`);
+test("a shadow's reach is measured as drawn: each layer's offset, blur and spread, not those inside", () => {
+  const e = document.createElement("div");
+  fixture().append(e);
+  for (const [shadow, want] of [
+    ["none", 0],
+    ["0 22px 48px rgb(0 0 0 / 0.22)", 48],
+    ["-3px 0 10px 2px red, 0 2px 3px color-mix(in srgb, red, blue)", 15],
+    ["inset 0 0 0 90px red, 0 1px 2px black", 2],
+  ] as const) {
+    e.style.boxShadow = shadow;
+    assertEqual(shadowReach(e), want, shadow);
   }
 });
-
 test("a jump while the photo on screen is changing goes the way the slides lie", async () => {
   if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
   const theme = themed("sliding-jump", { transition: { type: "slide", duration: "600ms" } });
@@ -559,7 +553,7 @@ test("a slide past the margin measures it as laid out, whatever transform the pa
   show.style.setProperty("--clack-transition-duration", "600ms");
   await settledOn(show, "1 of 2");
   await sleep(200); // the next preloaded
-  const want = Math.ceil(parseFloat(getComputedStyle(box(show)).paddingRight)) + shadowReach;
+  const want = Math.ceil(parseFloat(getComputedStyle(box(show)).paddingRight) + shadowReach(part(show, ".slide img")));
   const leaving = figures(show)[0]!;
   void show.next();
   await waitFor(() => leaving.getAnimations().length > 0, "the photos to move");
@@ -728,12 +722,141 @@ test("a step while the last is still sliding in takes the photo on from where it
   void show.next();
   await waitFor(() => figures(show).length > 2 || !figures(show).includes(first), "the third coming");
   await waitFor(() => second.getAnimations().length > 0, "the second leaving");
-  const frames = (second.getAnimations()[0]!.effect as KeyframeEffect).getKeyframes();
-  const from = new DOMMatrix(String(frames[0]!["transform"])).m41;
+  const start = (f: Element): number => new DOMMatrix(String((f.getAnimations()[0]!.effect as KeyframeEffect).getKeyframes()[0]!["transform"])).m41;
+  const from = start(second);
   assert(from > 1, `from where it had got to, ${from}px, not the middle`);
+  // The first, still on its way out, goes on along with it: not gone
+  // from the middle of the stage.
+  assert(first.isConnected && first.getAnimations().length === 1, "the first still leaving");
+  assert(start(first) < from - 1, `the first from where it had got to, ${start(first)}px, beside the second`);
   await settledOn(show, "3 of 3");
+  assert(!first.isConnected, "and gone once it has");
 });
 
+test("photos still leaving go along with the next slide, the distance between them kept", () => {
+  assertEqual(JSON.stringify(alongside(-300, 400, -1, 20)), JSON.stringify([{ transform: "translateX(-300px)" }, { transform: "translateX(calc(-700px + calc(-100% - 20px)))" }]), "behind it, as far again");
+  assertEqual(alongside(400, 400, 1)[1]!.transform, "translateX(100%)", "where the photo on screen is: as it goes");
+});
+
+test("a finger catching a photo as it slides in holds it where it is, and the last goes on leaving", async () => {
+  if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
+  const theme = themed("sliding-caught", { transition: { type: "slide", duration: "600ms" } });
+  const show = makeShow([{}, {}, {}], { theme });
+  await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
+  show.style.setProperty("--clack-transition-duration", "600ms");
+  await settledOn(show, "1 of 3");
+  await sleep(300); // the next preloaded
+  const first = figures(show)[0]!;
+  void show.next();
+  await waitFor(() => first.getAnimations().length > 0, "the photos to move");
+  const second = figures(show).find((f) => f !== first)!;
+  await sleep(100);
+  const p = pointer(show);
+  const x = p.left + p.width / 2;
+  p.send("pointerdown", x);
+  p.send("pointermove", x - 10);
+  const held = parseFloat(second.style.getPropertyValue("--clack-drag"));
+  assert(held > 40, `held where it was caught, ${held}px, not at the middle`);
+  assert(first.isConnected && first.getAnimations().length === 1, "the first still leaving");
+  p.send("pointerup", x - 10, { buttons: 0 });
+  await waitFor(() => !first.isConnected, "the first gone once it has left");
+});
+
+test("a fade over a photo the page itself moves takes nothing of that for Clack's own moving", async () => {
+  if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
+  const page = new CSSStyleSheet();
+  page.replaceSync("clack-show.page-moved::part(slide) { transform: translateX(30px) scale(1.05); }");
+  document.adoptedStyleSheets = [...document.adoptedStyleSheets, page];
+  try {
+    const show = makeShow([{}, {}, {}], { class: "page-moved" });
+    show.style.setProperty("--clack-transition-duration", "600ms");
+    await settledOn(show, "1 of 3");
+    await sleep(300); // the next preloaded
+    const first = figures(show)[0]!;
+    void show.next();
+    await waitFor(() => first.getAnimations().length > 0, "the fade");
+    const second = figures(show).find((f) => f !== first)!;
+    await sleep(100);
+    void show.next();
+    await waitFor(() => !first.isConnected && second.getAnimations().length > 0, "the second fading out");
+    const out = (second.getAnimations().at(-1)!.effect as KeyframeEffect).getKeyframes();
+    assert(out.every((k) => k["transform"] === undefined), `faded only, its own transform left alone: ${JSON.stringify(out)}`);
+    assertEqual(getComputedStyle(box(show)).overflowX, "visible", "nothing moved aside, so nothing cut off");
+    await settledOn(show, "3 of 3");
+  } finally {
+    document.adoptedStyleSheets = document.adoptedStyleSheets.filter((s) => s !== page);
+  }
+});
+
+test("a new photo of a slide still sliding in fades in place, the old one sliding on into place as it fades", async () => {
+  if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
+  const theme = themed("sliding-renewed", { transition: { type: "slide", duration: "1500ms" } });
+  const slide = (id: string, url: string): SlideInput => ({ id, alt: id, width: 300, height: 200, sources: [{ url, width: 300 }] });
+  const show = makeShow([], { theme });
+  await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
+  show.style.setProperty("--clack-transition-duration", "1500ms");
+  const [a, b] = [slide("a", img(300, 200)), slide("b", img(300, 200, "aa8866"))];
+  show.slides = [a, b];
+  await settledOn(show, "1 of 2");
+  await sleep(300); // the next preloaded
+  const first = figures(show)[0]!;
+  void show.next();
+  await waitFor(() => first.getAnimations().length > 0, "the photos to move");
+  const second = figures(show).find((f) => f !== first)!;
+  show.slides = [a, slide("b", img(300, 200, "66aa88"))];
+  await waitFor(() => second.getAnimations().length > 1, "the new photo coming");
+  const kinds = second.getAnimations().map((x) => Object.keys((x.effect as KeyframeEffect).getKeyframes()[0]!).filter((k) => k === "transform" || k === "opacity").join());
+  assertEqual(kinds.join(" "), "transform opacity", "still sliding into place, and fading as it does");
+  await settledOn(show, "2 of 2");
+});
+
+test("focus that comes back to a control with the window is not judged again", async () => {
+  const show = makeShow([{}, {}], { theme: "darkroom" });
+  await settledOn(show, "1 of 2");
+  const next = part(show, ".next");
+  focusAs(next, true);
+  assert(box(show).classList.contains("key-focus"), "kept up, by the keyboard's focus");
+  // A pointer taken up: that focus no longer keeps them up.
+  pointer(show).send("pointerdown", pointer(show).left + 10);
+  assert(!box(show).classList.contains("key-focus"), "not once a pointer is taken up");
+  // Away to another window and back: focus comes back to it, by then
+  // shown as the keyboard's, but it did not come there by the keyboard.
+  next.dispatchEvent(new FocusEvent("focusin", { bubbles: true, composed: true }));
+  assert(!box(show).classList.contains("key-focus"), "still not, back with the window");
+  next.blur();
+});
+
+test("focus arriving on the show itself, made focusable by the page, is activity", async () => {
+  const show = makeShow([{}, {}], { theme: "darkroom" });
+  await settledOn(show, "1 of 2");
+  show.tabIndex = 0;
+  if (!document.hasFocus()) skip("this engine's window does not have focus, so focusing fires no focus event, as it would for a visitor's keyboard");
+  show.focus();
+  assertEqual(document.activeElement, show, "the show focused");
+  await waitFor(() => shown(part(show, ".controls")), "the controls shown");
+  show.blur();
+});
+
+test("controls focused by a click are not taken for the keyboard's once keys follow", async () => {
+  const show = makeShow([{}, {}, {}], { theme: "darkroom" });
+  await settledOn(show, "1 of 3");
+  const next = part(show, ".next") as HTMLButtonElement;
+  next.dispatchEvent(new PointerEvent("pointerdown", { pointerType: "mouse", bubbles: true, composed: true }));
+  focusAs(next, false);
+  // As Chrome and Firefox show it once keys follow a click: as the
+  // keyboard's, without focus arriving again. (No engine lets a script
+  // change that of focus already there.)
+  const matches = Element.prototype.matches;
+  Object.defineProperty(next, "matches", { configurable: true, value: (s: string) => s === ":focus-visible" || matches.call(next, s) });
+  try {
+    show.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+    next.dispatchEvent(new FocusEvent("focusin", { bubbles: true, composed: true }));
+    assert(!box(show).classList.contains("key-focus"), "neither the keys nor focus coming back make it the keyboard's");
+  } finally {
+    delete (next as { matches?: unknown }).matches;
+    next.blur();
+  }
+});
 test("with reduced motion, nothing of the floating bar fades: it and its caption's box come and go at once", async () => {
   const show = makeShow([{ title: "A" }, {}], { theme: "minimal" });
   await settledOn(show, "1 of 2");
@@ -749,6 +872,8 @@ test("with reduced motion, nothing of the floating bar fades: it and its caption
   const saved = [...root.adoptedStyleSheets];
   root.adoptedStyleSheets = saved.map((s) => (s === clack ? reduced : s));
   try {
+    // Shown and hidden: the caption's box has a delay only while the bar is shown.
+    box(show).classList.add("active");
     for (const [what, style] of [
       ["the controls", getComputedStyle(part(show, ".controls"))],
       ["the bar's surface", getComputedStyle(part(show, ".below"), "::before")],
@@ -757,6 +882,7 @@ test("with reduced motion, nothing of the floating bar fades: it and its caption
       assertEqual(`${style.transitionDuration} ${style.transitionDelay}`, "0s 0s", what);
     }
   } finally {
+    box(show).classList.remove("active");
     root.adoptedStyleSheets = saved;
   }
 });
@@ -783,4 +909,23 @@ test("with no margin, a slide still moves a photo past the reach of its shadow: 
   assert(first.left >= host.right + 36, `as it starts, the next photo, from ${first.left}, and its shadow are past the show's edge, ${host.right}`);
   for (const a of all) a.finish();
   await settledOn(show, "2 of 2");
+});
+
+test("steps quicker than a slide, as a key held down, never pile photos up past the show", async () => {
+  if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
+  const theme = themed("sliding-held", { transition: { type: "slide", duration: "600ms" } });
+  const show = makeShow([{}, {}, {}], { theme, loop: "" });
+  await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
+  show.style.setProperty("--clack-transition-duration", "600ms");
+  await settledOn(show, "1 of 3");
+  await sleep(300); // the other two preloaded
+  let most = 0;
+  for (let i = 0; i < 10; i++) {
+    void show.next();
+    await sleep(60);
+    most = Math.max(most, figures(show).length);
+  }
+  // The one on screen, the one coming, and those still to be seen leaving.
+  assert(most <= 4, `at most four at once, not ${most}`);
+  await waitFor(() => figures(show).length === 1, "one, once they have stopped");
 });

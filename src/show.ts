@@ -290,12 +290,11 @@ export function transitionFrames(
   const from = `translateX(${offset ?? 0}px)`;
   if (type === "slide") {
     const beyond = o.beyond ?? 0;
-    const away = (sign: number): string => (beyond ? `calc(${sign * 100}% ${sign < 0 ? "-" : "+"} ${beyond}px)` : `${sign * 100}%`);
     // The next starts beside the last, where a swipe let go of it.
-    const beside = offset ? `translateX(calc(${offset}px + ${away(-exit)}))` : `translateX(${away(-exit)})`;
+    const beside = offset ? `translateX(calc(${offset}px + ${away(-exit, beyond)}))` : `translateX(${away(-exit, beyond)})`;
     return {
       incoming: [{ transform: beside }, { transform: "translateX(0)" }],
-      outgoing: [{ transform: from }, { transform: `translateX(${away(exit)})` }],
+      outgoing: [{ transform: from }, { transform: `translateX(${away(exit, beyond)})` }],
     };
   }
   return {
@@ -310,13 +309,39 @@ export function transitionFrames(
   };
 }
 
+/** A whole stage's width and beyond px more, sign's way (sign of the text's direction aside): where a slide starts or ends a photo. */
+function away(sign: number, beyond: number): string {
+  return beyond ? `calc(${sign * 100}% ${sign < 0 ? "-" : "+"} ${beyond}px)` : `${sign * 100}%`;
+}
+
 /**
- * The most a shadow under a photo reaches past its side: mat's frame's
- * 48px blur (clack.css), more than the soft shadow's 36px. A slide moves
- * a photo this much further than the show's margin, so not even its
- * shadow is seen there.
+ * How a photo still leaving, at px, goes on when the next slide starts,
+ * with the photo on screen leaving from offset px by exit: as far as it
+ * does, so the two keep the distance between them, as prints moved along
+ * a wall together.
  */
-export const shadowReach = 48;
+export function alongside(at: number, offset: number, exit: -1 | 1, beyond = 0): Keyframe[] {
+  const apart = at - offset;
+  const end = apart ? `translateX(calc(${apart}px + ${away(exit, beyond)}))` : `translateX(${away(exit, beyond)})`;
+  return [{ transform: `translateX(${at}px)` }, { transform: end }];
+}
+
+/**
+ * How far the shadows drawn under e reach past its sides, in px: Clack's
+ * or a page's, as computed -- each layer's sideways offset, blur and
+ * spread; not one drawn inside it.
+ */
+export function shadowReach(e: Element): number {
+  let most = 0;
+  // Layers, split at the commas outside a colour's parentheses.
+  for (const layer of getComputedStyle(e).boxShadow.split(/,(?![^(]*\))/)) {
+    if (/\binset\b/.test(layer)) continue;
+    // A colour, then x, y, blur and spread, in px.
+    const [x = 0, , blur = 0, spread = 0] = (layer.match(/-?[\d.]+(?:e-?\d+)?px/g) ?? []).map(parseFloat);
+    most = Math.max(most, Math.abs(x) + blur + spread);
+  }
+  return most;
+}
 
 function el<K extends keyof HTMLElementTagNameMap>(name: K, className: string, part = ""): HTMLElementTagNameMap[K] {
   const e = document.createElement(name);
@@ -346,9 +371,16 @@ function impression(hash: string): HTMLCanvasElement | null {
   return canvas;
 }
 
-/** A transition in progress, and what must happen when it ends, however it ends. */
+/**
+ * A transition in progress, and what must happen when it ends, however it
+ * ends: the photos it takes away removed. The photo it brings in is let go
+ * of (coming null) when something else takes it over (#takeOver); those it
+ * takes away may be taken on by the next slide (#display).
+ */
 interface Running {
-  animations: Animation[];
+  type: "crossfade" | "slide";
+  coming: { figure: HTMLElement; animation: Animation } | null;
+  leaving: { figure: HTMLElement; animation: Animation }[];
   done: () => void;
 }
 
@@ -472,6 +504,12 @@ export class ClackShow extends HTMLElement {
    * there -- shown by a key -- are hovered, but not rested on.
    */
   #pointerOn = false;
+  /**
+   * The control focus last came to and has not left since, though the
+   * window may have: focus comes back to it with the window, and is not
+   * judged again then (#markKeyFocus).
+   */
+  #focusAt: Element | null = null;
   /** Whether #onActivity is listened for (#listenForActivity). */
   #listening = false;
   /** The key of the slide whose photo is on screen (even if the slide has since had a new one), or null for none or the placeholder. */
@@ -573,12 +611,15 @@ export class ClackShow extends HTMLElement {
     for (const type of ClackShow.#activity) {
       // In the shadow tree: focus moving within it, from the stage to a
       // control, never reaches the host, which it has neither left nor
-      // come to; and a pointer's target there is what it is over. Keys
-      // where the show hears them (#onKey): on the host, if the page made
-      // it focusable itself.
-      const at = type === "keydown" ? this : this.shadowRoot!;
-      if (on) at.addEventListener(type, this.#onActivity, { passive: true });
-      else at.removeEventListener(type, this.#onActivity);
+      // come to; and a pointer's target there is what it is over (the
+      // page's own padding around the show is not the show). Keys where
+      // the show hears them (#onKey), on the host; and focus there too, for
+      // a host the page made focusable itself (#onActivity).
+      const at = type === "keydown" ? [this] : type.startsWith("focus") ? [this, this.shadowRoot!] : [this.shadowRoot!];
+      for (const t of at) {
+        if (on) t.addEventListener(type, this.#onActivity, { passive: true });
+        else t.removeEventListener(type, this.#onActivity);
+      }
     }
     if (!on) this.#inactive();
   }
@@ -588,6 +629,7 @@ export class ClackShow extends HTMLElement {
     clearTimeout(this.#idle);
     this.#idle = undefined;
     this.#box.classList.remove("active", "key-focus");
+    this.#focusAt = null;
   }
 
   #button(label: string, name: string, onClick: () => void): HTMLButtonElement {
@@ -1351,13 +1393,21 @@ export class ClackShow extends HTMLElement {
 
   #display(index: number, photo: Photo, how: How): void {
     const old = this.#figure;
-    // A photo on its way -- springing back from a drag, or sliding in --
-    // goes on from where it has got to, not from the middle, where
-    // finishing what moves it would put it. (Those already on their way
-    // out are finished: they are as good as gone.)
-    const moving = old && (this.#springing || this.#running.length) ? this.#offsetOf(old) : 0;
-    this.#finishTransitions();
     const from = this.#onScreen();
+    let transition = old ? this.#transition() : null;
+    // A slide only from one slide to another -- though the one on screen
+    // has had a new photo meanwhile: a photo replacing its placeholder, or
+    // a new photo of the slide on screen, fades in place.
+    if (transition?.type === "slide" && (from < 0 || from === index)) transition = { ...transition, type: "crossfade" };
+    // None at all: what is moving gets where it was going, at once. A fade
+    // is finished at once whatever comes next, so no more than two photos
+    // are ever fading, and the one on screen is wholly there to go from.
+    this.#finishTransitions(transition ? "crossfade" : undefined);
+    // The photo on screen, if on its way -- springing back from a drag, or
+    // sliding in -- leaves from where it has got to, not from the middle.
+    // Sliding in when the next only fades, it slides on into place as it
+    // fades out.
+    const moving = old && (transition?.type === "slide" || this.#springing) ? this.#takeOver(old) : null;
     const previous = from >= 0 && from !== index ? from : this.#shown;
     const slide = this.#slides[index]!;
     const figure = this.#makeFigure(index, slide, photo);
@@ -1371,11 +1421,6 @@ export class ClackShow extends HTMLElement {
       this.#announce(index + 1, this.#slides.length, slide);
     }
 
-    let transition = old ? this.#transition() : null;
-    // A slide only from one slide to another -- though the one on screen
-    // has had a new photo meanwhile: a photo replacing its placeholder, or
-    // a new photo of the slide on screen, fades in place.
-    if (transition?.type === "slide" && (from < 0 || from === index)) transition = { ...transition, type: "crossfade" };
     // The old photo held aside by a drag, and another slide shown by
     // other means -- a key, a button, the page: it leaves from where the
     // finger holds it, and the rest of the gesture is not a swipe.
@@ -1389,23 +1434,32 @@ export class ClackShow extends HTMLElement {
       let exit: -1 | 1 = -1;
       if (how.swipe) exit = how.swipe.exit;
       else if (transition.type === "slide" || offset !== null) exit = (-this.#direction * (this.#rtl() ? -1 : 1)) as -1 | 1;
-      const frames = transitionFrames(transition.type, exit, offset, {
-        beyond: transition.type === "slide" ? this.#margin() : 0,
-        still: transition.reduced,
-      });
+      const beyond = transition.type === "slide" ? this.#beyond(old, figure) : 0;
+      const frames = transitionFrames(transition.type, exit, offset, { beyond, still: transition.reduced });
+      // Those on their way out of a slide go on along with this one, from
+      // where they are: nothing vanishes from the middle of the stage.
+      const along = transition.type === "slide" ? this.#carryLeaving(old.offsetWidth + beyond) : [];
       // Cut off at the show's sides while any moves (#settleMoving).
       if (transition.type === "slide" || offset !== null) this.#box.classList.add("moving");
-      const animations = [figure.animate(frames.incoming, timing), old.animate(frames.outgoing, timing)];
       const running: Running = {
-        animations,
+        type: transition.type,
+        coming: { figure, animation: figure.animate(frames.incoming, timing) },
+        leaving: [
+          { figure: old, animation: old.animate(frames.outgoing, timing) },
+          ...along.map(({ figure: f, at }) => ({ figure: f, animation: f.animate(alongside(at, offset ?? 0, exit, beyond), timing) })),
+        ],
         done: () => {
-          old.remove();
+          // Once, and not for a transition another has taken on.
+          if (!this.#running.includes(running)) return;
+          for (const l of running.leaving) l.figure.remove();
           this.#running = this.#running.filter((r) => r !== running);
           this.#settleMoving();
         },
       };
       this.#running.push(running);
-      void Promise.all(animations.map((a) => a.finished)).then(running.done, running.done);
+      // Over when what it takes away has gone: the photo it brings is in
+      // place by then, or taken over by something else.
+      void Promise.all(running.leaving.map((l) => l.animation.finished)).then(running.done, running.done);
     } else {
       old?.remove();
       this.#settleMoving();
@@ -1441,16 +1495,59 @@ export class ClackShow extends HTMLElement {
     return figure;
   }
 
-  /** Ends every running transition at once, at its end. */
-  #finishTransitions(): void {
+  /** Ends every running transition, or every one of type, at once, at its end. */
+  #finishTransitions(type?: "crossfade"): void {
     // The spring back too: the photo where it was going, in place.
-    this.#springing?.finish();
+    if (!type) this.#springing?.finish();
     for (const r of [...this.#running]) {
-      for (const a of r.animations) {
-        a.finish();
-      }
+      if (type && r.type !== type) continue;
+      r.coming?.animation.finish();
+      for (const l of r.leaving) l.animation.finish();
       r.done();
     }
+  }
+
+  /**
+   * Takes figure's photo from what moves it sideways -- a spring back, a
+   * slide bringing it in -- for something else to move on: where it has
+   * got to, in px, or null if nothing moved it.
+   */
+  #takeOver(figure: HTMLElement): number | null {
+    let at: number | null = null;
+    const springing = this.#springing;
+    if (springing) {
+      at = this.#offsetOf(figure);
+      this.#springing = null;
+      springing.cancel();
+    }
+    for (const r of this.#running) {
+      if (r.type !== "slide" || r.coming?.figure !== figure) continue;
+      at = this.#offsetOf(figure);
+      r.coming.animation.cancel();
+      r.coming = null;
+    }
+    return at;
+  }
+
+  /**
+   * The photos on their way out of a slide, and where each has got to, in
+   * px, taken from it for the next slide to carry on (#display): their
+   * slides end here. Those already gone -- gone px or more aside, out of
+   * the stage and past what of the show is seen -- are removed, so a key
+   * held down never piles photos up beyond the show.
+   */
+  #carryLeaving(gone: number): { figure: HTMLElement; at: number }[] {
+    const taken = this.#running.filter((r) => r.type === "slide");
+    const all = taken.flatMap((r) => r.leaving.map((l) => ({ figure: l.figure, at: this.#offsetOf(l.figure) })));
+    // Dropped first, so that cancelling their animations ends nothing.
+    this.#running = this.#running.filter((r) => r.type !== "slide");
+    for (const r of taken) {
+      r.coming?.animation.cancel();
+      for (const l of r.leaving) l.animation.cancel();
+    }
+    const carried = all.filter((c) => Math.abs(c.at) < gone - 0.5);
+    for (const c of all) if (!carried.includes(c)) c.figure.remove();
+    return carried;
   }
 
   /**
@@ -1523,6 +1620,9 @@ export class ClackShow extends HTMLElement {
    * shows them then whatever this says).
    */
   readonly #onActivity = (e: Event): void => {
+    // Focus heard on the host is the host's own, not the shadow tree's,
+    // which its shadow root hears (#listenForActivity).
+    if (e.type.startsWith("focus") && e.currentTarget === this && e.composedPath()[0] !== this) return;
     // How focus came, as it comes; where it is once it has gone, which
     // focusout is too early to say.
     if (e.type === "focusin") this.#markKeyFocus(true);
@@ -1570,14 +1670,21 @@ export class ClackShow extends HTMLElement {
    * says which as focus arrives (:focus-visible), knowing the visitor's
    * input across the page, from wherever they tabbed. Asked then only:
    * Chrome and Firefox take a clicked button's focus for the keyboard's
-   * once keys follow, and arrow keys are how a show is used. arrived:
-   * focus has just come somewhere; otherwise it has just gone from
-   * somewhere.
+   * once keys follow, and arrow keys are how a show is used -- nor when
+   * focus comes back to the control it was on, with the window (#focusAt).
+   * arrived: focus has just come somewhere; otherwise it has just gone
+   * from somewhere.
    */
   #markKeyFocus(arrived: boolean): void {
     const at = this.shadowRoot!.activeElement;
-    if (!at || !this.#controls.contains(at)) this.#box.classList.remove("key-focus");
-    else if (arrived) this.#box.classList.toggle("key-focus", at.matches(":focus-visible"));
+    if (!at || !this.#controls.contains(at)) {
+      this.#box.classList.remove("key-focus");
+      this.#focusAt = null;
+      return;
+    }
+    if (!arrived || at === this.#focusAt) return;
+    this.#focusAt = at;
+    this.#box.classList.toggle("key-focus", at.matches(":focus-visible"));
   }
 
   /** What the pointer rests on, to keep controls shown for activity up: the controls, or in floating, the bar. */
@@ -1652,15 +1759,12 @@ export class ClackShow extends HTMLElement {
     if (!figure || this.#shown < 0) {
       return;
     }
-    // Caught again as it springs back: it follows the finger from where it
-    // was caught, not from where it is going.
-    const springing = this.#springing;
-    if (springing) {
-      this.#caught = this.#offsetOf(figure);
-      this.#springing = null;
-      springing.cancel();
-    }
-    this.#finishTransitions();
+    // Caught as it springs back or slides in: it follows the finger from
+    // where it was caught, not from where it is going. What is leaving goes
+    // on leaving.
+    const caught = this.#takeOver(figure);
+    if (caught !== null) this.#caught = caught;
+    this.#finishTransitions("crossfade");
     // Where there is nowhere to go, the photo resists.
     const delta = (dx < 0 ? 1 : -1) * (this.#rtl() ? -1 : 1);
     const free = canStep(this.#from(), this.#slides.length, delta, this.loop);
@@ -1698,12 +1802,14 @@ export class ClackShow extends HTMLElement {
   }
 
   /**
-   * How far a photo moving out of the stage sideways still shows: the
-   * show's margin beside the stage, the wider side's, and a shadow's reach
-   * into it -- even with no margin, as a photo just past the show's edge
-   * casts its shadow back in, where nothing cuts it off.
+   * How far past the stage a slide takes the photos of figures, so that
+   * nothing of either is seen as it starts and ends: the show's margin
+   * beside the stage, the wider side's, and the reach of their shadows --
+   * even with no margin, as a photo just past the show's edge casts its
+   * shadow back in, where nothing cuts it off. With neither, none: the
+   * photos go edge to edge.
    */
-  #margin(): number {
+  #beyond(...figures: HTMLElement[]): number {
     // As laid out, in the show's own px, untouched by any transform of the
     // page's around it (as #measure reads it): the stage fills the show's
     // one column, so its margin is the show's padding and its own.
@@ -1711,7 +1817,9 @@ export class ClackShow extends HTMLElement {
     const stage = getComputedStyle(this.#stage);
     const side = (s: string): number => parseFloat(show.getPropertyValue(`padding-${s}`)) + parseFloat(stage.getPropertyValue(`margin-${s}`));
     const margin = Math.max(side("left"), side("right"), 0);
-    return Math.ceil(margin) + shadowReach;
+    let reach = 0;
+    for (const f of figures) for (const e of f.querySelectorAll(".mount, img, .missing, .fill")) reach = Math.max(reach, shadowReach(e));
+    return Math.ceil(margin + reach);
   }
 
   /** Ends a drag of figure's photo: back in place, and nothing cut off once nothing moves. */

@@ -248,11 +248,12 @@ slide moves the photos along only from one slide to another; the first photo, an
 photo of the slide on screen, fade in. A photo held aside by a drag when a key or a button
 moves on leaves from where it is held, and the rest of the drag is not a swipe; with reduced
 motion, it fades where it is, as a swiped one does. A step taken while the last photo is
-still sliding in takes it on from where it has got to. A slide starts and ends with each photo
-past the show's margin, if it has one, and the reach of its shadow, and they cross the margin a margin apart,
-as prints moved along a wall — after a swipe too, from where it let go. (A page that gives
-`::part(photo)` a shadow reaching further than Clack's, 48px, may see it in the margin at
-the start and end.)
+still sliding in takes it on from where it has got to, and the one still leaving goes on
+along with it; a finger catching a photo as it slides in holds it there. A slide starts and
+ends with each photo past the show's margin, if it has one, and the reach of its shadow as
+drawn (a page's own, given through `::part(photo)`, too), and they cross the margin a margin
+apart, as prints moved along a wall — after a swipe too, from where it let go. With neither
+margin nor shadow, they go edge to edge.
 
 In `matted`, the frame casts its own shadow, and `layout.shadow` is not drawn. The mat and
 the frame are measured as of the show, as the schema says — `cqi` in either is of the
