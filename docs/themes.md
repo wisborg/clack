@@ -254,7 +254,8 @@ slides, as many as it can show; a finger catching a photo as it slides in holds 
 the last hurrying out, and a swipe then moves on at once. A slide starts and ends with each photo past the show's
 margin, if it has one, and the reach of what is drawn around it — a shadow, a drop shadow,
 an outline, Clack's or a page's own through `::part(slide)` or `::part(photo)`, a filter
-on `::part(stage)`, and how far a page moves or scales the slide or the photo — and they
+on `::part(stage)`, and however a page moves, scales or pads the slide there (not a photo
+it moves or scales past its own slide) — and they
 cross the margin a margin apart, as prints moved along a wall — after a swipe too, from
 where it let go. With neither margin nor shadow, they go edge to edge.
 

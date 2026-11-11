@@ -528,19 +528,6 @@ test("a shadow's reach is measured as drawn, to three standard deviations of its
   assertEqual(reach({ outline: "6px solid red", outlineOffset: "3px" }), 9, "an outline");
   // An ancestor's drop shadow is cast from what is drawn in it.
   assertEqual(reach({ outline: "8px solid white" }, "drop-shadow(0 0 6px black)"), 26, "an outline inside a drop shadow");
-  // A descendant a page moves past the element's side, its shadow from there.
-  e.style.position = "relative";
-  e.style.left = "40px";
-  assertEqual(reach({ boxShadow: "0 0 20px black" }), 70, "a descendant moved 40px past the side");
-  // Clipped by the element it is in: no further than that element's box.
-  outer.style.overflow = "hidden";
-  assertEqual(reach({ boxShadow: "0 0 20px black" }), 0, "a descendant moved past the side, clipped there");
-  outer.style.overflow = e.style.position = e.style.left = "";
-  // Scaled: its box, and what it draws, as large as drawn.
-  outer.style.width = "100px";
-  e.style.scale = "1.5";
-  assertEqual(reach({ boxShadow: "0 0 40px black" }), 115, "a descendant scaled by half again: 25px past, its shadow 90px");
-  outer.style.width = e.style.scale = "";
   e.style.display = "none";
   assertEqual(reach({ boxShadow: "0 0 40px black" }), 0, "nothing of what is not displayed");
 });
@@ -1048,6 +1035,8 @@ test("a swipe during a slide moves on at once, from where the finger let go, the
   p.send("pointerdown", from);
   for (let i = 1; i <= 8; i++) p.send("pointermove", from + ((to - from) * i) / 8);
   const held = parseFloat(second.style.getPropertyValue("--clack-drag"));
+  // Still moving out, slowly, however long the next events take here.
+  first.getAnimations()[0]!.updatePlaybackRate(0.05);
   p.send("pointerup", to, { buttons: 0 });
   await sleep(0);
   // The next at once; the first not gone from where it is, but hurrying.
@@ -1055,7 +1044,8 @@ test("a swipe during a slide moves on at once, from where the finger let go, the
   assert(first.isConnected && first.getAnimations().length === 1, "the first still leaving, not gone from where it was");
   const out = String((second.getAnimations()[0]!.effect as KeyframeEffect).getKeyframes()[0]!["transform"]);
   assert(Math.abs(new DOMMatrix(out).m41 - held) < 1, `the second from where the finger let it go, ${held}px: ${out}`);
-  await waitFor(() => !first.isConnected, "the first gone once it has left", 1000);
+  first.getAnimations()[0]?.finish();
+  await waitFor(() => !first.isConnected, "the first gone once it has left");
   await settledOn(show, "3 of 3");
 });
 
@@ -1226,7 +1216,7 @@ test("a photo leaving that does not move -- paused by the page -- is not left on
   await waitFor(() => getComputedStyle(box(show)).overflowX === "visible", "nothing cut off once nothing moves");
 });
 
-test("a swipe back to a slide whose photo could not be had lets its figure, which holds no photo of the next's, hurry on out", async () => {
+test("a swipe back to a slide whose photo could not be had has one of it on the stage, not two", async () => {
   if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
   const theme = themed("sliding-failed-back", { transition: { type: "slide", duration: "2000ms" } });
   const show = makeShow([{ src: "/img/broken.png?tag=fb" }, {}, {}], { theme });
@@ -1240,9 +1230,15 @@ test("a swipe back to a slide whose photo could not be had lets its figure, whic
   await waitFor(() => first.getAnimations().length > 0, "the photos to move");
   await sleep(100);
   const p = pointer(show);
-  p.swipe(p.left + p.width * 0.2, p.left + p.width * 0.8);
+  const [from, to] = [p.left + p.width * 0.2, p.left + p.width * 0.8];
+  p.send("pointerdown", from);
+  for (let i = 1; i <= 8; i++) p.send("pointermove", from + ((to - from) * i) / 8);
+  // Still moving out, slowly, however long the next events take here.
+  first.getAnimations()[0]!.updatePlaybackRate(0.05);
+  p.send("pointerup", to, { buttons: 0 });
   await sleep(0);
-  assert(first.isConnected && first.getAnimations().length === 1, "the first still leaving, not gone from where it was");
+  // One of a slide on the stage at a time: the one leaving goes.
+  assert(!first.isConnected, "the first's figure gone, the one coming in its place");
   await settledOn(show, "1 of 3");
 });
 
@@ -1279,4 +1275,103 @@ test("a photo with alternatives in other formats is in the middle of its frame, 
   const figure = figures(show)[0]!.getBoundingClientRect();
   const photo = part(show, ".slide img").getBoundingClientRect();
   assert(Math.abs((photo.top + photo.bottom) / 2 - (figure.top + figure.bottom) / 2) < 1, `in the middle: the photo ${photo.top}-${photo.bottom}, the frame ${figure.top}-${figure.bottom}`);
+});
+
+for (const [what, css] of [
+  ["scales the slide down", "clack-show.cleared::part(slide) { scale: 0.9; }"],
+  ["pads the stage", "clack-show.cleared::part(stage) { padding-inline: 40px; box-sizing: border-box; }"],
+] as const) {
+  test(`a slide clears the show's sides where the page ${what}`, async () => {
+    if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
+    const page = new CSSStyleSheet();
+    page.replaceSync(css);
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, page];
+    try {
+      const theme = themed(`bleed-sliding-${what.replace(/ /g, "-")}`, { extends: "minimal", transition: { type: "slide", duration: "600ms" } });
+      const show = makeShow([{ width: 600, height: 200 }, { width: 600, height: 200 }], { theme, class: "cleared" });
+      await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
+      show.style.setProperty("--clack-transition-duration", "600ms");
+      await settledOn(show, "1 of 2");
+      await sleep(200); // the next preloaded
+      const host = box(show).getBoundingClientRect();
+      const leaving = figures(show)[0]!;
+      void show.next();
+      await waitFor(() => leaving.getAnimations().length > 0, "the photos to move");
+      const coming = figures(show).find((f) => f !== leaving)!;
+      const all = [...leaving.getAnimations(), ...coming.getAnimations()];
+      for (const a of all) a.pause();
+      for (const a of all) a.currentTime = 0;
+      const first = coming.getBoundingClientRect();
+      assert(first.left >= host.right - 0.5, `as it starts, the next, from ${first.left}, is past the show's edge, ${host.right}`);
+      for (const a of all) a.currentTime = 599.9;
+      const last = leaving.getBoundingClientRect();
+      assert(last.right <= host.left + 0.5, `as it ends, the last, to ${last.right}, is past the show's other edge, ${host.left}`);
+      for (const a of all) a.finish();
+      await settledOn(show, "2 of 2");
+    } finally {
+      document.adoptedStyleSheets = document.adoptedStyleSheets.filter((x) => x !== page);
+    }
+  });
+}
+
+test("a photo the finger left leaving that does not move goes when the finger lets go, though nothing moves on", async () => {
+  if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
+  const theme = themed("sliding-left-paused-sprung", { transition: { type: "slide", duration: "2000ms" } });
+  const show = makeShow([{}, {}, {}], { theme });
+  await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
+  show.style.setProperty("--clack-transition-duration", "2000ms");
+  await settledOn(show, "1 of 3");
+  await sleep(300); // the next preloaded
+  const first = figures(show)[0]!;
+  void show.next();
+  await waitFor(() => first.getAnimations().length > 0, "the photos to move");
+  await sleep(100);
+  const p = pointer(show);
+  const x = p.left + p.width / 2;
+  p.send("pointerdown", x);
+  p.send("pointermove", x - 10);
+  first.getAnimations()[0]!.pause();
+  // A short drag: no swipe, so it springs back, and nothing moves on.
+  p.send("pointerup", x - 10, { buttons: 0 });
+  assert(!first.isConnected, "the paused one gone as the finger lets go");
+  await waitFor(() => getComputedStyle(box(show)).overflowX === "visible", "nothing cut off once nothing moves");
+});
+
+test("a slide a page has made endless does not stop the show: the next comes after a while", async () => {
+  if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
+  const theme = themed("sliding-endless", { transition: { type: "slide", duration: "600ms" } });
+  const show = makeShow([{}, {}, {}], { theme });
+  await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
+  show.style.setProperty("--clack-transition-duration", "600ms");
+  await settledOn(show, "1 of 3");
+  await sleep(300); // the next two preloaded
+  void show.next();
+  await waitFor(() => figures(show).length === 2, "the photos to move");
+  for (const f of figures(show)) for (const a of f.getAnimations()) a.effect!.updateTiming({ iterations: Infinity });
+  const shown = await Promise.race([show.next(), sleep(2000).then(() => "waiting")]);
+  assertEqual(shown, true, "the next shown");
+  await settledOn(show, "3 of 3");
+});
+
+test("a photo the finger left leaving that a page sends back goes as the finger lets go, not back over the stage", async () => {
+  if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
+  const theme = themed("sliding-left-reversed", { transition: { type: "slide", duration: "2000ms" } });
+  const show = makeShow([{}, {}, {}], { theme });
+  await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
+  show.style.setProperty("--clack-transition-duration", "2000ms");
+  await settledOn(show, "1 of 3");
+  await sleep(300); // the next preloaded
+  const first = figures(show)[0]!;
+  void show.next();
+  await waitFor(() => first.getAnimations().length > 0, "the photos to move");
+  await sleep(100);
+  const p = pointer(show);
+  const x = p.left + p.width / 2;
+  p.send("pointerdown", x);
+  p.send("pointermove", x - 10);
+  const out = first.getAnimations()[0]!;
+  await out.ready;
+  out.playbackRate = -out.playbackRate;
+  p.send("pointerup", x - 10, { buttons: 0 });
+  assert(!first.isConnected, "gone, not sent back to the middle");
 });
