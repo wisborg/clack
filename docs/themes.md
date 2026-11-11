@@ -248,9 +248,10 @@ slide moves the photos along only from one slide to another; the first photo, an
 photo of the slide on screen, fade in. A photo held aside by a drag when a key or a button
 moves on leaves from where it is held, and the rest of the drag is not a swipe; with reduced
 motion, it fades where it is, as a swiped one does. One slide at a time: a step taken while
-one is still going hurries it to its end, in a moment, and then slides on, so a key held
-down runs quickly through the slides; a finger catching a photo as it slides in holds it
-there, the last hurrying out. A slide starts and ends with each photo past the show's
+one is still going hurries it to its end, in a moment, and then slides on — from the one
+it stops at, if steps came quicker still, so a key held down runs quickly through the
+slides, as many as it can show; a finger catching a photo as it slides in holds it there,
+the last hurrying out, and a swipe then moves on at once. A slide starts and ends with each photo past the show's
 margin, if it has one, and the reach of what is drawn around it — a shadow, a drop shadow,
 an outline, Clack's or a page's own through `::part(slide)` or `::part(photo)` — and they
 cross the margin a margin apart, as prints moved along a wall — after a swipe too, from

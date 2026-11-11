@@ -314,30 +314,74 @@ function away(sign: number, beyond: number): string {
   return beyond ? `calc(${sign * 100}% ${sign < 0 ? "-" : "+"} ${beyond}px)` : `${sign * 100}%`;
 }
 
+/** What is inside each name(...) in a computed value, parentheses within it and all. */
+function calls(value: string, name: string): string[] {
+  const out: string[] = [];
+  for (let at = value.indexOf(`${name}(`); at >= 0; at = value.indexOf(`${name}(`, at + 1)) {
+    let depth = 0;
+    let end = at + name.length;
+    for (; end < value.length; end++) {
+      if (value[end] === "(") depth++;
+      else if (value[end] === ")" && --depth === 0) break;
+    }
+    out.push(value.slice(at + name.length + 1, end));
+  }
+  return out;
+}
+
+/** The lengths in px in a computed value, in order. */
+function pxs(value: string): number[] {
+  return (value.match(/-?[\d.]+(?:e[+-]?\d+)?px/g) ?? []).map(parseFloat);
+}
+
 /**
- * How far what is drawn around e reaches past its sides, in px: Clack's
- * or a page's, as computed -- a box shadow's layers, each by its sideways
- * offset, blur and spread (not one drawn inside it); a drop shadow's, by
- * its offset and three times its blur, a standard deviation, past which
- * nothing of it shows; and an outline.
+ * How far what e and everything in it draw reaches past e's sides, in px:
+ * Clack's or a page's, as computed. A blur's reach is three standard
+ * deviations, past which nothing of it shows: a box shadow's blur radius is
+ * two of them, so a layer reaches its sideways offset, one and a half
+ * times its blur, and its spread (one drawn inside reaches nothing); an
+ * outline, its width and offset. A filter acts on all that is drawn in its
+ * element, its descendants' shadows too, one function after another: each
+ * drop shadow adds its offset and three times its deviation, a blur three
+ * times its own. More than is drawn, where a descendant is inside e's
+ * sides; never less.
  */
 export function shadowReach(e: Element): number {
   const style = getComputedStyle(e);
-  const px = (s: string): number[] => (s.match(/-?[\d.]+(?:e-?\d+)?px/g) ?? []).map(parseFloat);
-  let most = 0;
-  // Layers, split at the commas outside a colour's parentheses.
-  for (const layer of style.boxShadow.split(/,(?![^(]*\))/)) {
+  if (style.display === "none") return 0;
+  let drawn = 0;
+  // Layers, at the commas: a colour's own split off a layer only what is
+  // before its lengths, as a computed layer gives its colour first.
+  for (const layer of style.boxShadow.split(",")) {
     if (/\binset\b/.test(layer)) continue;
     // A colour, then x, y, blur and spread.
-    const [x = 0, , blur = 0, spread = 0] = px(layer);
-    most = Math.max(most, Math.abs(x) + blur + spread);
+    const [x = 0, , blur = 0, spread = 0] = pxs(layer);
+    drawn = Math.max(drawn, Math.abs(x) + 1.5 * blur + spread);
   }
-  for (const [, shadow] of style.filter.matchAll(/drop-shadow\(((?:[^()]|\([^()]*\))*)\)/g)) {
-    const [x = 0, , blur = 0] = px(shadow!);
-    most = Math.max(most, Math.abs(x) + 3 * blur);
+  if (style.outlineStyle !== "none") drawn = Math.max(drawn, (parseFloat(style.outlineWidth) || 0) + (parseFloat(style.outlineOffset) || 0));
+  for (const child of e.children) drawn = Math.max(drawn, shadowReach(child));
+  let filtered = 0;
+  for (const shadow of calls(style.filter, "drop-shadow")) {
+    const [x = 0, , deviation = 0] = pxs(shadow);
+    filtered += Math.abs(x) + 3 * deviation;
   }
-  if (style.outlineStyle !== "none") most = Math.max(most, parseFloat(style.outlineWidth) + parseFloat(style.outlineOffset));
-  return most;
+  for (const blur of calls(style.filter, "blur")) filtered += 3 * (pxs(blur)[0] ?? 0);
+  return drawn + filtered;
+}
+
+function noop(): void {}
+
+/**
+ * Ends a at once, at its end -- or, where it has none to get to (a rate of
+ * 0, which finish refuses), where it started from: the photo as it is
+ * without it, in place.
+ */
+function end(a: Animation | undefined): void {
+  try {
+    a?.finish();
+  } catch {
+    a?.cancel();
+  }
 }
 
 /** How long a slide still going is given to finish when the next is asked for (#hurry), in ms. */
@@ -381,8 +425,6 @@ interface Running {
   coming: { figure: HTMLElement; animation: Animation } | null;
   leaving: { figure: HTMLElement; animation: Animation };
   done: () => void;
-  /** Settled once done has run. */
-  ended: Promise<void>;
 }
 
 /** The `<clack-show>` element. */
@@ -622,20 +664,28 @@ export class ClackShow extends HTMLElement {
         else t.removeEventListener(type, this.#onActivity);
       }
     }
-    if (!on) this.#inactive();
-    // Focus already on a control, unheard on its way there, is taken as
-    // having been there: not judged as it comes back with the window.
-    else {
-      const at = this.shadowRoot!.activeElement;
-      this.#focusAt = at && this.#controls.contains(at) ? at : null;
+    if (!on) {
+      // How focus came to a control is kept: listened for again (a theme
+      // that reveals them, back), it is as it was.
+      this.#inactive(false);
+      return;
     }
+    // Focus that moved, unheard, while not listened for is judged as it
+    // is now: hidden keyboard focus is worse than controls kept up.
+    // (#markKeyFocus leaves focus it knows as it was.)
+    this.#markKeyFocus(true);
   }
 
-  /** The controls as they are without the visitor's activity: the timer for its end dropped. */
-  #inactive(): void {
+  /**
+   * The controls as they are without the visitor's activity: the timer for
+   * its end dropped; and with focus gone from them, if focus too.
+   */
+  #inactive(focus: boolean): void {
     clearTimeout(this.#idle);
     this.#idle = undefined;
-    this.#box.classList.remove("active", "key-focus");
+    this.#box.classList.remove("active");
+    if (!focus) return;
+    this.#box.classList.remove("key-focus");
     this.#focusAt = null;
   }
 
@@ -698,8 +748,8 @@ export class ClackShow extends HTMLElement {
 
   disconnectedCallback(): void {
     this.#ready = false;
-    // The visitor's activity, here, is over.
-    this.#inactive();
+    // The visitor's activity, here, is over, and focus has gone with it.
+    this.#inactive(true);
     // A drag the visitor was in the middle of ends here: its end will not
     // be heard.
     this.#endDrag();
@@ -1309,14 +1359,20 @@ export class ClackShow extends HTMLElement {
       this.#placeholder(target);
     }
     const pending = photo.settled.then(async (state) => {
-      // A slide still going is hurried to its end first: one at a time.
-      const going = state !== "dropped" && token === this.#token ? this.#hurry() : null;
-      if (going) await going;
       // The slides may have changed while it loaded: it is found by key.
-      const index = this.#indexByKey.get(slide.key);
-      if (token !== this.#token || state === "dropped" || index === undefined) {
+      const stale = (): boolean => token !== this.#token || !this.#indexByKey.has(slide.key);
+      if (state === "dropped" || stale()) {
         return false;
       }
+      // A slide still going is hurried to its end first: one at a time.
+      // Not after a swipe: the finger has taken the photo coming, and the
+      // one leaving goes at once, so the next goes on from the finger.
+      const going = how.swipe ? null : this.#hurry();
+      if (going) {
+        await going;
+        if (stale()) return false;
+      }
+      const index = this.#indexByKey.get(slide.key)!;
       this.#pending = null;
       this.#stage.classList.remove("loading");
       this.#display(index, photo, how);
@@ -1409,11 +1465,12 @@ export class ClackShow extends HTMLElement {
     // has had a new photo meanwhile: a photo replacing its placeholder, or
     // a new photo of the slide on screen, fades in place.
     if (transition?.type === "slide" && (from < 0 || from === index)) transition = { ...transition, type: "crossfade" };
-    // What is moving gets where it was going, at once: a fade, or anything
-    // with no transition next. (A slide still going has been hurried to its
-    // end before this, #request: one slide at a time.) So no more than two
-    // photos are ever on the stage.
-    this.#finishTransitions(transition ? "crossfade" : undefined);
+    // One transition at a time, so no more than two photos are ever on the
+    // stage: what is still going gets where it was going, at once -- a fade;
+    // a slide's photo leaving, which a finger let go of the other of; a
+    // slide hurried (#request) that did not end in time. A spring back is
+    // taken from where it has got to, below, if there is a transition.
+    this.#finishTransitions({ spring: !transition });
     // A photo springing back from a drag leaves from where it has got to,
     // not from the middle.
     const moving = old && this.#springing ? this.#takeOver(old) : null;
@@ -1449,7 +1506,6 @@ export class ClackShow extends HTMLElement {
       old.ariaHidden = "true";
       // Cut off at the show's sides while any moves (#settleMoving).
       if (transition.type === "slide" || offset !== null) this.#box.classList.add("moving");
-      let end = (): void => {};
       const running: Running = {
         type: transition.type,
         coming: { figure, animation: figure.animate(frames.incoming, timing) },
@@ -1459,9 +1515,7 @@ export class ClackShow extends HTMLElement {
           old.remove();
           this.#running = this.#running.filter((r) => r !== running);
           this.#settleMoving();
-          end();
         },
-        ended: new Promise<void>((resolve) => (end = resolve)),
       };
       this.#running.push(running);
       // Over when the photo it takes away has gone: the one it brings is in
@@ -1502,14 +1556,17 @@ export class ClackShow extends HTMLElement {
     return figure;
   }
 
-  /** Ends every running transition, or every one of type, at once, at its end. */
-  #finishTransitions(type?: "crossfade"): void {
-    // The spring back too: the photo where it was going, in place.
-    if (!type) this.#springing?.finish();
+  /**
+   * Ends running transitions at once, at their end: all, or only those of
+   * type; and the spring back, unless not spring -- the photo where it was
+   * going, in place.
+   */
+  #finishTransitions(o: { type?: "crossfade"; spring?: boolean } = {}): void {
+    if (o.spring ?? !o.type) end(this.#springing ?? undefined);
     for (const r of [...this.#running]) {
-      if (type && r.type !== type) continue;
-      r.coming?.animation.finish();
-      r.leaving.animation.finish();
+      if (o.type && r.type !== o.type) continue;
+      end(r.coming?.animation);
+      end(r.leaving.animation);
       r.done();
     }
   }
@@ -1522,24 +1579,29 @@ export class ClackShow extends HTMLElement {
    * if none is going.
    */
   #hurry(): Promise<void> | null {
-    const slides = this.#running.filter((r) => r.type === "slide");
-    if (slides.length === 0) return null;
-    for (const r of slides) {
-      for (const a of [r.coming?.animation, r.leaving.animation]) {
-        const timing = a?.effect?.getComputedTiming();
-        if (!a || !timing || a.playState !== "running") continue;
-        const left = (Number(timing.endTime) - Number(a.currentTime ?? 0)) / a.playbackRate;
-        if (left > hurryMs) a.updatePlaybackRate((a.playbackRate * left) / hurryMs);
-      }
+    const animations = this.#running.filter((r) => r.type === "slide").flatMap((r) => [r.coming?.animation, r.leaving.animation]);
+    // Only those running: one paused (by the page, say) would never end,
+    // and is finished with the rest (#display).
+    const going = animations.filter((a): a is Animation => a?.playState === "running");
+    if (going.length === 0) return null;
+    for (const a of going) {
+      const timing = a.effect?.getComputedTiming();
+      const left = (Number(timing?.endTime ?? 0) - Number(a.currentTime ?? 0)) / a.playbackRate;
+      // (Stood still, at a rate of 0, it has no end to hurry to: waited on, below.)
+      if (Number.isFinite(left) && left > hurryMs) a.updatePlaybackRate((a.playbackRate * left) / hurryMs);
     }
-    return Promise.all(slides.map((r) => r.ended)).then(() => undefined);
+    // Not waited on for long, should time stand still for them (a frame
+    // the browser has stopped drawing, as it may in a page out of sight).
+    const over = Promise.all(going.map((a) => a.finished.then(noop, noop)));
+    return Promise.race([over, new Promise((resolve) => setTimeout(resolve, 4 * hurryMs))]).then(noop);
   }
 
   /**
    * Takes figure's photo from what moves it sideways -- a spring back, a
-   * slide bringing it in -- for something else to move on (a finger, or
-   * the next slide): where it has got to, in px, or null if nothing moved
-   * it.
+   * slide bringing it in -- for something else to move on: a finger (a
+   * spring back or a slide), or the next slide (a spring back; a slide is
+   * hurried to its end instead, #hurry). Where it has got to, in px, or
+   * null if nothing moved it.
    */
   #takeOver(figure: HTMLElement): number | null {
     let at: number | null = null;
@@ -1776,7 +1838,7 @@ export class ClackShow extends HTMLElement {
       this.#caught = caught;
       void this.#hurry();
     }
-    this.#finishTransitions("crossfade");
+    this.#finishTransitions({ type: "crossfade" });
     // Where there is nowhere to go, the photo resists.
     const delta = (dx < 0 ? 1 : -1) * (this.#rtl() ? -1 : 1);
     const free = canStep(this.#from(), this.#slides.length, delta, this.loop);
@@ -1830,7 +1892,7 @@ export class ClackShow extends HTMLElement {
     const side = (s: string): number => parseFloat(show.getPropertyValue(`padding-${s}`)) + parseFloat(stage.getPropertyValue(`margin-${s}`));
     const margin = Math.max(side("left"), side("right"), 0);
     let reach = 0;
-    for (const f of figures) for (const e of [f, ...f.querySelectorAll(".mount, img, .missing, .fill")]) reach = Math.max(reach, shadowReach(e));
+    for (const f of figures) reach = Math.max(reach, shadowReach(f));
     return Math.ceil(margin + reach);
   }
 
