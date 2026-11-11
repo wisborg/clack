@@ -547,7 +547,9 @@ test("a shadow's reach is measured as drawn, to three standard deviations of its
   assertEqual(reach({ boxShadow: "0 0 20px black" }), 0, "a shadow its parent clips off");
   outer.style.overflow = "clip";
   outer.style.setProperty("overflow-clip-margin", "10px");
-  assertEqual(reach({ boxShadow: "0 0 20px black" }), 10, "a shadow its parent clips at a margin");
+  // An engine without the margin (Safari) clips at the box, and so is measured.
+  const margins = CSS.supports("overflow-clip-margin", "10px");
+  assertEqual(reach({ boxShadow: "0 0 20px black" }), margins ? 10 : 0, "a shadow its parent clips at a margin");
   outer.style.overflow = "";
   outer.style.removeProperty("overflow-clip-margin");
   // An inline box tells nothing of its scale: as its parent's.
@@ -1560,7 +1562,9 @@ test("a slide counts what a page's slide lets show past it, by the margin it cli
     void show.next();
     await waitFor(() => leaving.getAnimations().length > 0, "the photos to move");
     const coming = figures(show).find((f) => f !== leaving)!;
-    assertEqual(String((coming.getAnimations()[0]!.effect as KeyframeEffect).getKeyframes()[0]!["transform"]), "translateX(calc(100% + 20px))", "the 20px the slide lets show of the zoomed photo, no more");
+    // An engine without the margin (Safari) clips the zoomed photo at the slide: nothing shows past it.
+    const want = CSS.supports("overflow-clip-margin", "20px") ? "translateX(calc(100% + 20px))" : "translateX(100%)";
+    assertEqual(String((coming.getAnimations()[0]!.effect as KeyframeEffect).getKeyframes()[0]!["transform"]), want, "the 20px the slide lets show of the zoomed photo, no more");
     await settledOn(show, "2 of 2");
   } finally {
     document.adoptedStyleSheets = document.adoptedStyleSheets.filter((x) => x !== page);
