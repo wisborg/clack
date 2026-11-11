@@ -278,8 +278,8 @@ const revealFor = 3000;
  * moved aside carrying on a little the way it went -- unless still, for
  * reduced motion: then it fades where it is); a slide moves both along by
  * a whole stage and beyond px more, the next coming in from the side the
- * last leaves by -- beyond being the show's margin beside the stage, so
- * neither is seen in it.
+ * last leaves by -- beyond being the show's margin beside the stage and
+ * the reach of the photos' shadows (#beyond), so neither is seen in it.
  */
 export function transitionFrames(
   type: "crossfade" | "slide",
@@ -315,33 +315,33 @@ function away(sign: number, beyond: number): string {
 }
 
 /**
- * How a photo still leaving, at px, goes on when the next slide starts,
- * with the photo on screen leaving from offset px by exit: as far as it
- * does, so the two keep the distance between them, as prints moved along
- * a wall together.
- */
-export function alongside(at: number, offset: number, exit: -1 | 1, beyond = 0): Keyframe[] {
-  const apart = at - offset;
-  const end = apart ? `translateX(calc(${apart}px + ${away(exit, beyond)}))` : `translateX(${away(exit, beyond)})`;
-  return [{ transform: `translateX(${at}px)` }, { transform: end }];
-}
-
-/**
- * How far the shadows drawn under e reach past its sides, in px: Clack's
- * or a page's, as computed -- each layer's sideways offset, blur and
- * spread; not one drawn inside it.
+ * How far what is drawn around e reaches past its sides, in px: Clack's
+ * or a page's, as computed -- a box shadow's layers, each by its sideways
+ * offset, blur and spread (not one drawn inside it); a drop shadow's, by
+ * its offset and three times its blur, a standard deviation, past which
+ * nothing of it shows; and an outline.
  */
 export function shadowReach(e: Element): number {
+  const style = getComputedStyle(e);
+  const px = (s: string): number[] => (s.match(/-?[\d.]+(?:e-?\d+)?px/g) ?? []).map(parseFloat);
   let most = 0;
   // Layers, split at the commas outside a colour's parentheses.
-  for (const layer of getComputedStyle(e).boxShadow.split(/,(?![^(]*\))/)) {
+  for (const layer of style.boxShadow.split(/,(?![^(]*\))/)) {
     if (/\binset\b/.test(layer)) continue;
-    // A colour, then x, y, blur and spread, in px.
-    const [x = 0, , blur = 0, spread = 0] = (layer.match(/-?[\d.]+(?:e-?\d+)?px/g) ?? []).map(parseFloat);
+    // A colour, then x, y, blur and spread.
+    const [x = 0, , blur = 0, spread = 0] = px(layer);
     most = Math.max(most, Math.abs(x) + blur + spread);
   }
+  for (const [, shadow] of style.filter.matchAll(/drop-shadow\(((?:[^()]|\([^()]*\))*)\)/g)) {
+    const [x = 0, , blur = 0] = px(shadow!);
+    most = Math.max(most, Math.abs(x) + 3 * blur);
+  }
+  if (style.outlineStyle !== "none") most = Math.max(most, parseFloat(style.outlineWidth) + parseFloat(style.outlineOffset));
   return most;
 }
+
+/** How long a slide still going is given to finish when the next is asked for (#hurry), in ms. */
+const hurryMs = 120;
 
 function el<K extends keyof HTMLElementTagNameMap>(name: K, className: string, part = ""): HTMLElementTagNameMap[K] {
   const e = document.createElement(name);
@@ -373,15 +373,16 @@ function impression(hash: string): HTMLCanvasElement | null {
 
 /**
  * A transition in progress, and what must happen when it ends, however it
- * ends: the photos it takes away removed. The photo it brings in is let go
- * of (coming null) when something else takes it over (#takeOver); those it
- * takes away may be taken on by the next slide (#display).
+ * ends: the photo it takes away removed. The photo it brings in is let go
+ * of (coming null) when a finger takes it over (#takeOver).
  */
 interface Running {
   type: "crossfade" | "slide";
   coming: { figure: HTMLElement; animation: Animation } | null;
-  leaving: { figure: HTMLElement; animation: Animation }[];
+  leaving: { figure: HTMLElement; animation: Animation };
   done: () => void;
+  /** Settled once done has run. */
+  ended: Promise<void>;
 }
 
 /** The `<clack-show>` element. */
@@ -622,6 +623,12 @@ export class ClackShow extends HTMLElement {
       }
     }
     if (!on) this.#inactive();
+    // Focus already on a control, unheard on its way there, is taken as
+    // having been there: not judged as it comes back with the window.
+    else {
+      const at = this.shadowRoot!.activeElement;
+      this.#focusAt = at && this.#controls.contains(at) ? at : null;
+    }
   }
 
   /** The controls as they are without the visitor's activity: the timer for its end dropped. */
@@ -1301,7 +1308,10 @@ export class ClackShow extends HTMLElement {
     if (!this.#figure || this.#figure.classList.contains("placeholder")) {
       this.#placeholder(target);
     }
-    const pending = photo.settled.then((state) => {
+    const pending = photo.settled.then(async (state) => {
+      // A slide still going is hurried to its end first: one at a time.
+      const going = state !== "dropped" && token === this.#token ? this.#hurry() : null;
+      if (going) await going;
       // The slides may have changed while it loaded: it is found by key.
       const index = this.#indexByKey.get(slide.key);
       if (token !== this.#token || state === "dropped" || index === undefined) {
@@ -1399,15 +1409,14 @@ export class ClackShow extends HTMLElement {
     // has had a new photo meanwhile: a photo replacing its placeholder, or
     // a new photo of the slide on screen, fades in place.
     if (transition?.type === "slide" && (from < 0 || from === index)) transition = { ...transition, type: "crossfade" };
-    // None at all: what is moving gets where it was going, at once. A fade
-    // is finished at once whatever comes next, so no more than two photos
-    // are ever fading, and the one on screen is wholly there to go from.
+    // What is moving gets where it was going, at once: a fade, or anything
+    // with no transition next. (A slide still going has been hurried to its
+    // end before this, #request: one slide at a time.) So no more than two
+    // photos are ever on the stage.
     this.#finishTransitions(transition ? "crossfade" : undefined);
-    // The photo on screen, if on its way -- springing back from a drag, or
-    // sliding in -- leaves from where it has got to, not from the middle.
-    // Sliding in when the next only fades, it slides on into place as it
-    // fades out.
-    const moving = old && (transition?.type === "slide" || this.#springing) ? this.#takeOver(old) : null;
+    // A photo springing back from a drag leaves from where it has got to,
+    // not from the middle.
+    const moving = old && this.#springing ? this.#takeOver(old) : null;
     const previous = from >= 0 && from !== index ? from : this.#shown;
     const slide = this.#slides[index]!;
     const figure = this.#makeFigure(index, slide, photo);
@@ -1436,30 +1445,28 @@ export class ClackShow extends HTMLElement {
       else if (transition.type === "slide" || offset !== null) exit = (-this.#direction * (this.#rtl() ? -1 : 1)) as -1 | 1;
       const beyond = transition.type === "slide" ? this.#beyond(old, figure) : 0;
       const frames = transitionFrames(transition.type, exit, offset, { beyond, still: transition.reduced });
-      // Those on their way out of a slide go on along with this one, from
-      // where they are: nothing vanishes from the middle of the stage.
-      const along = transition.type === "slide" ? this.#carryLeaving(old.offsetWidth + beyond) : [];
+      // Going: no longer a slide to be found, or read as one, beside the one on screen.
+      old.ariaHidden = "true";
       // Cut off at the show's sides while any moves (#settleMoving).
       if (transition.type === "slide" || offset !== null) this.#box.classList.add("moving");
+      let end = (): void => {};
       const running: Running = {
         type: transition.type,
         coming: { figure, animation: figure.animate(frames.incoming, timing) },
-        leaving: [
-          { figure: old, animation: old.animate(frames.outgoing, timing) },
-          ...along.map(({ figure: f, at }) => ({ figure: f, animation: f.animate(alongside(at, offset ?? 0, exit, beyond), timing) })),
-        ],
+        leaving: { figure: old, animation: old.animate(frames.outgoing, timing) },
         done: () => {
-          // Once, and not for a transition another has taken on.
-          if (!this.#running.includes(running)) return;
-          for (const l of running.leaving) l.figure.remove();
+          if (!this.#running.includes(running)) return; // once
+          old.remove();
           this.#running = this.#running.filter((r) => r !== running);
           this.#settleMoving();
+          end();
         },
+        ended: new Promise<void>((resolve) => (end = resolve)),
       };
       this.#running.push(running);
-      // Over when what it takes away has gone: the photo it brings is in
-      // place by then, or taken over by something else.
-      void Promise.all(running.leaving.map((l) => l.animation.finished)).then(running.done, running.done);
+      // Over when the photo it takes away has gone: the one it brings is in
+      // place by then, or held by a finger.
+      void running.leaving.animation.finished.then(running.done, running.done);
     } else {
       old?.remove();
       this.#settleMoving();
@@ -1502,15 +1509,37 @@ export class ClackShow extends HTMLElement {
     for (const r of [...this.#running]) {
       if (type && r.type !== type) continue;
       r.coming?.animation.finish();
-      for (const l of r.leaving) l.animation.finish();
+      r.leaving.animation.finish();
       r.done();
     }
   }
 
   /**
+   * Hurries any slide still going to its end, as the next is asked for:
+   * what is left of it in hurryMs at most, so the next starts from the
+   * photo in place -- one slide at a time, nothing snapped into place or
+   * taken from the middle of the stage. Settled once they are over; null
+   * if none is going.
+   */
+  #hurry(): Promise<void> | null {
+    const slides = this.#running.filter((r) => r.type === "slide");
+    if (slides.length === 0) return null;
+    for (const r of slides) {
+      for (const a of [r.coming?.animation, r.leaving.animation]) {
+        const timing = a?.effect?.getComputedTiming();
+        if (!a || !timing || a.playState !== "running") continue;
+        const left = (Number(timing.endTime) - Number(a.currentTime ?? 0)) / a.playbackRate;
+        if (left > hurryMs) a.updatePlaybackRate((a.playbackRate * left) / hurryMs);
+      }
+    }
+    return Promise.all(slides.map((r) => r.ended)).then(() => undefined);
+  }
+
+  /**
    * Takes figure's photo from what moves it sideways -- a spring back, a
-   * slide bringing it in -- for something else to move on: where it has
-   * got to, in px, or null if nothing moved it.
+   * slide bringing it in -- for something else to move on (a finger, or
+   * the next slide): where it has got to, in px, or null if nothing moved
+   * it.
    */
   #takeOver(figure: HTMLElement): number | null {
     let at: number | null = null;
@@ -1529,26 +1558,6 @@ export class ClackShow extends HTMLElement {
     return at;
   }
 
-  /**
-   * The photos on their way out of a slide, and where each has got to, in
-   * px, taken from it for the next slide to carry on (#display): their
-   * slides end here. Those already gone -- gone px or more aside, out of
-   * the stage and past what of the show is seen -- are removed, so a key
-   * held down never piles photos up beyond the show.
-   */
-  #carryLeaving(gone: number): { figure: HTMLElement; at: number }[] {
-    const taken = this.#running.filter((r) => r.type === "slide");
-    const all = taken.flatMap((r) => r.leaving.map((l) => ({ figure: l.figure, at: this.#offsetOf(l.figure) })));
-    // Dropped first, so that cancelling their animations ends nothing.
-    this.#running = this.#running.filter((r) => r.type !== "slide");
-    for (const r of taken) {
-      r.coming?.animation.cancel();
-      for (const l of r.leaving) l.animation.cancel();
-    }
-    const carried = all.filter((c) => Math.abs(c.at) < gone - 0.5);
-    for (const c of all) if (!carried.includes(c)) c.figure.remove();
-    return carried;
-  }
 
   /**
    * How one photo gives way to the next, from the theme -- a crossfade or a
@@ -1760,10 +1769,13 @@ export class ClackShow extends HTMLElement {
       return;
     }
     // Caught as it springs back or slides in: it follows the finger from
-    // where it was caught, not from where it is going. What is leaving goes
-    // on leaving.
+    // where it was caught, not from where it is going. The one leaving
+    // hurries on out (#hurry), so it is gone by the time the finger lets go.
     const caught = this.#takeOver(figure);
-    if (caught !== null) this.#caught = caught;
+    if (caught !== null) {
+      this.#caught = caught;
+      void this.#hurry();
+    }
     this.#finishTransitions("crossfade");
     // Where there is nowhere to go, the photo resists.
     const delta = (dx < 0 ? 1 : -1) * (this.#rtl() ? -1 : 1);
@@ -1818,7 +1830,7 @@ export class ClackShow extends HTMLElement {
     const side = (s: string): number => parseFloat(show.getPropertyValue(`padding-${s}`)) + parseFloat(stage.getPropertyValue(`margin-${s}`));
     const margin = Math.max(side("left"), side("right"), 0);
     let reach = 0;
-    for (const f of figures) for (const e of f.querySelectorAll(".mount, img, .missing, .fill")) reach = Math.max(reach, shadowReach(e));
+    for (const f of figures) for (const e of [f, ...f.querySelectorAll(".mount, img, .missing, .fill")]) reach = Math.max(reach, shadowReach(e));
     return Math.ceil(margin + reach);
   }
 
