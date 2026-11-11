@@ -125,15 +125,23 @@ function themeSheet({ properties }: Compiled): CSSStyleSheet {
  * An element's content box as laid out, in CSS pixels, untouched by any
  * transform: from its computed style, less any padding and border a page
  * may give it (the stage is a part) where its box sizing counts them in.
- * Nothing, out of the page or hidden.
+ * And its border box's width (outer), the width a transform's percentages
+ * are of. Nothing, out of the page or hidden.
  */
-function laidOut(e: Element): { width: number; height: number } {
+function laidOut(e: Element): { width: number; height: number; outer: number } {
   const style = getComputedStyle(e);
   const px = (...names: string[]): number => names.reduce((sum, n) => sum + (parseFloat(style.getPropertyValue(n)) || 0), 0);
   const inner = style.boxSizing === "border-box";
-  const width = (parseFloat(style.width) || 0) - (inner ? px("padding-left", "padding-right", "border-left-width", "border-right-width") : 0);
+  const sides = px("padding-left", "padding-right", "border-left-width", "border-right-width");
+  const width = (parseFloat(style.width) || 0) - (inner ? sides : 0);
   const height = (parseFloat(style.height) || 0) - (inner ? px("padding-top", "padding-bottom", "border-top-width", "border-bottom-width") : 0);
-  return { width: Math.max(0, width), height: Math.max(0, height) };
+  return { width: Math.max(0, width), height: Math.max(0, height), outer: Math.max(0, width) + sides };
+}
+
+/** How many px on the screen an element's own px are, as a page scales it and what is around it (not as it rotates it). */
+function screenScale(e: Element, rect = e.getBoundingClientRect()): number {
+  const outer = laidOut(e).outer;
+  return outer > 0 && rect.width > 0 ? rect.width / outer : 1;
 }
 
 /** Where the photos are drawn: the stage's size, and what the mount takes around a photo, each side. */
@@ -278,8 +286,9 @@ const revealFor = 3000;
  * moved aside carrying on a little the way it went -- unless still, for
  * reduced motion: then it fades where it is); a slide moves both along by
  * a whole stage and beyond px more, the next coming in from the side the
- * last leaves by -- beyond being the show's margin beside the stage and
- * the reach of the photos' shadows (#beyond), so neither is seen in it.
+ * last leaves by -- beyond being how far each is from the show's sides,
+ * and what is drawn around it reaches, in its own px (#beyond), so neither
+ * is seen in the show.
  */
 export function transitionFrames(
   type: "crossfade" | "slide",
@@ -379,9 +388,15 @@ export function shadowReach(e: Element): number {
 
 function noop(): void {}
 
-/** Whether a is moving on towards its end: running, forwards (reversed, it heads back to its start). */
+/**
+ * Whether a is moving on towards its end, and will get there: running,
+ * forwards (reversed, it heads back to its start), to an end there is
+ * (made endless by a page, it has none). One that does not -- paused, at
+ * a rate of 0, reversed, endless -- is not waited for, hurried, or left to
+ * go on by itself (#display, #swiped): it is ended.
+ */
 function moves(a: Animation): boolean {
-  return a.playState === "running" && a.playbackRate > 0;
+  return a.playState === "running" && a.playbackRate > 0 && Number.isFinite(Number(a.effect?.getComputedTiming().endTime));
 }
 
 /**
@@ -1488,14 +1503,13 @@ export class ClackShow extends HTMLElement {
     // slide on the stage, and one photo element can be in one figure at a
     // time (#makeFigure). A spring back is taken from where it has got to,
     // below.
-    const key = this.#slides[index]!.key;
-    const leavesBeside = (r: Running): boolean => r.type === "slide" && !r.coming && moves(r.leaving.animation) && r.leaving.key !== key;
+    const slide = this.#slides[index]!;
+    const leavesBeside = (r: Running): boolean => r.type === "slide" && !r.coming && moves(r.leaving.animation) && r.leaving.key !== slide.key;
     this.#finishTransitions(!transition, (r) => !transition || !leavesBeside(r));
     // A photo springing back from a drag leaves from where it has got to,
     // not from the middle.
     const moving = old && this.#springing ? this.#takeOver(old) : null;
     const previous = from >= 0 && from !== index ? from : this.#shown;
-    const slide = this.#slides[index]!;
     const figure = this.#makeFigure(index, slide, photo);
     this.#stage.append(figure);
     this.#figure = figure;
@@ -1601,9 +1615,8 @@ export class ClackShow extends HTMLElement {
   /** Speeds every slide still going on to its end, in hurryMs at most: one paused, or stood still, has no end to hurry to. */
   #hurry(): void {
     for (const a of this.#sliding()) {
-      const left = (Number(a.effect?.getComputedTiming().endTime ?? 0) - Number(a.currentTime ?? 0)) / a.playbackRate;
-      // (One a page has made endless has no end to hurry to.)
-      if (Number.isFinite(left) && left > hurryMs) a.updatePlaybackRate((a.playbackRate * left) / hurryMs);
+      const left = (Number(a.effect?.getComputedTiming().endTime) - Number(a.currentTime ?? 0)) / a.playbackRate;
+      if (left > hurryMs) a.updatePlaybackRate((a.playbackRate * left) / hurryMs);
     }
   }
 
@@ -1923,28 +1936,45 @@ export class ClackShow extends HTMLElement {
   /**
    * How far past a whole slide's width a slide takes the photos -- old's
    * and coming's -- so that nothing of either is seen in the show as they
-   * start and end, in the slide's own px. Where coming is, at rest, against
-   * the show's sides, which cut off what moves (clack.css, .moving): the
-   * show's margin beside the stage, the wider side's, or however a page
-   * moves, scales or pads it there. And what is drawn around the photos,
-   * as far as it reaches (shadowReach), with a filter on the stage, which
-   * spreads what is in it (one further out spreads only what the show
-   * leaves of them). With none, none: the photos go edge to edge.
+   * start and end, in the slide's own px. Where each slide, and all that is
+   * in it, is as the page places it, at rest, against the show's sides,
+   * which cut off what moves (clack.css, .moving): the show's margin beside
+   * the stage, the wider side's, or however a page moves, scales, pads or
+   * borders the slide or the photo in it. And what is drawn around the
+   * photos, as far as it reaches (shadowReach), with a filter on the stage,
+   * which spreads what is in it (one further out spreads only what the
+   * show leaves of them). With none, none: the photos go edge to edge. Not
+   * a slide a page rotates, whose corners reach further than its box.
    */
   #beyond(old: HTMLElement, coming: HTMLElement): number {
-    const at = coming.getBoundingClientRect();
     const show = this.#box.getBoundingClientRect();
-    // The slide's px per px on the screen, as laid out: its border box.
-    const style = getComputedStyle(coming);
-    const width = ["width", "padding-left", "padding-right", "border-left-width", "border-right-width"]
-      .slice(0, style.boxSizing === "border-box" ? 1 : 5)
-      .reduce((sum, p) => sum + (parseFloat(style.getPropertyValue(p)) || 0), 0);
-    const scale = width > 0 && at.width > 0 ? at.width / width : 1;
-    const gap = Math.max(at.left - show.left, show.right - at.right, 0) / scale;
-    const reach = Math.max(shadowReach(old), shadowReach(coming)) + filterReach(getComputedStyle(this.#stage).filter);
+    // How far f is from the show's sides, at its far side, and how far
+    // what is in it reaches past its own, in its own px. Both at rest: a
+    // drag of old's photo has been let go, and a spring back taken over
+    // (#display), before this.
+    const clear = (f: HTMLElement): number => {
+      const box = f.getBoundingClientRect();
+      const scale = screenScale(f, box);
+      let left = box.left;
+      let right = box.right;
+      for (const e of f.querySelectorAll("*")) {
+        const r = e.getBoundingClientRect();
+        if (r.width === 0 && r.height === 0) continue; // no box (display: contents, none)
+        left = Math.min(left, r.left);
+        right = Math.max(right, r.right);
+      }
+      const gap = Math.max(box.left - show.left, show.right - box.right, 0);
+      const over = Math.max(box.left - left, right - box.right, 0);
+      return (gap + over) / scale;
+    };
+    const drawn = Math.max(shadowReach(old), shadowReach(coming));
+    // The stage's filter, in its px, as the slide's.
+    const stage = filterReach(getComputedStyle(this.#stage).filter) * (screenScale(this.#stage) / screenScale(coming));
+    const total = Math.max(clear(old), clear(coming)) + drawn + stage;
     // Whole px, not a rounding error's more.
-    return Math.ceil(Math.round((gap + reach) * 100) / 100);
+    return Math.ceil(Math.round(total * 100) / 100);
   }
+
 
 
   /** Ends a drag of figure's photo: back in place, and nothing cut off once nothing moves. */

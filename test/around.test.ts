@@ -345,10 +345,10 @@ test("on the floating bar, over whatever photo, the counter and the credit are i
 test("a photo held aside by a drag when a key moves on slides on from where it is held, and the rest of the drag is no swipe", async () => {
   if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
   const theme = themed("sliding-held", { transition: { type: "slide", duration: "600ms" } });
-  const show = makeShow([{}, {}, {}], { theme });
+  const show = makeShow([{}, {}, {}, {}], { theme });
   await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
   show.style.setProperty("--clack-transition-duration", "600ms");
-  await settledOn(show, "1 of 3");
+  await settledOn(show, "1 of 4");
   await sleep(200); // the next preloaded
   const leaving = figures(show)[0]!;
   const p = pointer(show);
@@ -366,10 +366,19 @@ test("a photo held aside by a drag when a key moves on slides on from where it i
   p.send("pointermove", x - 200);
   assert(leaving.isConnected && leaving.getAnimations().length > 0, "the slide is not cut short by the rest of the drag");
   p.send("pointerup", x - 200, { buttons: 0 });
-  await settledOn(show, "2 of 3");
+  await settledOn(show, "2 of 4");
   await sleep(100);
   assertEqual(show.index, 1, "the second, and not on to the third: the letting go was no swipe");
   assertEqual(figures(show)[0]!.style.getPropertyValue("--clack-drag"), "", "the photo on screen not held aside");
+  // As far past the stage as a step with nothing held: where it was held
+  // is not taken for where the page puts it.
+  const second = figures(show)[0]!;
+  await sleep(200); // the next preloaded
+  void show.next();
+  await waitFor(() => second.getAnimations().length > 0, "the photos to move");
+  const again = (second.getAnimations()[0]!.effect as KeyframeEffect).getKeyframes();
+  assertEqual(String(frames.at(-1)!["transform"]), String(again.at(-1)!["transform"]), "as far as a step from in place");
+  await settledOn(show, "3 of 4");
 });
 
 test("a floating bar's caption too long for one line widens nothing", async () => {
@@ -1277,9 +1286,12 @@ test("a photo with alternatives in other formats is in the middle of its frame, 
   assert(Math.abs((photo.top + photo.bottom) / 2 - (figure.top + figure.bottom) / 2) < 1, `in the middle: the photo ${photo.top}-${photo.bottom}, the frame ${figure.top}-${figure.bottom}`);
 });
 
-for (const [what, css] of [
-  ["scales the slide down", "clack-show.cleared::part(slide) { scale: 0.9; }"],
-  ["pads the stage", "clack-show.cleared::part(stage) { padding-inline: 40px; box-sizing: border-box; }"],
+for (const [what, css, sizes] of [
+  ["scales the slide down", "clack-show.cleared::part(slide) { scale: 0.9; }", [600, 600]],
+  ["pads the stage", "clack-show.cleared::part(stage) { padding-inline: 40px; box-sizing: border-box; }", [600, 600]],
+  ["borders the photo past its slide", "clack-show.cleared::part(photo) { border: 12px solid white; }", [600, 600]],
+  ["sizes slides to their photos, the last narrower", "clack-show.cleared::part(slide) { justify-self: center; width: max-content; }", [200, 600]],
+  ["scales a slide on a stage it gives a drop shadow", "clack-show.cleared::part(slide) { scale: 0.5; } clack-show.cleared::part(stage) { filter: drop-shadow(0 0 10px black); }", [600, 600]],
 ] as const) {
   test(`a slide clears the show's sides where the page ${what}`, async () => {
     if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
@@ -1287,8 +1299,8 @@ for (const [what, css] of [
     page.replaceSync(css);
     document.adoptedStyleSheets = [...document.adoptedStyleSheets, page];
     try {
-      const theme = themed(`bleed-sliding-${what.replace(/ /g, "-")}`, { extends: "minimal", transition: { type: "slide", duration: "600ms" } });
-      const show = makeShow([{ width: 600, height: 200 }, { width: 600, height: 200 }], { theme, class: "cleared" });
+      const theme = themed(`bleed-sliding-${what.split(" ").slice(0, 3).join("-").replace(/[^a-z-]/g, "")}`, { extends: "minimal", transition: { type: "slide", duration: "600ms" } });
+      const show = makeShow([{ width: sizes[0], height: 200 }, { width: sizes[1], height: 200 }], { theme, class: "cleared" });
       await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
       show.style.setProperty("--clack-transition-duration", "600ms");
       await settledOn(show, "1 of 2");
@@ -1301,11 +1313,14 @@ for (const [what, css] of [
       const all = [...leaving.getAnimations(), ...coming.getAnimations()];
       for (const a of all) a.pause();
       for (const a of all) a.currentTime = 0;
-      const first = coming.getBoundingClientRect();
-      assert(first.left >= host.right - 0.5, `as it starts, the next, from ${first.left}, is past the show's edge, ${host.right}`);
+      // Everything in it, and for a drop shadow on the stage, three of its deviations more.
+      const extent = (f: Element): DOMRect[] => [f, ...f.querySelectorAll("*")].map((e) => e.getBoundingClientRect()).filter((r) => r.width || r.height);
+      const spread = what.includes("drop shadow") ? 30 : 0;
+      const first = Math.min(...extent(coming).map((r) => r.left));
+      assert(first >= host.right + spread - 0.5, `as it starts, the next, from ${first}, is past the show's edge, ${host.right}, and the shadow's ${spread}px`);
       for (const a of all) a.currentTime = 599.9;
-      const last = leaving.getBoundingClientRect();
-      assert(last.right <= host.left + 0.5, `as it ends, the last, to ${last.right}, is past the show's other edge, ${host.left}`);
+      const last = Math.max(...extent(leaving).map((r) => r.right));
+      assert(last <= host.left - spread + 0.5, `as it ends, the last, to ${last}, is past the show's other edge, ${host.left}, and the shadow's ${spread}px`);
       for (const a of all) a.finish();
       await settledOn(show, "2 of 2");
     } finally {
@@ -1370,8 +1385,34 @@ test("a photo the finger left leaving that a page sends back goes as the finger 
   p.send("pointerdown", x);
   p.send("pointermove", x - 10);
   const out = first.getAnimations()[0]!;
-  await out.ready;
-  out.playbackRate = -out.playbackRate;
+  // Slowed first, so it is still leaving however long this takes here.
+  out.playbackRate = 0.05;
+  out.playbackRate = -0.05;
+  assert(first.isConnected, "still leaving, sent back");
   p.send("pointerup", x - 10, { buttons: 0 });
   assert(!first.isConnected, "gone, not sent back to the middle");
+});
+
+test("a photo the finger left leaving that a page makes endless goes as the finger lets go", async () => {
+  if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
+  const theme = themed("sliding-left-endless", { transition: { type: "slide", duration: "2000ms" } });
+  const show = makeShow([{}, {}, {}], { theme });
+  await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
+  show.style.setProperty("--clack-transition-duration", "2000ms");
+  await settledOn(show, "1 of 3");
+  await sleep(300); // the next preloaded
+  const first = figures(show)[0]!;
+  void show.next();
+  await waitFor(() => first.getAnimations().length > 0, "the photos to move");
+  await sleep(100);
+  const p = pointer(show);
+  const x = p.left + p.width / 2;
+  p.send("pointerdown", x);
+  p.send("pointermove", x - 10);
+  const out = first.getAnimations()[0]!;
+  out.playbackRate = 0.05;
+  out.effect!.updateTiming({ iterations: Infinity });
+  assert(first.isConnected, "still leaving, without end");
+  p.send("pointerup", x - 10, { buttons: 0 });
+  assert(!first.isConnected, "gone, not crossing the stage again and again");
 });
