@@ -357,20 +357,27 @@ function filterReach(filter: string): number {
  * box shadow's layers, each by its sideways offset, one and a half times
  * its blur (its radius is two standard deviations, and past three nothing
  * shows) and its spread, not one drawn inside; an outline, its width and
- * offset. A filter spreads all that is drawn in its element, descendants
- * too (filterReach). Measured from each element's own sides, where they
- * are inside e's: more than is drawn there, never less.
+ * offset -- each as large as a scale on its element draws it. A filter
+ * spreads all that is drawn in its element, descendants too
+ * (filterReach); an element that clips what overflows it keeps its
+ * descendants within its own box. Measured from each element's own sides,
+ * where they are inside e's: more than is drawn there, never less.
  */
 export function shadowReach(e: Element): number {
   const sides = e.getBoundingClientRect();
-  const scale = e instanceof HTMLElement && sides.width > 0 ? e.offsetWidth / sides.width : 1;
-  const reach = (n: Element): number => {
+  // e's px as laid out, per px on screen.
+  const unscale = e instanceof HTMLElement && sides.width > 0 ? e.offsetWidth / sides.width : 1;
+  const reach = (n: Element, outer: number): number => {
     const style = getComputedStyle(n);
     if (style.display === "none") return 0;
+    // How far its box is past e's sides, and how large it draws, against
+    // e's px: as its parent's, for an element with no box of its own.
     let past = 0;
+    let scale = outer;
     if (n !== e && style.display !== "contents") {
       const r = n.getBoundingClientRect();
-      past = Math.max(sides.left - r.left, r.right - sides.right, 0) * scale;
+      past = Math.max(sides.left - r.left, r.right - sides.right, 0) * unscale;
+      if (n instanceof HTMLElement && n.offsetWidth > 0) scale = (r.width / n.offsetWidth) * unscale;
     }
     let own = 0;
     // Layers, at the commas: a colour's own split off a layer only what is
@@ -382,14 +389,23 @@ export function shadowReach(e: Element): number {
       own = Math.max(own, Math.abs(x) + 1.5 * blur + spread);
     }
     if (style.outlineStyle !== "none") own = Math.max(own, (parseFloat(style.outlineWidth) || 0) + (parseFloat(style.outlineOffset) || 0));
-    let drawn = past + own;
-    for (const child of n.children) drawn = Math.max(drawn, reach(child));
-    return drawn + filterReach(style.filter);
+    let drawn = past + own * scale;
+    const clips = style.overflowX !== "visible";
+    for (const child of n.children) {
+      const inside = reach(child, scale);
+      drawn = Math.max(drawn, clips ? Math.min(inside, past) : inside);
+    }
+    return drawn + filterReach(style.filter) * scale;
   };
-  return reach(e);
+  return reach(e, 1);
 }
 
 function noop(): void {}
+
+/** Whether a is moving on towards its end: running, at a rate that gets it there. */
+function moves(a: Animation): boolean {
+  return a.playState === "running" && a.playbackRate !== 0 && Number.isFinite(a.playbackRate);
+}
 
 /**
  * Ends a at once, at its end -- or, where it has none to get to (a rate of
@@ -443,8 +459,7 @@ function impression(hash: string): HTMLCanvasElement | null {
 interface Running {
   type: "crossfade" | "slide";
   coming: { figure: HTMLElement; animation: Animation } | null;
-  /** The photo it takes away, and the key of its slide (null for the placeholder). */
-  leaving: { figure: HTMLElement; animation: Animation; key: string | null };
+  leaving: { figure: HTMLElement; animation: Animation };
   done: () => void;
 }
 
@@ -1479,7 +1494,6 @@ export class ClackShow extends HTMLElement {
 
   #display(index: number, photo: Photo, how: How): void {
     const old = this.#figure;
-    const oldKey = this.#figureKey;
     const from = this.#onScreen();
     let transition = old ? this.#transition() : null;
     // A slide only from one slide to another -- though the one on screen
@@ -1490,11 +1504,13 @@ export class ClackShow extends HTMLElement {
     // going, at once -- a fade; a slide hurried (#request) that did not end
     // in time. All of it, with no transition next. A photo only leaving, a
     // finger having caught the one a slide brought in (#drag), hurries on
-    // out beside the next -- unless the next is its own slide, which has
-    // one photo element for one figure at a time (#makeFigure). A spring
-    // back is taken from where it has got to, below.
-    const key = this.#slides[index]!.key;
-    this.#finishTransitions(!transition, (r) => !transition || r.type === "crossfade" || r.coming !== null || r.leaving.key === key);
+    // out beside the next -- if it is moving at all (one paused would stay
+    // for good), and unless it holds the photo element the next takes, one
+    // figure's at a time (#makeFigure). A spring back is taken from where
+    // it has got to, below.
+    const leavesBeside = (r: Running): boolean =>
+      r.type === "slide" && !r.coming && moves(r.leaving.animation) && !(photo.state !== "failed" && r.leaving.figure.contains(photo.element));
+    this.#finishTransitions(!transition, (r) => !transition || !leavesBeside(r));
     // A photo springing back from a drag leaves from where it has got to,
     // not from the middle.
     const moving = old && this.#springing ? this.#takeOver(old) : null;
@@ -1533,7 +1549,7 @@ export class ClackShow extends HTMLElement {
       const running: Running = {
         type: transition.type,
         coming: { figure, animation: figure.animate(frames.incoming, timing) },
-        leaving: { figure: old, animation: old.animate(frames.outgoing, timing), key: oldKey },
+        leaving: { figure: old, animation: old.animate(frames.outgoing, timing) },
         done: () => {
           if (!this.#running.includes(running)) return; // once
           old.remove();
@@ -1594,15 +1610,19 @@ export class ClackShow extends HTMLElement {
     }
   }
 
-  /** Speeds every slide still going on to its end, in hurryMs at most: one paused, or stood still at a rate of 0, has no end to hurry to. */
+  /** The animations of the slides still going that are moving, of those still bringing a photo in only if bringing. */
+  #sliding(bringing = false): Animation[] {
+    return this.#running
+      .filter((r) => r.type === "slide" && (!bringing || r.coming))
+      .flatMap((r) => [r.coming?.animation, r.leaving.animation])
+      .filter((a): a is Animation => !!a && moves(a));
+  }
+
+  /** Speeds every slide still going on to its end, in hurryMs at most: one paused, or stood still, has no end to hurry to. */
   #hurry(): void {
-    for (const r of this.#running) {
-      if (r.type !== "slide") continue;
-      for (const a of [r.coming?.animation, r.leaving.animation]) {
-        if (a?.playState !== "running") continue;
-        const left = (Number(a.effect?.getComputedTiming().endTime ?? 0) - Number(a.currentTime ?? 0)) / a.playbackRate;
-        if (Number.isFinite(left) && left > hurryMs) a.updatePlaybackRate((a.playbackRate * left) / hurryMs);
-      }
+    for (const a of this.#sliding()) {
+      const left = (Number(a.effect?.getComputedTiming().endTime ?? 0) - Number(a.currentTime ?? 0)) / a.playbackRate;
+      if (left > hurryMs) a.updatePlaybackRate((a.playbackRate * left) / hurryMs);
     }
   }
 
@@ -1611,16 +1631,14 @@ export class ClackShow extends HTMLElement {
    * bringing a photo in are over -- one slide at a time, the next starting
    * from the photo in place, nothing snapped there or taken from the middle
    * of the stage. Not those only taking one away, a finger having caught
-   * the other (#drag): they hurry on out beside the next. Not for long,
-   * should time stand still for them (in a page the browser stops drawing,
-   * or at a rate of 0): #display ends what is left. Null if there is none.
+   * the other (#drag): they hurry on out beside the next. Not those not
+   * moving, paused or at a rate of 0, nor for long, should time stand
+   * still for them in a page the browser stops drawing: #display ends what
+   * is left. Null if there is none.
    */
   #slidesOver(): Promise<void> | null {
     this.#hurry();
-    const going = this.#running
-      .filter((r) => r.type === "slide" && r.coming)
-      .flatMap((r) => [r.coming!.animation, r.leaving.animation])
-      .filter((a) => a.playState === "running");
+    const going = this.#sliding(true);
     if (going.length === 0) return null;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const late = new Promise<void>((resolve) => (timer = setTimeout(resolve, 4 * hurryMs)));
@@ -1754,7 +1772,7 @@ export class ClackShow extends HTMLElement {
       // where it was as it goes.
       if (this.shadowRoot!.activeElement !== this.#focusAt) this.#focusAt = null;
       queueMicrotask(() => this.#markKeyFocus(false));
-    } else this.#box.classList.remove("key-focus");
+    } else if (e.type === "pointerdown") this.#box.classList.remove("key-focus");
   };
 
   /** Whether e, focus heard on the host, is the shadow tree's, which its shadow root hears too: only the host's own is the host's. */
@@ -1939,6 +1957,12 @@ export class ClackShow extends HTMLElement {
     const margin = Math.max(side("left"), side("right"), 0);
     let reach = 0;
     for (const f of figures) reach = Math.max(reach, shadowReach(f));
+    // And how far a page moves the figure itself off the stage, as the
+    // one coming shows it, at rest: what it moves goes with it.
+    const at = figures[figures.length - 1]!.getBoundingClientRect();
+    const room = this.#stage.getBoundingClientRect();
+    const unscale = room.width > 0 ? this.#stage.offsetWidth / room.width : 1;
+    reach += Math.max(room.left - at.left, at.right - room.right, 0) * unscale;
     // And the stage's own filter, which spreads the photos in it (one on
     // the show, beyond what it cuts off as they move, spreads only what is
     // left of them).

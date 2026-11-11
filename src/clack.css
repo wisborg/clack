@@ -155,6 +155,13 @@
   display: contents;
 }
 
+/* A photo's alternatives, which are not boxes: with picture and the mount
+   boxes of none (display: contents), they would be the slide's grid items,
+   each a row, and put the photo off its middle. */
+.slide source {
+  display: none;
+}
+
 /* Contained: the whole photo, as large as the frame allows, in its own
    proportions -- which the shadow depends on, so the box is the photo. */
 .slide picture {

@@ -532,7 +532,15 @@ test("a shadow's reach is measured as drawn, to three standard deviations of its
   e.style.position = "relative";
   e.style.left = "40px";
   assertEqual(reach({ boxShadow: "0 0 20px black" }), 70, "a descendant moved 40px past the side");
-  e.style.position = e.style.left = "";
+  // Clipped by the element it is in: no further than that element's box.
+  outer.style.overflow = "hidden";
+  assertEqual(reach({ boxShadow: "0 0 20px black" }), 0, "a descendant moved past the side, clipped there");
+  outer.style.overflow = e.style.position = e.style.left = "";
+  // Scaled: its box, and what it draws, as large as drawn.
+  outer.style.width = "100px";
+  e.style.scale = "1.5";
+  assertEqual(reach({ boxShadow: "0 0 40px black" }), 115, "a descendant scaled by half again: 25px past, its shadow 90px");
+  outer.style.width = e.style.scale = "";
   e.style.display = "none";
   assertEqual(reach({ boxShadow: "0 0 40px black" }), 0, "nothing of what is not displayed");
 });
@@ -800,7 +808,7 @@ test("a step while the last is still sliding in hurries it into place, then slid
   const coming = second.getAnimations()[0]!;
   let furthest = 0;
   const watch = (): void => {
-    if (coming.playState === "finished") return;
+    if (coming.playState !== "running") return;
     furthest = Math.max(furthest, coming.effect?.getComputedTiming().progress ?? 0);
     requestAnimationFrame(watch);
   };
@@ -1069,8 +1077,13 @@ test("a swipe back to the slide whose photo is still leaving brings that photo b
   // One photo element to a slide: the figure leaving with it is gone, and
   // the one coming back has it.
   assert(!first.isConnected, "the figure leaving with it gone");
-  const back = figures(show).find((f) => f.getAnimations().some((a) => String((a.effect as KeyframeEffect).getKeyframes().at(-1)!["transform"]) === "translateX(0px)"))!;
-  assert(back?.querySelector("img") !== null, "the photo back in the one coming");
+  const back = figures(show).find((f) =>
+    f.getAnimations().some((a) => {
+      const to = (a.effect as KeyframeEffect).getKeyframes().at(-1)!["transform"];
+      return typeof to === "string" && /^translateX\(0(px)?\)$/.test(to);
+    }),
+  );
+  assert(back !== undefined && back.querySelector("img") !== null, "the photo back in the one coming");
   await settledOn(show, "1 of 3");
 });
 test("a slide that does not end -- paused by the page -- does not keep the next waiting", async () => {
@@ -1186,4 +1199,84 @@ test("a pointer taken up while the theme showed the controls lets go of the keyb
   await waitFor(() => box(show).dataset["reveal"] === "on-activity", "and back");
   assert(!box(show).classList.contains("key-focus"), "not kept up for good after the pointer");
   next.blur();
+});
+
+test("a photo leaving that does not move -- paused by the page -- is not left on the stage for good", async () => {
+  if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
+  const theme = themed("sliding-left-paused", { transition: { type: "slide", duration: "2000ms" } });
+  const show = makeShow([{}, {}, {}], { theme });
+  await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
+  show.style.setProperty("--clack-transition-duration", "2000ms");
+  await settledOn(show, "1 of 3");
+  await sleep(300); // the next two preloaded
+  const first = figures(show)[0]!;
+  void show.next();
+  await waitFor(() => first.getAnimations().length > 0, "the photos to move");
+  await sleep(100);
+  // A finger catches the second, so the first only leaves; then it is paused.
+  const p = pointer(show);
+  const x = p.left + p.width / 2;
+  p.send("pointerdown", x);
+  p.send("pointermove", x - 10);
+  first.getAnimations()[0]!.pause();
+  p.send("pointerup", x - 10, { buttons: 0 });
+  await show.next();
+  assert(!first.isConnected, "the paused one gone with the next");
+  await settledOn(show, "3 of 3");
+  await waitFor(() => getComputedStyle(box(show)).overflowX === "visible", "nothing cut off once nothing moves");
+});
+
+test("a swipe back to a slide whose photo could not be had lets its figure, which holds no photo of the next's, hurry on out", async () => {
+  if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
+  const theme = themed("sliding-failed-back", { transition: { type: "slide", duration: "2000ms" } });
+  const show = makeShow([{ src: "/img/broken.png?tag=fb" }, {}, {}], { theme });
+  await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
+  show.style.setProperty("--clack-transition-duration", "2000ms");
+  await settledOn(show, "1 of 3");
+  await sleep(300); // the next preloaded
+  const first = figures(show)[0]!;
+  assert(first.classList.contains("failed"), "the first could not be had");
+  void show.next();
+  await waitFor(() => first.getAnimations().length > 0, "the photos to move");
+  await sleep(100);
+  const p = pointer(show);
+  p.swipe(p.left + p.width * 0.2, p.left + p.width * 0.8);
+  await sleep(0);
+  assert(first.isConnected && first.getAnimations().length === 1, "the first still leaving, not gone from where it was");
+  await settledOn(show, "1 of 3");
+});
+
+test("a slide clears how far the page moves the slide itself off the stage", async () => {
+  if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
+  const page = new CSSStyleSheet();
+  page.replaceSync("clack-show.slide-moved::part(slide) { translate: 40px; }");
+  document.adoptedStyleSheets = [...document.adoptedStyleSheets, page];
+  try {
+    const theme = themed("bleed-sliding-moved", { extends: "minimal", transition: { type: "slide", duration: "600ms" } });
+    const show = makeShow([{ width: 600, height: 200 }, { width: 600, height: 200 }], { theme, class: "slide-moved" });
+    await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
+    show.style.setProperty("--clack-transition-duration", "600ms");
+    await settledOn(show, "1 of 2");
+    await sleep(200); // the next preloaded
+    const leaving = figures(show)[0]!;
+    void show.next();
+    await waitFor(() => leaving.getAnimations().length > 0, "the photos to move");
+    const out = String((leaving.getAnimations()[0]!.effect as KeyframeEffect).getKeyframes().at(-1)!["transform"]);
+    assertEqual(out, "translateX(calc(-100% - 40px))", "the last out by the 40px it is moved, too");
+    await settledOn(show, "2 of 2");
+  } finally {
+    document.adoptedStyleSheets = document.adoptedStyleSheets.filter((x) => x !== page);
+  }
+});
+
+test("a photo with alternatives in other formats is in the middle of its frame, as one without", async () => {
+  const show = makeShow([]);
+  show.slides = [
+    { id: "a", alt: "a", width: 300, height: 100, sources: [{ url: img(300, 100), width: 300, type: "image/webp" }, { url: img(300, 100), width: 300 }] },
+  ];
+  await settledOn(show, "1 of 1");
+  assert(part(show, ".slide picture source") !== null, "an alternative, as a source");
+  const figure = figures(show)[0]!.getBoundingClientRect();
+  const photo = part(show, ".slide img").getBoundingClientRect();
+  assert(Math.abs((photo.top + photo.bottom) / 2 - (figure.top + figure.bottom) / 2) < 1, `in the middle: the photo ${photo.top}-${photo.bottom}, the frame ${figure.top}-${figure.bottom}`);
 });
