@@ -5,7 +5,7 @@ import type { ClackShow, SlideInput } from "../src/clack";
 import { shadowReach, transitionFrames, transitionOf } from "../src/show";
 import { assert, assertEqual, fixture, focusWindow, input, skip, sleep, test } from "./harness";
 import { Key, click, moveTo, pointOn, press, tabber } from "./input";
-import { figures, imageLog, img, logged, makeShow, part, pointer, resetImageLog, settledOn, showBox as box, themed, waitFor } from "./util";
+import { figures, imageLog, img, logged, makeShow, part, pointer, reduceMotion, resetImageLog, settledOn, showBox as box, themed, waitFor } from "./util";
 
 /** Whether the visitor could see and point at the controls now. */
 function shown(e: Element): boolean {
@@ -985,17 +985,7 @@ test("controls focused by a click are not taken for the keyboard's once keys fol
 test("with reduced motion, nothing of the floating bar fades: it and its caption's box come and go at once", async () => {
   const show = makeShow([{ title: "A" }, {}], { theme: "minimal" });
   await settledOn(show, "1 of 2");
-  // The visitor's setting cannot be emulated here: Clack's stylesheet, as
-  // if it applied.
-  const root = show.shadowRoot!;
-  const clack = root.adoptedStyleSheets.find((s) => Array.from(s.cssRules).some((r) => r instanceof CSSMediaRule && r.media.mediaText.includes("prefers-reduced-motion")))!;
-  const text = Array.from(clack.cssRules, (r) =>
-    r instanceof CSSMediaRule && r.media.mediaText.includes("prefers-reduced-motion") ? Array.from(r.cssRules, (i) => i.cssText).join("\n") : r.cssText,
-  ).join("\n");
-  const reduced = new CSSStyleSheet();
-  reduced.replaceSync(text);
-  const saved = [...root.adoptedStyleSheets];
-  root.adoptedStyleSheets = saved.map((s) => (s === clack ? reduced : s));
+  const restore = reduceMotion(show);
   try {
     // Shown and hidden: the caption's box has a delay only while the bar is shown.
     box(show).classList.add("active");
@@ -1008,8 +998,79 @@ test("with reduced motion, nothing of the floating bar fades: it and its caption
     }
   } finally {
     box(show).classList.remove("active");
-    root.adoptedStyleSheets = saved;
+    restore();
   }
+});
+
+test("with reduced motion, a theme's slide is a short fade instead: nothing moves", async () => {
+  if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
+  const theme = themed("sliding-reduced", { transition: { type: "slide", duration: "600ms" } });
+  const show = makeShow([{}, {}], { theme });
+  await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
+  show.style.setProperty("--clack-transition-duration", "600ms");
+  await settledOn(show, "1 of 2");
+  await sleep(200); // the next preloaded
+  const restore = reduceMotion(show);
+  try {
+    const leaving = figures(show)[0]!;
+    void show.next();
+    await waitFor(() => figures(show).some((f) => f !== leaving && f.getAnimations().length > 0), "the next to come in");
+    const coming = figures(show).find((f) => f !== leaving)!;
+    const effect = coming.getAnimations()[0]!.effect as KeyframeEffect;
+    const frames = effect.getKeyframes();
+    assertEqual(`${frames[0]!["opacity"]} ${frames[0]!["transform"] ?? ""}`, "0 ", "faded in, where it is");
+    assertEqual(effect.getComputedTiming().duration, 200, "in a short fade");
+    await settledOn(show, "2 of 2");
+  } finally {
+    restore();
+  }
+});
+
+test("with reduced motion, a photo held aside by a drag when a key moves on fades where it is held", async () => {
+  if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
+  const theme = themed("sliding-held-reduced", { transition: { type: "slide", duration: "600ms" } });
+  const show = makeShow([{}, {}], { theme });
+  await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
+  show.style.setProperty("--clack-transition-duration", "600ms");
+  await settledOn(show, "1 of 2");
+  await sleep(200); // the next preloaded
+  const restore = reduceMotion(show);
+  try {
+    const leaving = figures(show)[0]!;
+    const p = pointer(show);
+    const x = p.left + p.width / 2;
+    p.send("pointerdown", x);
+    p.send("pointermove", x - 60);
+    p.send("pointermove", x - 120);
+    await waitFor(() => leaving.style.getPropertyValue("--clack-drag") !== "", "the photo held aside");
+    const held = leaving.style.getPropertyValue("--clack-drag");
+    show.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+    await waitFor(() => leaving.getAnimations().length > 0, "the photos to fade");
+    const frames = (leaving.getAnimations()[0]!.effect as KeyframeEffect).getKeyframes();
+    assertEqual(`${String(frames[0]!["transform"])} ${String(frames.at(-1)!["transform"])}`, `translateX(${held}) translateX(${held})`, "where it was held, to the end");
+    p.send("pointerup", x - 120, { buttons: 0 });
+    await settledOn(show, "2 of 2");
+  } finally {
+    restore();
+  }
+});
+
+test("a page's own value for whether motion is reduced is not taken for the visitor's", async () => {
+  if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) skip("this engine's visitor has asked for reduced motion");
+  const theme = themed("sliding-page-reduced", { transition: { type: "slide", duration: "600ms" } });
+  const show = makeShow([{}, {}], { theme });
+  show.style.setProperty("--clack-reduced-motion", "yes");
+  await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
+  show.style.setProperty("--clack-transition-duration", "600ms");
+  await settledOn(show, "1 of 2");
+  await sleep(200); // the next preloaded
+  const leaving = figures(show)[0]!;
+  void show.next();
+  await waitFor(() => leaving.getAnimations().length > 0, "the photos to move");
+  const frames = (leaving.getAnimations()[0]!.effect as KeyframeEffect).getKeyframes();
+  assert(/translateX\(.*100%/.test(String(frames.at(-1)!["transform"])), `slid out, as the visitor asked nothing: ${String(frames.at(-1)!["transform"])}`);
+  await settledOn(show, "2 of 2");
 });
 
 test("with no margin, a slide still moves a photo past the reach of its shadow: one just past the edge casts it back in", async () => {

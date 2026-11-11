@@ -464,6 +464,11 @@
   visibility: hidden;
   pointer-events: none;
   animation-duration: calc(var(--clack-transition-duration) + 1s);
+  /* Whether motion is reduced, as #transition reads it: from the media
+     block below, as everything else of reduced motion is, rather than
+     asked of the window apart -- so the two cannot disagree. Set here
+     either way, never inherited, so a page's value of it is not read. */
+  --clack-reduced-motion: no;
 }
 
 /* ---- Layouts: the theme's layout.type, on .show as data-layout ------- */
@@ -741,6 +746,10 @@
 
   .stage.loading::after {
     animation: clack-appear 200ms 400ms both;
+  }
+
+  .probe {
+    --clack-reduced-motion: yes;
   }
 }
 

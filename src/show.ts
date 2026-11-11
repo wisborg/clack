@@ -1747,8 +1747,9 @@ export class ClackShow extends HTMLElement {
     // an engine that has it), is told from 0s; computed, it is always
     // seconds. A show out of the page has no computed style at all.
     const s = parseFloat(style.animationDuration);
-    // Asked once, for the transition and for how a photo moved aside goes.
-    const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // Read once, for the transition and for how a photo moved aside goes,
+    // from clack.css's reduced-motion block (.probe).
+    const reduced = style.getPropertyValue("--clack-reduced-motion").trim() === "yes";
     const played = transitionOf(type, s > 0 ? Math.round(s * 1000) - 1000 : NaN, reduced);
     return played && { ...played, reduced };
   }

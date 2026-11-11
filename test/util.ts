@@ -272,3 +272,24 @@ export function pointer(show: ClackShow) {
     },
   };
 }
+
+/**
+ * Has show go as it does for a visitor who asked for reduced motion: its
+ * stylesheet with the reduced-motion block applied whatever the setting,
+ * which WebDriver cannot set. Everything Clack does for reduced motion is
+ * in that block -- the transition too, which it reads from there (.probe)
+ * -- so this is all of it. Returns how to put the stylesheet back.
+ */
+export function reduceMotion(show: ClackShow): () => void {
+  const root = show.shadowRoot!;
+  const reducing = (r: CSSRule): r is CSSMediaRule => r instanceof CSSMediaRule && r.media.mediaText.includes("prefers-reduced-motion");
+  const clack = root.adoptedStyleSheets.find((s) => Array.from(s.cssRules).some(reducing));
+  assert(clack, "Clack's stylesheet has a reduced-motion block");
+  const reduced = new CSSStyleSheet();
+  reduced.replaceSync(Array.from(clack.cssRules, (r) => (reducing(r) ? Array.from(r.cssRules, (i) => i.cssText).join("\n") : r.cssText)).join("\n"));
+  const saved = [...root.adoptedStyleSheets];
+  root.adoptedStyleSheets = saved.map((s) => (s === clack ? reduced : s));
+  return () => {
+    root.adoptedStyleSheets = saved;
+  };
+}
