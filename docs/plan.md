@@ -86,6 +86,13 @@ have happened. The front-end is built and tested without it, all through one Go 
 - **The test page enforces a strict Content-Security-Policy**, including Trusted Types, and
   any policy violation a test did not provoke on purpose fails the run. Every test is
   therefore also a test that Clack works on the strictest site that might embed it.
+- **The visitor's own input comes from the driver.** A test that needs a real pointer or
+  keyboard — `:hover`, Tab moving focus, `:focus-visible` as a click or a key leaves it,
+  a mouse dragging — asks the WebDriver session for it, which performs it with the
+  protocol's Actions and calls back in: the run goes in rounds, since WebDriver takes one
+  command at a time. Events a script makes are not trusted, and the browser does nothing
+  of its own with them. The same channel gives the window focus where a headless browser
+  loses it.
 - **Logic tests** for the pure parts (state machine, layout maths, theme validation,
   ThumbHash decoding) run in the browser through the same harness, so there is one test
   runner, not two.

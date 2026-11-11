@@ -31,6 +31,9 @@ delegates; do not add a target that does the work itself.
   served with a **strict Content-Security-Policy** (`tools/internal/browsertest`). A
   violation a test does not claim with `expectViolation` fails the run. Never weaken the
   policy to make a test pass: the policy is what is being tested.
+- A test of what the visitor's own input does — `:hover`, Tab, how a click or a key leaves
+  focus, a mouse drag — gives it through the WebDriver session (`test/input.ts`), not with
+  events made in script, which the browser does not act on as on a visitor's.
 - A test that cannot run in an engine calls `skip(reason)`; it is reported, not hidden.
 - Session output goes in the gitignored `.scratch/`.
 

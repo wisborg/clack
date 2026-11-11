@@ -119,7 +119,8 @@
   -webkit-user-select: none;
 }
 
-.stage:focus {
+.stage:focus,
+.below:focus {
   outline: none;
 }
 

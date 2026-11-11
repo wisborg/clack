@@ -3,12 +3,14 @@
 // The tests are TypeScript, bundled into one script and served from a local
 // server on a page with a strict Content-Security-Policy -- the strictest a
 // host site could reasonably choose -- so every test also checks that Clack
-// works under it. The page reports its results through a promise the
-// WebDriver session waits on.
+// works under it. The page reports its results to the WebDriver session
+// waiting on it, and asks it, between, for the visitor's own input (drive).
 package browsertest
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -202,18 +204,79 @@ func (r Report) Failed() bool {
 	return false
 }
 
-// waitScript waits for the promise the test bundle leaves on window.
-const waitScript = `
+// nextScript hands the page the answer to what it last asked of the driver
+// (null at first, then an error's text, or "" if it was done), and waits for
+// what it asks next: input to perform, or the run's report. See clackNext in
+// test/harness.ts.
+const nextScript = `
+const answer = arguments[0];
 const done = arguments[arguments.length - 1];
-const run = window.clackTestRun;
-if (!run) {
-  done({error: "the test bundle did not start: window.clackTestRun is missing"});
+const next = window.clackNext;
+if (!next) {
+  done({report: {error: "the test bundle did not start: window.clackNext is missing"}});
   return;
 }
-run.then(done, (e) => done({error: String((e && e.stack) || e)}));
+next(answer).then(done, (e) => done({report: {error: String((e && e.stack) || e)}}));
 `
 
-// scriptTimeout bounds the whole test run in one browser. The harness keeps
+// message is what the page asks of the driver: exactly one of these.
+type message struct {
+	// Input is WebDriver input sources to perform, as the visitor's own.
+	Input json.RawMessage `json:"input"`
+	// Release lets go of whatever input left pressed: after each test that
+	// gave any, so that nothing of it is held into the next.
+	Release bool `json:"release"`
+	// Focus gives the page's window the focus, for a test of what focus
+	// does: without it, focusing fires no focus events.
+	Focus bool `json:"focus"`
+	// Report ends the run.
+	Report *Report `json:"report"`
+}
+
+// driven is what drive needs of a WebDriver session.
+type driven interface {
+	ExecuteAsync(ctx context.Context, script string, args []any, result any) error
+	PerformActions(ctx context.Context, actions json.RawMessage) error
+	ReleaseActions(ctx context.Context) error
+	FocusWindow(ctx context.Context) error
+}
+
+// drive runs the tests on p, a page with the test bundle loaded, to their
+// report. WebDriver takes one command at a time, and a script waiting in
+// the page is one: so the run goes in rounds -- the page waits for what it
+// needs of the driver, the driver does it, and calls back in with the
+// answer.
+func drive(ctx context.Context, p driven) (Report, error) {
+	var answer any // null: nothing asked yet
+	for {
+		var m message
+		if err := p.ExecuteAsync(ctx, nextScript, []any{answer}, &m); err != nil {
+			return Report{}, err
+		}
+		var err error
+		switch {
+		case m.Report != nil:
+			return *m.Report, nil
+		case m.Release:
+			err = p.ReleaseActions(ctx)
+		case m.Focus:
+			err = p.FocusWindow(ctx)
+		case m.Input != nil:
+			err = p.PerformActions(ctx, m.Input)
+		default:
+			return Report{}, errors.New("the page asked the driver for nothing it knows")
+		}
+		answer = ""
+		if err != nil {
+			// The page's to report, in the test that asked; a driver that
+			// has gone is found out by the next round.
+			answer = err.Error()
+		}
+	}
+}
+
+// scriptTimeout bounds each round of the test run in one browser (drive),
+// and so the whole run, which may be one round. The harness keeps
 // well inside it (see runBudgetMs in test/harness.ts), so that a slow run
 // still comes back as a report rather than as a WebDriver timeout.
 const scriptTimeout = 10 * time.Minute
@@ -242,8 +305,8 @@ func Run(ctx context.Context, b webdriver.Browser, driverPath, url string, headl
 	if err := s.Navigate(ctx, url); err != nil {
 		return Report{}, err
 	}
-	var report Report
-	if err := s.ExecuteAsync(ctx, waitScript, nil, &report); err != nil {
+	report, err := drive(ctx, s)
+	if err != nil {
 		return Report{}, err
 	}
 	if len(report.Results) == 0 && report.Error == "" {

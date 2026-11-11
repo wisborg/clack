@@ -670,6 +670,10 @@ export class ClackShow extends HTMLElement {
     this.#counter.ariaHidden = "true";
     controls.append(this.#previous, this.#counter, this.#next);
     below.append(caption, controls);
+    // Focusable by a click too, as the stage is, so the keys work after a
+    // click on the caption -- or on a control in Safari, whose clicks focus
+    // no button, and so give focus to what holds it.
+    below.tabIndex = -1;
 
     this.#live = el("div", "live");
     this.#live.ariaLive = "polite";

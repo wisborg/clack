@@ -148,7 +148,9 @@ The element is 3:2 unless the page gives it a height.
 - **Controls:** previous and next, and a counter. At the ends of a show that does not loop
   they are marked unavailable (`aria-disabled`), not disabled, so keyboard focus stays.
 - **Keys** (with focus in the show): ← and → move the way the text runs (so the other way
-  round in a right-to-left page), Home and End go to the first and last.
+  round in a right-to-left page), Home and End go to the first and last. A click on the
+  photo, the caption or a control gives the show focus for them — even in Safari, whose
+  clicks focus no button.
 - **Swipe and drag**, with touch, pen or mouse: a long drag or a quick flick moves on; a
   short one springs back; up-and-down is left to the page, to scroll. At the ends the photo
   resists.

@@ -2,7 +2,10 @@ package browsertest
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"image/png"
 	"io"
 	"net/http"
@@ -176,5 +179,90 @@ func TestStartedRemembersTheLastTest(t *testing.T) {
 	}
 	if got := srv.Started(); got != "" {
 		t.Errorf("Started() again = %q, want it forgotten", got)
+	}
+}
+
+// fakePage answers drive's rounds from a script: each ExecuteAsync records
+// the answer it was given and returns the next message.
+type fakePage struct {
+	messages []string // JSON, one per round
+	answers  []any
+	did      []string
+	fail     error // what performing or releasing input returns
+}
+
+func (f *fakePage) ExecuteAsync(ctx context.Context, script string, args []any, result any) error {
+	if len(args) != 1 {
+		return fmt.Errorf("args = %v, want the one answer", args)
+	}
+	f.answers = append(f.answers, args[0])
+	if len(f.messages) == 0 {
+		return errors.New("asked for a round past the last")
+	}
+	m := f.messages[0]
+	f.messages = f.messages[1:]
+	return json.Unmarshal([]byte(m), result)
+}
+
+func (f *fakePage) PerformActions(ctx context.Context, actions json.RawMessage) error {
+	f.did = append(f.did, "perform "+string(actions))
+	return f.fail
+}
+
+func (f *fakePage) ReleaseActions(ctx context.Context) error {
+	f.did = append(f.did, "release")
+	return f.fail
+}
+
+func (f *fakePage) FocusWindow(ctx context.Context) error {
+	f.did = append(f.did, "focus")
+	return f.fail
+}
+
+func TestDriveGivesThePageItsInputAndAnswers(t *testing.T) {
+	f := &fakePage{messages: []string{
+		`{"input": [{"type": "key", "id": "k", "actions": []}]}`,
+		`{"release": true}`,
+		`{"focus": true}`,
+		`{"report": {"userAgent": "fake", "results": [{"name": "a", "passed": true}]}}`,
+	}}
+	r, err := drive(context.Background(), f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.UserAgent != "fake" || len(r.Results) != 1 {
+		t.Errorf("report = %+v", r)
+	}
+	want := []string{`perform [{"type": "key", "id": "k", "actions": []}]`, "release", "focus"}
+	if fmt.Sprint(f.did) != fmt.Sprint(want) {
+		t.Errorf("did %q, want %q", f.did, want)
+	}
+	// Nothing asked at first; then each done.
+	if fmt.Sprintf("%#v", f.answers) != `[]interface {}{interface {}(nil), "", "", ""}` {
+		t.Errorf("answers = %#v", f.answers)
+	}
+}
+
+func TestDriveTellsThePageWhatTheDriverCouldNotDo(t *testing.T) {
+	f := &fakePage{
+		messages: []string{`{"input": []}`, `{"report": {"error": "stopped"}}`},
+		fail:     errors.New("move target out of bounds"),
+	}
+	r, err := drive(context.Background(), f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Error != "stopped" {
+		t.Errorf("report = %+v", r)
+	}
+	if len(f.answers) != 2 || f.answers[1] != "move target out of bounds" {
+		t.Errorf("answers = %#v, want the driver's error given back", f.answers)
+	}
+}
+
+func TestDriveRefusesAMessageItDoesNotKnow(t *testing.T) {
+	f := &fakePage{messages: []string{`{"scroll": 3}`}}
+	if _, err := drive(context.Background(), f); err == nil {
+		t.Error("drive took a message it does not know")
 	}
 }

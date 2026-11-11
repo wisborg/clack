@@ -82,7 +82,12 @@ func (f *fakeDriver) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch key {
 	case "POST /session":
 		io.WriteString(w, `{"value":{"sessionId":"s1","capabilities":{"browserName":"chrome"}}}`)
-	case "POST /session/s1/url", "POST /session/s1/timeouts", "DELETE /session/s1":
+	case "POST /session/s1/url", "POST /session/s1/timeouts", "DELETE /session/s1",
+		"POST /session/s1/actions", "DELETE /session/s1/actions":
+		io.WriteString(w, `{"value":null}`)
+	case "GET /session/s1/window":
+		io.WriteString(w, `{"value":"w1"}`)
+	case "POST /session/s1/window":
 		io.WriteString(w, `{"value":null}`)
 	case "POST /session/s1/execute/async":
 		io.WriteString(w, `{"value":{"passed":3}}`)
@@ -137,6 +142,27 @@ func TestSessionFlow(t *testing.T) {
 		t.Errorf("args = %#v, want []", fake.bodies["POST /session/s1/execute/async"]["args"])
 	}
 
+	// The page's input sources go to the driver as they are.
+	moves := json.RawMessage(`[{"type":"pointer","id":"mouse","actions":[{"type":"pointerMove","x":3,"y":4}]}]`)
+	if err := s.PerformActions(ctx, moves); err != nil {
+		t.Fatal(err)
+	}
+	sent, _ := json.Marshal(fake.bodies["POST /session/s1/actions"]["actions"])
+	if string(sent) != `[{"actions":[{"type":"pointerMove","x":3,"y":4}],"id":"mouse","type":"pointer"}]` {
+		t.Errorf("actions = %s", sent)
+	}
+	if err := s.ReleaseActions(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// Its own window, by the handle the driver gives it.
+	if err := s.FocusWindow(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := fake.bodies["POST /session/s1/window"]["handle"]; got != "w1" {
+		t.Errorf("switched to window %v, want w1", got)
+	}
+
 	png, err := s.Screenshot(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -148,7 +174,7 @@ func TestSessionFlow(t *testing.T) {
 	if err := s.Close(ctx); err != nil {
 		t.Fatal(err)
 	}
-	want := "POST /session,POST /session/s1/url,POST /session/s1/execute/async,GET /session/s1/screenshot,DELETE /session/s1"
+	want := "POST /session,POST /session/s1/url,POST /session/s1/execute/async,POST /session/s1/actions,DELETE /session/s1/actions,GET /session/s1/window,POST /session/s1/window,GET /session/s1/screenshot,DELETE /session/s1"
 	if got := strings.Join(fake.requests, ","); got != want {
 		t.Errorf("requests:\n got %s\nwant %s", got, want)
 	}

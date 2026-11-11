@@ -1,7 +1,9 @@
 /**
  * A test harness small enough to read in one sitting: tests register with
  * `test`, run in order, and the report goes back to the WebDriver session
- * that is waiting for it (see tools/internal/browsertest).
+ * that is waiting for it (see tools/internal/browsertest). A test may ask
+ * that session, as it runs, for the visitor's own pointer and keys
+ * (`input`; test/input.ts has the words for it).
  *
  * It also listens for Content-Security-Policy violations from the moment the
  * test bundle starts. A test that provokes one on purpose claims it with
@@ -130,6 +132,111 @@ export function fixture(): HTMLElement {
   return el;
 }
 
+// ---- The visitor's input, from the driver ----------------------------------
+
+/** One of the WebDriver protocol's actions (the "Actions" section of its spec). */
+export type Action =
+  | { type: "pause"; duration?: number }
+  | { type: "pointerMove"; x: number; y: number; origin?: "viewport" | "pointer"; duration?: number }
+  | { type: "pointerDown" | "pointerUp"; button: number }
+  | { type: "keyDown" | "keyUp"; value: string };
+
+/** An input source and what it does: a mouse, a pen, a finger, or keys. */
+export interface InputSource {
+  type: "pointer" | "key" | "none";
+  id: string;
+  parameters?: { pointerType: "mouse" | "pen" | "touch" };
+  actions: Action[];
+}
+
+/** What the page asks of the driver (drive in tools/internal/browsertest): one at a time. */
+type ToDriver = { input: InputSource[] } | { release: true } | { focus: true } | { report: Report };
+
+/** Asked, and not yet collected by the driver. */
+const outbox: ToDriver[] = [];
+/** The driver, waiting for what is asked next. */
+let collect: ((m: ToDriver) => void) | null = null;
+/** The test, waiting for the driver to say it did what was asked. */
+let answered: ((error: string) => void) | null = null;
+/** Whether the running test gave input: let go of after it. */
+let gaveInput = false;
+
+function send(m: ToDriver): void {
+  if (collect) {
+    const c = collect;
+    collect = null;
+    c(m);
+  } else {
+    outbox.push(m);
+  }
+}
+
+function ask(m: ToDriver): Promise<void> {
+  if (answered) return Promise.reject(new Error("input asked for while the driver is still giving the last"));
+  return new Promise((resolve, reject) => {
+    answered = (error) => (error ? reject(new Error(`the driver could not give the input: ${error}`)) : resolve());
+    send(m);
+  });
+}
+
+/**
+ * Has the driver perform sources, as the visitor's own input: trusted
+ * events, which the browser acts on as on a visitor's -- :hover, how focus
+ * came (:focus-visible), Tab moving it -- as no event a script makes can
+ * have it. What is still pressed when the test ends is let go of then.
+ */
+export function input(sources: InputSource[]): Promise<void> {
+  gaveInput = true;
+  return ask({ input: sources });
+}
+
+/**
+ * Has the driver give the page's window the focus, if it has not: for a
+ * test of what focus does, since without it focusing fires no focus events.
+ * Headless Firefox loses it a moment after it starts; a Safari window the
+ * visitor has left behind another has lost it too. Waits a moment for it to
+ * come, and returns whether it did.
+ */
+export async function focusWindow(): Promise<boolean> {
+  if (document.hasFocus()) return true;
+  await ask({ focus: true });
+  const deadline = performance.now() + 1000;
+  while (!document.hasFocus() && performance.now() < deadline) await sleep(20);
+  return document.hasFocus();
+}
+
+/**
+ * Starts the run, for the driver to follow: it calls clackNext with its
+ * answer to what was last asked (null at first; "" when done, or why it
+ * could not), and is given what is asked next -- input, or the report.
+ */
+export function start(): void {
+  window.clackNext = (answer: string | null): Promise<unknown> => {
+    if (answer !== null && answered) {
+      const a = answered;
+      answered = null;
+      a(answer);
+    }
+    return new Promise((resolve) => {
+      const m = outbox.shift();
+      if (m) resolve(m);
+      else collect = resolve;
+    });
+  };
+  run().then(
+    (report) => send({ report }),
+    (e: unknown) => send({ report: { userAgent: navigator.userAgent, hidden: wasHidden, results: [], error: wellFormed(describe(e)) } }),
+  );
+}
+
+declare global {
+  interface Window {
+    clackNext?: (answer: string | null) => Promise<unknown>;
+  }
+}
+
+// ---- Running ---------------------------------------------------------------
+
 const perTestTimeoutMs = 10_000;
 
 /**
@@ -143,7 +250,7 @@ const runBudgetMs = 5 * 60_000;
 class Timeout extends Error {}
 
 /** Runs every registered test, then the check for unclaimed violations. */
-export async function run(): Promise<Report> {
+async function run(): Promise<Report> {
   const results: Result[] = [];
   const deadline = performance.now() + runBudgetMs;
   // Set when a test timed out. Its code may still be running -- a promise
@@ -160,6 +267,17 @@ export async function run(): Promise<Report> {
     }
     const r = await runOne(t);
     results.push(r);
+    // What the test left pressed is let go of while its DOM is there to
+    // hear it, and the pointer put where no later test's will be.
+    if (gaveInput && !r.timedOut) {
+      gaveInput = false;
+      try {
+        await rest();
+        await ask({ release: true });
+      } catch (e) {
+        if (r.passed) Object.assign(r, { passed: false, error: wellFormed(`after the test: ${describe(e)}`) });
+      }
+    }
     document.getElementById("fixtures")?.replaceChildren();
     if (r.timedOut) {
       abandoned = `"${t.name}" timed out and may still be running`;
@@ -181,6 +299,23 @@ export async function run(): Promise<Report> {
     }),
   );
   return { userAgent: navigator.userAgent, hidden: wasHidden, results, error: "" };
+}
+
+/**
+ * Moves the mouse onto a spot of its own, over everything at the
+ * viewport's corner: a pointer left where a test had it would rest on, and
+ * hover, whatever the next test puts there.
+ */
+async function rest(): Promise<void> {
+  let spot = document.getElementById("rest");
+  if (!spot) {
+    spot = document.createElement("div");
+    spot.id = "rest";
+    Object.assign(spot.style, { position: "fixed", right: "0", bottom: "0", width: "4px", height: "4px", zIndex: "2147483647" });
+    document.body.append(spot);
+  }
+  const r = spot.getBoundingClientRect();
+  await ask({ input: [{ type: "pointer", id: "mouse", parameters: { pointerType: "mouse" }, actions: [{ type: "pointerMove", x: Math.floor(r.left + 2), y: Math.floor(r.top + 2) }] }] });
 }
 
 async function runOne(t: Test): Promise<Result & { timedOut: boolean }> {

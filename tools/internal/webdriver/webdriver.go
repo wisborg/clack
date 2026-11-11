@@ -1,6 +1,6 @@
 // Package webdriver is a minimal client for the W3C WebDriver protocol: just
-// enough to open a page in a real browser, run a script in it, and take a
-// screenshot.
+// enough to open a page in a real browser, run a script in it, give it a
+// visitor's pointer and keys, and take a screenshot.
 //
 // It talks to the browser vendors' own drivers -- safaridriver (shipped with
 // macOS), chromedriver and geckodriver -- over HTTP and JSON, using the
@@ -265,6 +265,34 @@ func (s *Session) ExecuteAsync(ctx context.Context, script string, args []any, r
 	}
 	body := map[string]any{"script": script, "args": args}
 	return s.d.command(ctx, http.MethodPost, s.path("/execute/async"), body, result)
+}
+
+// PerformActions performs actions -- the protocol's input sources, each a
+// list of pointer moves, presses and key strokes -- as the visitor's own
+// input: the browser fires trusted events and acts on them, so :hover,
+// :focus-visible and Tab moving focus are as they are for a visitor, which
+// no event a script makes can be. What stays pressed at the end stays
+// pressed until ReleaseActions.
+func (s *Session) PerformActions(ctx context.Context, actions json.RawMessage) error {
+	return s.d.command(ctx, http.MethodPost, s.path("/actions"), map[string]any{"actions": actions}, nil)
+}
+
+// ReleaseActions lets go of whatever PerformActions left pressed, firing the
+// events of letting go, and forgets the input sources it made.
+func (s *Session) ReleaseActions(ctx context.Context) error {
+	return s.d.command(ctx, http.MethodDelete, s.path("/actions"), nil, nil)
+}
+
+// FocusWindow gives the session's window the focus, as switching to it
+// does: a page's document has it again (document.hasFocus), and focusing
+// an element in it fires focus events. Headless Firefox loses it a moment
+// after it starts, though nothing else is there to take it.
+func (s *Session) FocusWindow(ctx context.Context) error {
+	var handle string
+	if err := s.d.command(ctx, http.MethodGet, s.path("/window"), nil, &handle); err != nil {
+		return err
+	}
+	return s.d.command(ctx, http.MethodPost, s.path("/window"), map[string]any{"handle": handle}, nil)
 }
 
 // SetWindowSize resizes the browser window. In a headless browser the
