@@ -542,6 +542,24 @@ test("a shadow's reach is measured as drawn, to three standard deviations of its
   e.style.scale = "1.5";
   assertEqual(reach({ boxShadow: "0 0 40px black" }), 90, "a descendant scaled by half again: its shadow too");
   outer.style.width = e.style.scale = "";
+  // Clipped by the element it is in: no further than its box, or the margin it leaves.
+  outer.style.overflow = "hidden";
+  assertEqual(reach({ boxShadow: "0 0 20px black" }), 0, "a shadow its parent clips off");
+  outer.style.overflow = "clip";
+  outer.style.setProperty("overflow-clip-margin", "10px");
+  assertEqual(reach({ boxShadow: "0 0 20px black" }), 10, "a shadow its parent clips at a margin");
+  outer.style.overflow = "";
+  outer.style.removeProperty("overflow-clip-margin");
+  // An inline box tells nothing of its scale: as its parent's.
+  outer.style.scale = "0.5";
+  const words = document.createElement("span");
+  words.textContent = "a few words, inline";
+  words.style.padding = "0 4px";
+  words.style.outline = "2px solid red";
+  e.append(words);
+  assertEqual(reach({}), 2, "an inline box's outline, as large as it is");
+  words.remove();
+  outer.style.scale = "";
   e.style.display = "none";
   assertEqual(reach({ boxShadow: "0 0 40px black" }), 0, "nothing of what is not displayed");
 });
@@ -1483,4 +1501,68 @@ test("a photo coming in that a page makes endless is put in place once the last 
   await sleep(0);
   assertEqual(second.getAnimations().length, 0, "the second in place, not sliding in again and again");
   assertEqual(getComputedStyle(box(show)).overflowX, "visible", "nothing cut off once nothing moves");
+});
+
+test("a photo leaving that a page makes endless goes in a while, though no finger caught the other", async () => {
+  if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
+  const theme = themed("sliding-leaving-endless", { transition: { type: "slide", duration: "300ms" } });
+  const show = makeShow([{}, {}], { theme });
+  await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
+  show.style.setProperty("--clack-transition-duration", "300ms");
+  await settledOn(show, "1 of 2");
+  await sleep(200); // the next preloaded
+  const first = figures(show)[0]!;
+  void show.next();
+  await waitFor(() => first.getAnimations().length > 0, "the photos to move");
+  first.getAnimations()[0]!.effect!.updateTiming({ iterations: Infinity });
+  await waitFor(() => !first.isConnected, "gone in a while, not crossing the stage again and again", 1500);
+  await waitFor(() => getComputedStyle(box(show)).overflowX === "visible", "nothing cut off once nothing moves");
+});
+
+test("a swipe on a page whose own transform keeps the finger from moving the slide counts no gap for it", async () => {
+  if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
+  const page = new CSSStyleSheet();
+  page.replaceSync("clack-show.own-transform::part(slide) { transform: scale(1); }");
+  document.adoptedStyleSheets = [...document.adoptedStyleSheets, page];
+  try {
+    const theme = themed("bleed-sliding-own", { extends: "minimal", transition: { type: "slide", duration: "600ms" } });
+    const show = makeShow([{ width: 600, height: 200 }, { width: 600, height: 200 }], { theme, class: "own-transform" });
+    await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
+    show.style.setProperty("--clack-transition-duration", "600ms");
+    await settledOn(show, "1 of 2");
+    await sleep(200); // the next preloaded
+    const leaving = figures(show)[0]!;
+    const p = pointer(show);
+    p.swipe(p.left + p.width * 0.8, p.left + p.width * 0.4);
+    await waitFor(() => leaving.getAnimations().length > 0, "the photos to move");
+    const coming = figures(show).find((f) => f !== leaving)!;
+    const first = String((coming.getAnimations()[0]!.effect as KeyframeEffect).getKeyframes()[0]!["transform"]);
+    assert(/^translateX\(calc\((-[\d.]+px \+ 100%|100% - [\d.]+px)\)\)$/.test(first), `beside the last, nothing between: ${first}`);
+    await settledOn(show, "2 of 2");
+  } finally {
+    document.adoptedStyleSheets = document.adoptedStyleSheets.filter((x) => x !== page);
+  }
+});
+
+test("a slide counts what a page's slide lets show past it, by the margin it clips at", async () => {
+  if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
+  const page = new CSSStyleSheet();
+  page.replaceSync("clack-show.clip-margin::part(slide) { overflow: clip; overflow-clip-margin: 20px; } clack-show.clip-margin::part(photo) { scale: 1.2; }");
+  document.adoptedStyleSheets = [...document.adoptedStyleSheets, page];
+  try {
+    const theme = themed("bleed-sliding-margin", { extends: "minimal", transition: { type: "slide", duration: "600ms" } });
+    const show = makeShow([{ width: 600, height: 200 }, { width: 600, height: 200 }], { theme, class: "clip-margin", fit: "cover" });
+    await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
+    show.style.setProperty("--clack-transition-duration", "600ms");
+    await settledOn(show, "1 of 2");
+    await sleep(200); // the next preloaded
+    const leaving = figures(show)[0]!;
+    void show.next();
+    await waitFor(() => leaving.getAnimations().length > 0, "the photos to move");
+    const coming = figures(show).find((f) => f !== leaving)!;
+    assertEqual(String((coming.getAnimations()[0]!.effect as KeyframeEffect).getKeyframes()[0]!["transform"]), "translateX(calc(100% + 20px))", "the 20px the slide lets show of the zoomed photo, no more");
+    await settledOn(show, "2 of 2");
+  } finally {
+    document.adoptedStyleSheets = document.adoptedStyleSheets.filter((x) => x !== page);
+  }
 });

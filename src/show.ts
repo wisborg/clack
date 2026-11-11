@@ -366,17 +366,19 @@ function filterReach(filter: string): number {
  * radius is two standard deviations, and past three nothing shows) and its
  * spread, not one drawn inside; an outline, its width and offset. A filter
  * spreads all that is drawn in its element, descendants too
- * (filterReach). Each as large as a page scales its element, in e's px.
- * Where the boxes are is for the caller (#beyond).
+ * (filterReach); one that clips what is in it, no further than its box.
+ * Each as large as a page scales its element, in e's px. Where the boxes
+ * are is for the caller (#beyond).
  */
 export function shadowReach(e: Element): number {
   const base = screenScale(e);
   const reach = (n: Element, scale: number): number => {
     const style = getComputedStyle(n);
     if (style.display === "none") return 0;
-    // As large as the page scales n, in e's px; with no box of its own,
-    // as its parent.
-    if (n !== e && style.display !== "contents") scale = screenScale(n) / base;
+    // As large as the page scales n, in e's px; with no box of its own to
+    // tell by (display: contents, an inline box, an SVG shape), as its
+    // parent.
+    if (n !== e && !style.display.startsWith("inline") && style.display !== "contents" && laidOut(n).outer > 0) scale = screenScale(n) / base;
     let drawn = 0;
     // Layers, at the commas: a colour's own split off a layer only what is
     // before its lengths, as a computed layer gives its colour first.
@@ -388,7 +390,15 @@ export function shadowReach(e: Element): number {
     }
     if (style.outlineStyle !== "none") drawn = Math.max(drawn, (parseFloat(style.outlineWidth) || 0) + (parseFloat(style.outlineOffset) || 0));
     drawn *= scale;
-    for (const child of n.children) drawn = Math.max(drawn, reach(child, scale));
+    // What is drawn in an element that clips it reaches no further than
+    // its box -- and the margin it may leave (overflow-clip-margin) --
+    // which is where #beyond takes it from.
+    const clipped = style.overflowX !== "visible" && style.display !== "contents";
+    const margin = clipped && style.overflowX === "clip" ? (parseFloat(style.getPropertyValue("overflow-clip-margin")) || 0) * scale : 0;
+    for (const child of n.children) {
+      const inside = reach(child, scale);
+      drawn = Math.max(drawn, clipped ? Math.min(inside, margin) : inside);
+    }
     return drawn + filterReach(style.filter) * scale;
   };
   return reach(e, 1);
@@ -422,6 +432,13 @@ function end(a: Animation | undefined): void {
 
 /** How long a slide still going is given to finish when the next is asked for (#hurry), in ms. */
 const hurryMs = 120;
+/** How long past its time a transition is waited for, or let run, before it is ended however it is: a page may have stalled it. */
+const lateMs = 4 * hurryMs;
+
+/** How far a finger holds figure's photo aside (#drag), in px; 0 if none does. */
+function dragOf(figure: HTMLElement): number {
+  return parseFloat(figure.style.getPropertyValue("--clack-drag")) || 0;
+}
 
 function el<K extends keyof HTMLElementTagNameMap>(name: K, className: string, part = ""): HTMLElementTagNameMap[K] {
   const e = document.createElement(name);
@@ -462,7 +479,7 @@ interface Running {
   /** The photo it takes away, and the key of its slide (null for the placeholder). */
   leaving: { figure: HTMLElement; animation: Animation; key: string | null };
   done: () => void;
-  /** Once a finger has caught the photo it brings, when it ends what is left of it, however it is (#takeOver). */
+  /** What ends it however it is, should a page have stalled it: lateMs past its time, or past a hurry (#endBy). */
   deadline?: ReturnType<typeof setTimeout>;
 }
 
@@ -1535,6 +1552,10 @@ export class ClackShow extends HTMLElement {
     // other means -- a key, a button, the page: it leaves from where the
     // finger holds it, and the rest of the gesture is not a swipe.
     const held = how.swipe ? null : (this.#abandonDrag(old) ?? (moving || null));
+    // After a swipe, the photo it takes over from leaves from where the
+    // finger let it go (its offset, below): the drag itself ends, so the
+    // slide is at rest where the page places it, to be measured (#beyond).
+    if (how.swipe && old) this.#endDrag(old);
     if (old && transition) {
       const timing: KeyframeAnimationOptions = { duration: transition.ms, easing: "cubic-bezier(0.4, 0, 0.2, 1)" };
       const offset = how.swipe ? how.swipe.offset : held;
@@ -1566,6 +1587,7 @@ export class ClackShow extends HTMLElement {
         },
       };
       this.#running.push(running);
+      this.#endBy(running, transition.ms + lateMs);
       // Over when the photo it takes away has gone: the one it brings is in
       // place by then, or held by a finger.
       void running.leaving.animation.finished.then(running.done, running.done);
@@ -1612,9 +1634,8 @@ export class ClackShow extends HTMLElement {
     if (spring) end(this.#springing ?? undefined);
     for (const r of [...this.#running]) {
       if (!which(r)) continue;
-      end(r.coming?.animation);
       end(r.leaving.animation);
-      r.done();
+      r.done(); // the photo it brings put in place, too
     }
   }
 
@@ -1628,12 +1649,27 @@ export class ClackShow extends HTMLElement {
 
   /** Speeds every slide still going on to its end, in hurryMs at most: one paused, or stood still, has no end to hurry to. */
   #hurry(): void {
-    for (const a of this.#sliding()) {
-      // What is left of it, in its own time: at the rate that gets through
-      // that in hurryMs, if that is quicker than it goes.
-      const rest = Number(a.effect?.getComputedTiming().endTime) - Number(a.currentTime ?? 0);
-      if (rest / a.playbackRate > hurryMs) a.updatePlaybackRate(rest / hurryMs);
+    for (const r of this.#running) {
+      if (r.type !== "slide") continue;
+      for (const a of [r.coming?.animation, r.leaving.animation]) {
+        if (!a || !moves(a)) continue;
+        // What is left of it, in its own time: at the rate that gets
+        // through that in hurryMs, if that is quicker than it goes.
+        const rest = Number(a.effect?.getComputedTiming().endTime) - Number(a.currentTime ?? 0);
+        if (rest / a.playbackRate > hurryMs) a.updatePlaybackRate(rest / hurryMs);
+      }
+      this.#endBy(r, hurryMs + lateMs);
     }
+  }
+
+  /**
+   * Ends r in ms, however it is then, instead of whenever it was to be:
+   * whatever a page does to its photos -- pauses them, sends them back,
+   * makes them endless -- they do not stay on the stage.
+   */
+  #endBy(r: Running, ms: number): void {
+    clearTimeout(r.deadline);
+    r.deadline = setTimeout(() => this.#finishTransitions(false, (x) => x === r), ms);
   }
 
   /**
@@ -1651,7 +1687,7 @@ export class ClackShow extends HTMLElement {
     const going = this.#sliding(true);
     if (going.length === 0) return null;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const late = new Promise<void>((resolve) => (timer = setTimeout(resolve, 4 * hurryMs)));
+    const late = new Promise<void>((resolve) => (timer = setTimeout(resolve, lateMs)));
     const over = Promise.all(going.map((a) => a.finished.then(noop, noop))).then(noop);
     return Promise.race([over, late]).finally(() => clearTimeout(timer));
   }
@@ -1676,10 +1712,6 @@ export class ClackShow extends HTMLElement {
       at = this.#offsetOf(figure);
       r.coming.animation.cancel();
       r.coming = null;
-      // What is left, the photo leaving, hurries out (#hurry, #drag): and
-      // goes in a while whatever a page does to it -- pauses it, sends it
-      // back, makes it endless -- rather than stay on the stage.
-      r.deadline = setTimeout(() => this.#finishTransitions(false, (x) => x === r), 4 * hurryMs);
     }
     return at;
   }
@@ -1970,32 +2002,37 @@ export class ClackShow extends HTMLElement {
     const show = this.#box.getBoundingClientRect();
     // How far f is from the show's sides, at its far side, and how far the
     // boxes in it reach past its own (no further than one that clips them),
-    // in its own px; and its own px's size on the screen. As the page
-    // places it: not where a finger holds it (--clack-drag), which a swipe
-    // leaves on the photo it takes over from.
+    // in its own px; and its own px's size on the screen. At rest, as the
+    // page places it: a drag of old's photo has been let go, and a spring
+    // back taken over, before this (#display).
     const clear = (f: HTMLElement): { far: number; scale: number } => {
       const box = f.getBoundingClientRect();
       const scale = screenScale(f, box);
-      const held = (parseFloat(f.style.getPropertyValue("--clack-drag")) || 0) * scale;
       let left = box.left;
       let right = box.right;
-      const clips = (style: CSSStyleDeclaration): boolean => style.overflowX !== "visible" && style.display !== "contents";
+      // The box an element cuts what is in it off at, with the margin it
+      // may leave (overflow-clip-margin), on the screen; null if it does not.
+      const clip = (style: CSSStyleDeclaration, r: DOMRect): [number, number] | null => {
+        if (style.overflowX === "visible" || style.display === "contents" || (r.width === 0 && r.height === 0)) return null;
+        const margin = style.overflowX === "clip" ? (parseFloat(style.getPropertyValue("overflow-clip-margin")) || 0) * scale : 0;
+        return [r.left - margin, r.right + margin];
+      };
       const walk = (n: Element, from: number, to: number): void => {
         for (const e of n.children) {
           const style = getComputedStyle(e);
           if (style.display === "none") continue;
           const r = e.getBoundingClientRect();
-          const boxed = r.width > 0 || r.height > 0; // not display: contents
-          if (boxed) {
+          if (r.width > 0 || r.height > 0) {
             left = Math.min(left, Math.max(r.left, from));
             right = Math.max(right, Math.min(r.right, to));
           }
-          walk(e, boxed && clips(style) ? Math.max(from, r.left) : from, boxed && clips(style) ? Math.min(to, r.right) : to);
+          const cut = clip(style, r);
+          walk(e, cut ? Math.max(from, cut[0]) : from, cut ? Math.min(to, cut[1]) : to);
         }
       };
-      const own = clips(getComputedStyle(f));
-      walk(f, own ? box.left : -Infinity, own ? box.right : Infinity);
-      const gap = Math.max(box.left - held - show.left, show.right - (box.right - held), 0);
+      const own = clip(getComputedStyle(f), box);
+      walk(f, own ? own[0] : -Infinity, own ? own[1] : Infinity);
+      const gap = Math.max(box.left - show.left, show.right - box.right, 0);
       const over = Math.max(box.left - left, right - box.right, 0);
       return { far: (gap + over) / scale, scale };
     };
@@ -2033,7 +2070,7 @@ export class ClackShow extends HTMLElement {
     if (!figure) {
       return;
     }
-    const offset = parseFloat(figure.style.getPropertyValue("--clack-drag")) || 0;
+    const offset = dragOf(figure);
     this.#caught = 0; // the gesture's own: its next starts afresh
     const delta = ((outcome === -1 ? 1 : -1) * (this.#rtl() ? -1 : 1)) as 1 | -1;
     const from = this.#from();
