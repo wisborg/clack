@@ -1,7 +1,7 @@
 import type { ClackShow, SlideChangeDetail, SlideInput } from "../src/clack";
 import { tagName } from "../src/clack";
 import { assert, assertEqual, fixture, skip, sleep, test } from "./harness";
-import { contentBox, figure, figures, pointer, img, imageLog, makeShow, onScreen, part, resetImageLog, settledOn, waitFor } from "./util";
+import { contentBox, figure, figures, pointer, img, imageLog, logged, makeShow, onScreen, part, resetImageLog, settledOn, waitFor } from "./util";
 
 const three = [{ title: "One", credit: "Me" }, { title: "Two" }, { title: "Three" }];
 
@@ -125,21 +125,6 @@ test("a newer request wins over a slower, older one", async () => {
   assertEqual(await show.goTo(2), true, "back to the one on screen");
   assertEqual(await third, false, "the one in between is dropped");
 });
-
-/** Waits until the image log has an entry for which match holds. */
-async function logged(match: (entry: string) => boolean, what: string, timeoutMs = 2500): Promise<string[]> {
-  const deadline = performance.now() + timeoutMs;
-  for (;;) {
-    const log = await imageLog();
-    if (log.some(match)) {
-      return log;
-    }
-    if (performance.now() > deadline) {
-      throw new Error(`${what}: not in the log (${log.join(" ")})`);
-    }
-    await sleep(50);
-  }
-}
 
 test("preloads the next slides, and cancels what is no longer wanted", async () => {
   await resetImageLog();

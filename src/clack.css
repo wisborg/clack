@@ -695,43 +695,39 @@
    there for the keyboard, and shown while focus it brought is among them
    (.key-focus: #markKeyFocus) -- not the focus a click or a tap leaves on
    a button, which would keep them up for good. The caption stays, as a
-   caption is shown: in floating, the bar goes, and the caption keeps a box
-   of the bar's own (so the bar's contrasts hold for it); a show with no
-   captions loses the whole bar. Only opacity changes, which is
-   composited. */
-.controls,
-.show[data-controls="floating"] .below {
+   caption is shown: in floating, the bar's surface goes with the controls,
+   and the caption keeps a box of the bar's own (so the bar's contrasts
+   hold for it); a show with no captions has nothing left of the bar. Only
+   opacity changes, which is composited -- and never the bar's as a whole:
+   a parent fading cuts its surface's blur off from the photo behind it
+   (a backdrop root), which would pop in and out at the fade's ends. */
+.controls {
   transition: opacity 240ms var(--clack-ease);
 }
 
-/* Plain: the controls go. Floating with captions: the controls go, and
-   the bar's surface. Floating without: the whole bar goes -- and only the
-   bar, or the controls on it would fade twice over. */
-.show[data-reveal="on-activity"]:not([data-controls="floating"], .active, .key-focus) .controls,
-.show[data-reveal="on-activity"][data-controls="floating"][data-captioned="true"]:not(.active, .key-focus) .controls,
-.show[data-reveal="on-activity"][data-controls="floating"]:not([data-captioned="true"], .active, .key-focus) .below {
+.show[data-reveal="on-activity"]:not(.active, .key-focus) .controls {
   opacity: 0;
   pointer-events: none;
 }
 
-.show[data-reveal="on-activity"][data-controls="floating"][data-captioned="true"]:not(.active, .key-focus) .below {
+.show[data-reveal="on-activity"][data-controls="floating"]:not(.active, .key-focus) .below {
   pointer-events: none;
 }
 
-.show[data-reveal="on-activity"][data-controls="floating"][data-captioned="true"]:not(.active, .key-focus) .below::before {
+.show[data-reveal="on-activity"][data-controls="floating"]:not(.active, .key-focus) .below::before {
   opacity: 0;
 }
 
-.show[data-reveal="on-activity"][data-controls="floating"][data-captioned="true"]:not([data-card="true"], .active, .key-focus) .caption::before {
+.show[data-reveal="on-activity"][data-controls="floating"]:not([data-card="true"], .active, .key-focus) .caption::before {
   opacity: 1;
   transition-delay: 0s;
 }
 
+/* As specific as the rules they undo, and after them. */
 @media (prefers-reduced-motion: reduce) {
   .controls,
-  .show[data-controls="floating"] .below,
   .show[data-controls="floating"] .below::before,
-  .show[data-controls="floating"] .caption::before {
+  .show[data-controls="floating"]:not([data-card="true"]) .caption::before {
     transition: none;
   }
 

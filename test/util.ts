@@ -109,6 +109,21 @@ export async function resetImageLog(): Promise<void> {
   await fetch("/img-log/reset", { method: "POST" });
 }
 
+/** Waits until the image log has an entry for which match holds. */
+export async function logged(match: (entry: string) => boolean, what: string, timeoutMs = 2500): Promise<string[]> {
+  const deadline = performance.now() + timeoutMs;
+  for (;;) {
+    const log = await imageLog();
+    if (log.some(match)) {
+      return log;
+    }
+    if (performance.now() > deadline) {
+      throw new Error(`${what}: not in the log (${log.join(" ")})`);
+    }
+    await sleep(50);
+  }
+}
+
 /** Sets the value at a JSON Pointer (null removes it; "" replaces the document). */
 export function setPointer(doc: unknown, pointer: string, value: unknown): unknown {
   if (pointer === "") return value;

@@ -238,16 +238,18 @@ The counter is as wide as the show's last number makes it, so the controls besid
 move as the slide's number gains a digit. Controls shown `on-activity` appear when the
 pointer moves or presses, a key is pressed, or focus arrives, and go three seconds after the
 last of it, unless a mouse or pen moved onto them and rests there, or focus the keyboard
-brought (Tab) is among them — not focus a click left there, even once keys follow; until
+brought (Tab) is among them — from elsewhere in the page or from the photo, as the browser
+judges it as focus arrives (`:focus-visible`) — not focus a click left there, even once keys follow; until
 then they are not in the pointer's way, but are always in the keyboard's. Only the controls go: the caption is shown, as a caption is. In `plain`, it
-stays where it is; in `floating`, the bar goes, and the caption keeps a box of the bar's
+stays where it is; in `floating`, the bar's surface goes with them, and the caption keeps a box of the bar's
 own surface, held to the same contrasts, where it was on the bar (a show with no captions
 loses the whole bar). A
 slide moves the photos along only from one slide to another; the first photo, and a new
 photo of the slide on screen, fade in. A photo held aside by a drag when a key or a button
 moves on leaves from where it is held, and the rest of the drag is not a swipe; with reduced
-motion, it fades where it is, as a swiped one does. A slide starts and ends with each photo
-past the show's margin and the reach of its shadow, and they cross the margin a margin apart,
+motion, it fades where it is, as a swiped one does. A step taken while the last photo is
+still sliding in takes it on from where it has got to. A slide starts and ends with each photo
+past the show's margin, if it has one, and the reach of its shadow, and they cross the margin a margin apart,
 as prints moved along a wall — after a swipe too, from where it let go. (A page that gives
 `::part(photo)` a shadow reaching further than Clack's, 48px, may see it in the margin at
 the start and end.)
