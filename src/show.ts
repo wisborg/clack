@@ -1958,88 +1958,23 @@ export class ClackShow extends HTMLElement {
       default:
         return; // not the show's
     }
-    // With Shift, the keys extend a selection -- of a caption or a title
-    // dragged over, which leaves focus on the show itself -- and are the
-    // page's while there is one in the show. A click on a control in
-    // Safari leaves focus there too, with nothing of the show selected.
-    if (e.shiftKey && e.composedPath()[0] === this.#box && this.#selected()) {
+    // With Shift, the keys extend a selection, and are the page's where
+    // focus is on the show itself: where a click on the caption, the title
+    // or the mat leaves it, as one on text does. On the photo or a control
+    // nothing is selected, and they are the show's. (A click on a control
+    // in Safari, or Firefox on a Mac, leaves focus on the show itself too:
+    // Shift with an arrow is the page's there. Whether text in the show is
+    // selected was asked of the selection for a while, and dropped: each
+    // way components can be arranged around the show -- slotted, nested,
+    // beside it -- needed a rule of its own, and engines say where a
+    // selection is in a shadow tree in two ways. Decided with the user,
+    // 2026-11-12.)
+    if (e.shiftKey && e.composedPath()[0] === this.#box) {
       return;
     }
     if (typeof to === "number") this.#user(this.#rtl() ? (-to as -1 | 1) : to);
     else if (this.#slides.length) void this.#request(to === "first" ? 0 : this.#slides.length - 1, { user: true });
     e.preventDefault();
-  }
-
-  /**
-   * Whether text in the show is selected: a range of the selection's with
-   * an end in the show, or one that starts before the show and ends after
-   * it (Cmd-A, a drag past it), each end judged in its own tree -- the
-   * page, or a component's shadow tree the show is in -- against what holds
-   * the show there: the show itself, or the host of the tree it is in.
-   * Asked of the selection's composed ranges, the one way a selection says
-   * where in a shadow tree it is: its type, and Chrome's containsNode, see
-   * nothing of one. Chrome takes the shadow roots only in an object;
-   * Safari, before it took that, took them only as arguments of their own,
-   * and throws at the object. An engine without them -- none Clack is for
-   * -- is taken to have nothing of the show selected. Not seen: a show
-   * slotted into a component, whose own shadow tree's text is moved out to
-   * its host, and so taken as over the show.
-   */
-  #selected(): boolean {
-    type Composed = Selection & { getComposedRanges?(...a: ({ shadowRoots: ShadowRoot[] } | ShadowRoot)[]): StaticRange[] };
-    const doc = this.ownerDocument;
-    const selection = doc.getSelection() as Composed | null;
-    if (!selection?.rangeCount) return false;
-    const root = this.shadowRoot!;
-    // What holds the show in each tree it is in, out to the page; and the
-    // shadow roots among them, which getComposedRanges is given too, so an
-    // engine that would move ends in them out to their hosts keeps them.
-    // (Tested by what they are, not instanceof, which a root from another
-    // window's realm is not.)
-    const holders = new Map<Node, Element>();
-    const roots: ShadowRoot[] = [root];
-    for (let n: Element = this; ; ) {
-      const tree = n.getRootNode();
-      holders.set(tree, n);
-      if (tree === doc || tree.nodeType !== Node.DOCUMENT_FRAGMENT_NODE || !("host" in tree)) break;
-      roots.push(tree as ShadowRoot);
-      n = (tree as ShadowRoot).host;
-    }
-    // Where a range's end is against what holds the show in its tree: -1
-    // before it, 0 in it, 1 after; null in no tree the show is in. Against
-    // its contents, so that a point at its edge, in its parent -- a range
-    // of the element beside it -- is beside it, not in it. Inside a host
-    // that holds the show is the host's own light content, which comes
-    // after its shadow tree: after the show.
-    const against = (node: Node, offset: number): number | null => {
-      const held = holders.get(node.getRootNode());
-      if (!held) return null;
-      const range = doc.createRange();
-      range.selectNodeContents(held);
-      const at = range.comparePoint(node, offset);
-      return at === 0 && held !== this ? 1 : at;
-    };
-    const over = (r: StaticRange): boolean => {
-      if (r.collapsed) return false;
-      if (root.contains(r.startContainer) || root.contains(r.endContainer)) return true;
-      try {
-        const start = against(r.startContainer, r.startOffset);
-        const end = against(r.endContainer, r.endOffset);
-        return start !== null && end !== null && start <= 0 && end >= 0;
-      } catch {
-        return false; // a range no Range can be judged by: none of the show's
-      }
-    };
-    for (const args of [[{ shadowRoots: roots }], roots]) {
-      let ranges: StaticRange[];
-      try {
-        ranges = selection.getComposedRanges?.(...args) ?? [];
-      } catch {
-        continue; // not this form: the next
-      }
-      return ranges.some(over);
-    }
-    return false;
   }
 
   #drag(dx: number): void {

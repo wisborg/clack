@@ -332,8 +332,12 @@ async function run(): Promise<Report> {
             actions: [...pressed].map((p): Action => (typeof p === "number" ? { type: "pointerUp", button: p } : { type: "keyUp", value: p })),
           }));
         held.clear();
-        if (ups.length) await ask({ input: ups });
+        // The driver asked to release whether or not it took the ups --
+        // refused, they may be of a source it never took.
+        let failed: unknown = null;
+        if (ups.length) await ask({ input: ups }).catch((e: unknown) => (failed = e));
         await ask({ release: true });
+        if (failed) throw failed;
         if (moved) await rest();
       } catch (e) {
         // Said even of a test that failed or skipped: what it left held
