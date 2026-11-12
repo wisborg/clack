@@ -1832,22 +1832,43 @@ test("with Shift, the keys are the page's while all of the page is selected, the
   }
 });
 
-test("with Shift, the keys are the page's while all of the page is selected, the show in a component with it", async () => {
+test("with Shift, the keys are the page's while a selection runs over the show in a component, and the show's while one is beside it", async () => {
   if (!(await focusWindow())) skip("this engine's window does not take the focus, so a click focuses nothing");
-  const show = await titledShow(2, "shift-all-selected-component.json");
+  if (!("getComposedRanges" in Selection.prototype)) skip("this engine has no composed ranges");
+  const show = await titledShow(3, "shift-selected-component.json");
   const component = document.createElement("div");
   show.before(component);
-  component.attachShadow({ mode: "open" }).append(show);
-  await show.goTo(1);
-  await settledOn(show, "2 of 2");
+  const before = document.createElement("p");
+  before.textContent = "The component's words before the show.";
+  const after = document.createElement("p");
+  after.textContent = "The component's words after it.";
+  component.attachShadow({ mode: "open" }).append(before, show, after);
+  await show.goTo(2);
+  await settledOn(show, "3 of 3");
   await focusByCounter(show);
+  const selection = document.getSelection()!;
   try {
-    document.getSelection()!.selectAllChildren(document.body);
+    // All of the page, the component and the show in it.
+    selection.selectAllChildren(document.body);
     await chord(Key.Shift, Key.ArrowLeft);
     await sleep(300);
-    assertEqual(show.index, 1, "nothing moved: the selection, over all the component and the show in it, grows");
+    assertEqual(show.index, 2, "nothing moved: the selection over all the page grows");
+    // In the component, from before the show to after it.
+    selection.setBaseAndExtent(before.firstChild!, 0, after.firstChild!, 3);
+    if (!selection.toString().includes("component")) skip("this engine does not let a script select in a shadow tree");
+    await chord(Key.Shift, Key.ArrowLeft);
+    await sleep(300);
+    assertEqual(show.index, 2, "nothing moved: the selection over the show, in the component, grows");
+    // In the component, beside the show: the keys are the show's.
+    selection.setBaseAndExtent(before.firstChild!, 0, before.firstChild!, 9);
+    await chord(Key.Shift, Key.ArrowLeft);
+    await settledOn(show, "2 of 3");
+    // None at all: the show's.
+    selection.removeAllRanges();
+    await chord(Key.Shift, Key.ArrowLeft);
+    await settledOn(show, "1 of 3");
   } finally {
-    document.getSelection()!.removeAllRanges();
+    selection.removeAllRanges();
   }
 });
 
