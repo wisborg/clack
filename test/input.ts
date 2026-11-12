@@ -127,13 +127,14 @@ let shiftArrowsArrive: boolean | null = null;
  * Presses Shift-ArrowLeft, as the visitor's keyboard -- or, where the
  * driver gives it as a key of no name (Safari's), as a keydown made in
  * script at whatever has focus: what the show does with the key it is
- * given, and the selection there is, is still tested; what the browser
- * does with it is not. Finding out which moves focus the first time, so
+ * given is still tested; what the browser does with it is not. Finding out which moves focus the first time, so
  * a test calls shiftArrowsGiven at its start, before focus is anywhere it
  * watches.
  */
 export async function shiftLeft(): Promise<void> {
-  if (await shiftArrowsGiven()) return chord(Key.Shift, Key.ArrowLeft);
+  // Not found out here, in the middle of a test, which would take focus
+  // away: not found out yet (or heard nothing) is the driver's own key.
+  if (shiftArrowsArrive !== false) return chord(Key.Shift, Key.ArrowLeft);
   let at: Element | null = document.activeElement;
   while (at?.shadowRoot?.activeElement) at = at.shadowRoot.activeElement;
   (at ?? document.body).dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", shiftKey: true, bubbles: true, composed: true, cancelable: true }));
@@ -156,9 +157,8 @@ export async function shiftArrowsGiven(): Promise<boolean> {
     } finally {
       at.remove();
     }
-    // Nothing heard is taken as no name too: the keydown made in script
-    // then still reaches whatever has focus, where finding out again in
-    // the middle of a test would take the focus away.
+    // Nothing heard is no answer: asked again by the next test.
+    if (key === null) return true;
     shiftArrowsArrive = key === "ArrowLeft";
   }
   return shiftArrowsArrive;

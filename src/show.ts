@@ -1959,16 +1959,17 @@ export class ClackShow extends HTMLElement {
         return; // not the show's
     }
     // With Shift, the keys extend a selection, and are the page's where
-    // focus is on the show itself: where a click on the caption, the title
-    // or the mat leaves it, as one on text does. On the photo or a control
-    // nothing is selected, and they are the show's. (A click on a control
-    // in Safari, or Firefox on a Mac, leaves focus on the show itself too:
-    // Shift with an arrow is the page's there. Whether text in the show is
-    // selected was asked of the selection for a while, and dropped: each
-    // way components can be arranged around the show -- slotted, nested,
-    // beside it -- needed a rule of its own, and engines say where a
-    // selection is in a shadow tree in two ways. Decided with the user,
-    // 2026-11-12.)
+    // focus is on the show itself: where a click on the caption, the
+    // title, the header or the counter leaves it, as a drag over text
+    // does -- and, in Safari and Firefox on a Mac, a click on a control,
+    // which focuses no button. They are the page's there whether or not
+    // anything is selected. On the stage (the photo, the mat around it)
+    // or a focused button they are the show's. Whether text in the show
+    // is selected was asked of the selection for a while, and dropped:
+    // each way components can be arranged around the show -- slotted,
+    // nested, beside it -- needed a rule of its own, and engines say
+    // where a selection is in a shadow tree in two ways. Decided with the
+    // user, 2026-11-12.
     if (e.shiftKey && e.composedPath()[0] === this.#box) {
       return;
     }

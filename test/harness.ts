@@ -334,11 +334,12 @@ async function run(): Promise<Report> {
         held.clear();
         // The driver asked to release whether or not it took the ups --
         // refused, they may be of a source it never took.
-        let failed: unknown = null;
-        if (ups.length) await ask({ input: ups }).catch((e: unknown) => (failed = e));
-        await ask({ release: true });
-        if (failed) throw failed;
-        if (moved) await rest();
+        const failed: unknown[] = [];
+        if (ups.length) await ask({ input: ups }).catch((e: unknown) => failed.push(e));
+        await ask({ release: true }).catch((e: unknown) => failed.push(e));
+        if (moved) await rest().catch((e: unknown) => failed.push(e));
+        // The first is the cause; the rest may follow from it.
+        if (failed.length) throw failed[0];
       } catch (e) {
         // Said even of a test that failed or skipped: what it left held
         // may fail the next, which should not be the only sign of it.

@@ -1735,40 +1735,46 @@ test("after a click anywhere in the show, the keys move it on, and its focus is 
   await settledOn(show, "3 of 3");
 });
 
-/**
- * Clicks show's counter, which focuses the show itself in every engine
- * (it is no button, and no text), the controls brought up for it first.
- */
-async function focusByCounter(show: ClackShow): Promise<void> {
-  await moveTo(part(show, ".stage"));
-  await waitFor(() => shown(part(show, ".controls")), "the controls shown");
-  await click(part(show, ".counter"));
-  assertEqual(show.shadowRoot!.activeElement, box(show), "the counter's click's focus, on the show");
-}
-
-test("with Shift, the keys are the page's where focus is on the show itself, and the show's on the photo", async () => {
+test("with Shift, the keys are the page's where focus is on the show itself, and the show's on the photo or a button", async () => {
   if (!(await focusWindow())) skip("this engine's window does not take the focus, so a click focuses nothing");
   await shiftArrowsGiven(); // before focus is anywhere watched
-  const show = await titledShow(3, "shift-focus.json");
-  await show.goTo(2);
-  await settledOn(show, "3 of 3");
+  const show = await titledShow(4, "shift-focus.json");
+  await show.goTo(3);
+  await settledOn(show, "4 of 4");
   // A click on the title: focus on the show itself, where a selection
   // would grow.
   await click(part(show, ".title"));
   assertEqual(show.shadowRoot!.activeElement, box(show), "the click's focus, on the show");
   await shiftLeft();
   await sleep(300);
-  assertEqual(show.index, 2, "nothing moved: Shift with an arrow is the page's there");
-  // On the counter, which is no text: the same.
-  await focusByCounter(show);
+  assertEqual(show.index, 3, "nothing moved: Shift with an arrow is the page's there");
+  // Dragged over, as text is selected: focus on the show itself too.
+  const title = part(show, ".title");
+  const r = title.getBoundingClientRect();
+  await drag(title, { x: 2, y: r.height / 2 }, Math.floor(r.width) - 4, 200);
+  assertEqual(show.shadowRoot!.activeElement, box(show), "the drag's focus, on the show");
   await shiftLeft();
   await sleep(300);
-  assertEqual(show.index, 2, "nothing moved there either");
+  assertEqual(show.index, 3, "nothing moved: the selection's to grow");
+  document.getSelection()?.removeAllRanges();
   // On the photo: the show's.
   await click(part(show, ".stage"));
   assertEqual(show.shadowRoot!.activeElement, part(show, ".stage"), "the click's focus, on the photo");
   await shiftLeft();
-  await settledOn(show, "2 of 3");
+  await settledOn(show, "3 of 4");
+  // On a button, where a click focuses it (Chrome, Firefox off a Mac):
+  // the show's; where it focuses the show itself, the page's.
+  await moveTo(part(show, ".stage"));
+  await waitFor(() => shown(part(show, ".controls")), "the controls shown");
+  await click(part(show, ".previous"));
+  await settledOn(show, "2 of 4");
+  const onButton = show.shadowRoot!.activeElement === part(show, ".previous");
+  await shiftLeft();
+  if (onButton) await settledOn(show, "1 of 4");
+  else {
+    await sleep(300);
+    assertEqual(show.index, 1, "nothing moved, with focus on the show itself");
+  }
 });
 
 test("controls focused by a click or a tap, not the keyboard, still go -- though keys follow", async () => {
