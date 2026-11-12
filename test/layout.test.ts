@@ -2,7 +2,7 @@
 // draws, and that the mat and frame are measured as the schema says.
 import type { ClackShow } from "../src/clack";
 import { assert, assertEqual, fixture, skip, sleep, test } from "./harness";
-import { contentBox, echo, figures, img, imageLog, makeShow, part, pointer, resetImageLog, settledOn, showBox as box, themed, waitFor } from "./util";
+import { contentBox, echo, figures, img, imageLog, makeShow, part, pointer, resetImageLog, settledOn, showBox as box, themed, titled, waitFor } from "./util";
 
 
 /** A theme file that extends mat, with these lengths for the mat and frame. */
@@ -24,12 +24,6 @@ function matShow(show: ClackShow, theme = true): ClackShow {
   show.style.setProperty("--clack-transition-duration", "40ms");
   show.style.width = "600px";
   return show;
-}
-
-/** A manifest of n photos, titled, served at a path of its own. */
-function titled(title: string, n: number, path: string): string {
-  const slides = Array.from({ length: n }, (_, i) => ({ id: `p${i}`, alt: `${title} ${i + 1}`, width: 300, height: 200, sources: [{ url: img(300, 200), width: 300 }] }));
-  return echo(JSON.stringify({ format: "clack-manifest/1", title, slides }), { path });
 }
 
 test("the header shows the manifest's title and how many photos it has, only with a title", async () => {

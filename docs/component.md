@@ -150,8 +150,8 @@ The element is 3:2 unless the page gives it a height.
 - **Keys** (with focus in the show): ← and → move the way the text runs (so the other way
   round in a right-to-left page), Home and End go to the first and last. A click anywhere
   in the show gives it focus for them — even on a control in Safari, or Firefox on a Mac,
-  whose clicks focus no button. After a click on text, the caption or the title, Shift with
-  a key is left to the page, to extend a selection.
+  whose clicks focus no button. While text in the show is selected — the caption or the
+  title, dragged over — Shift with a key is left to the page, to extend the selection.
 - **Swipe and drag**, with touch, pen or mouse: a long drag or a quick flick moves on; a
   short one springs back; up-and-down is left to the page, to scroll. At the ends the photo
   resists.

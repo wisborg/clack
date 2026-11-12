@@ -307,7 +307,8 @@ async function run(): Promise<Report> {
         // Said even of a test that failed or skipped: what it left held
         // may fail the next, which should not be the only sign of it.
         const after = wellFormed(`after the test, letting go of its input: ${describe(e)}`);
-        Object.assign(r, { passed: false, skipped: "", error: r.error ? `${r.error}\n${after}` : after });
+        const before = r.skipped ? `skipped: ${r.skipped}` : r.error;
+        Object.assign(r, { passed: false, skipped: "", error: before ? `${before}\n${after}` : after });
       }
     }
     document.getElementById("fixtures")?.replaceChildren();

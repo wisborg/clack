@@ -275,7 +275,7 @@ func drive(ctx context.Context, p driven) (Report, error) {
 	for round := 0; ; round++ {
 		var m message
 		if err := p.ExecuteAsync(ctx, nextScript, []any{answer, run}, &m); err != nil {
-			return Report{}, err
+			return Report{}, overrun(ctx, err)
 		}
 		if run == nil {
 			run = m.Run
@@ -296,7 +296,7 @@ func drive(ctx context.Context, p driven) (Report, error) {
 			return Report{}, err
 		}
 		if ctx.Err() != nil {
-			return Report{}, fmt.Errorf("the run did not end within %v: %w", runTimeout, ctx.Err())
+			return Report{}, overrun(ctx, err)
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
 			// Cut off, the driver may still be doing it: what it does
@@ -313,6 +313,16 @@ func drive(ctx context.Context, p driven) (Report, error) {
 }
 
 var errUnknown = errors.New("the page asked the driver for nothing it knows")
+
+// overrun says what err was, when ctx -- the run's -- has ended: the run's
+// own deadline passing is said to be that; the run being cancelled (Ctrl-C)
+// is left as it is.
+func overrun(ctx context.Context, err error) error {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return fmt.Errorf("the run did not end within %v: %w", runTimeout, err)
+	}
+	return err
+}
 
 // do does for the page what m asks, within inputTimeout.
 func do(ctx context.Context, p driven, m message) error {

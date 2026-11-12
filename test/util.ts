@@ -309,3 +309,19 @@ export async function slidingShow(name: string, page?: (show: ClackShow) => void
   await sleep(200); // the next preloaded
   return show;
 }
+
+/**
+ * A manifest of n photos, titled, served at a path of its own; with
+ * slideTitles, each photo titled too, its caption.
+ */
+export function titled(title: string, n: number, path: string, o: { slideTitles?: boolean } = {}): string {
+  const slides = Array.from({ length: n }, (_, i) => ({
+    id: `p${i}`,
+    alt: `${title} ${i + 1}`,
+    ...(o.slideTitles ? { description: { title: `The photograph numbered ${i + 1}` } } : {}),
+    width: 300,
+    height: 200,
+    sources: [{ url: img(300, 200), width: 300 }],
+  }));
+  return echo(JSON.stringify({ format: "clack-manifest/1", title, slides }), { path });
+}

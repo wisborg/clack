@@ -298,6 +298,22 @@ func TestDriveGivesUpOnADriverThatNeverAnswers(t *testing.T) {
 	}
 }
 
+func TestDriveSaysWhenTheRunsDeadlinePassed(t *testing.T) {
+	// The run's deadline, as the caller's here: said to be the run's.
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	f := &fakePage{messages: []string{`{"focus": true}`}, block: true}
+	if _, err := drive(ctx, f); err == nil || !strings.Contains(err.Error(), "the run did not end") {
+		t.Errorf("error %v, want the run's deadline named", err)
+	}
+	// Cancelled (Ctrl-C): not called a deadline.
+	ctx, cancel = context.WithCancel(context.Background())
+	cancel()
+	if _, err := drive(ctx, &fakePage{messages: []string{`{"report": {}}`}}); err == nil || strings.Contains(err.Error(), "did not end") {
+		t.Errorf("error %v, want the cancelling as it is", err)
+	}
+}
+
 func TestDriveRefusesAMessageItDoesNotKnow(t *testing.T) {
 	f := &fakePage{messages: []string{`{"scroll": 3}`}}
 	if _, err := drive(context.Background(), f); err == nil {
