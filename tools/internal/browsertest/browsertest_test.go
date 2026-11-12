@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestServeSendsThePolicyWithEveryFile(t *testing.T) {
@@ -189,6 +190,7 @@ type fakePage struct {
 	answers  []any
 	did      []string
 	fail     error // what performing or releasing input returns
+	block    bool  // whether giving input waits for its context to end
 }
 
 func (f *fakePage) ExecuteAsync(ctx context.Context, script string, args []any, result any) error {
@@ -196,6 +198,9 @@ func (f *fakePage) ExecuteAsync(ctx context.Context, script string, args []any, 
 		return fmt.Errorf("args = %v, want the one answer", args)
 	}
 	f.answers = append(f.answers, args[0])
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if len(f.messages) == 0 {
 		return errors.New("asked for a round past the last")
 	}
@@ -216,6 +221,10 @@ func (f *fakePage) ReleaseActions(ctx context.Context) error {
 
 func (f *fakePage) FocusWindow(ctx context.Context) error {
 	f.did = append(f.did, "focus")
+	if f.block {
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	return f.fail
 }
 
@@ -257,6 +266,30 @@ func TestDriveTellsThePageWhatTheDriverCouldNotDo(t *testing.T) {
 	}
 	if len(f.answers) != 2 || f.answers[1] != "move target out of bounds" {
 		t.Errorf("answers = %#v, want the driver's error given back", f.answers)
+	}
+}
+
+func TestDriveTellsAPageThatWentFromOneThatNeverStarted(t *testing.T) {
+	r, err := drive(context.Background(), &fakePage{messages: []string{`{"gone": true}`}})
+	if err != nil || !strings.Contains(r.Error, "did not start") {
+		t.Errorf("first round: report %+v, error %v; want the bundle not started", r, err)
+	}
+	f := &fakePage{messages: []string{`{"release": true}`, `{"gone": true}`}}
+	if _, err := drive(context.Background(), f); err == nil || !strings.Contains(err.Error(), "went away") {
+		t.Errorf("a later round: error %v, want the page gone", err)
+	}
+}
+
+func TestDriveGivesUpOnADriverThatNeverAnswers(t *testing.T) {
+	f := &fakePage{messages: []string{`{"focus": true}`, `{"report": {}}`}, block: true}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	// The deadline is the caller's here (inputTimeout's own is too long to
+	// wait for in a test): the input that never ends is cut off, and so is
+	// the run.
+	_, err := drive(ctx, f)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("error %v, want the deadline", err)
 	}
 }
 

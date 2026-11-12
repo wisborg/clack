@@ -1,6 +1,7 @@
 // The test bundle's entry point. The harness is imported first so it is
 // listening for policy violations before any test module runs.
 import { start } from "./harness";
+import "./harness.test";
 import "./csp.test";
 import "./element.test";
 import "./nav.test";

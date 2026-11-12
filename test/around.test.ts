@@ -3,9 +3,9 @@
 // way to the next.
 import type { ClackShow, SlideInput } from "../src/clack";
 import { shadowReach, transitionFrames, transitionOf } from "../src/show";
-import { assert, assertEqual, fixture, focusWindow, input, skip, sleep, test } from "./harness";
-import { Key, click, moveTo, pointOn, press, tabber } from "./input";
-import { figures, imageLog, img, logged, makeShow, part, pointer, reduceMotion, resetImageLog, settledOn, showBox as box, themed, waitFor } from "./util";
+import { assert, assertEqual, fixture, focusWindow, skip, sleep, test } from "./harness";
+import { Key, chord, click, drag, moveTo, press, tabber } from "./input";
+import { echo, figures, imageLog, img, logged, makeShow, part, pointer, reduceMotion, resetImageLog, settledOn, showBox as box, themed, waitFor } from "./util";
 
 /** Whether the visitor could see and point at the controls now. */
 function shown(e: Element): boolean {
@@ -193,24 +193,6 @@ test("where the text runs right to left, the next slides in from the left", asyn
   await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
   const { incoming, outgoing } = await slideOn(show);
   assert(/^translateX\((calc\()?-100%/.test(incoming) && /^translateX\((calc\()?100%/.test(outgoing), `the next in from the left, the last out to the right: ${incoming}, ${outgoing}`);
-});
-
-test("controls focused by a click or a tap, not the keyboard, still go -- though keys follow", async () => {
-  const show = makeShow([{}, {}, {}], { theme: "darkroom" });
-  await settledOn(show, "1 of 3");
-  const p = pointer(show);
-  p.send("pointermove", p.left + 10, { buttons: 0 });
-  // As a click leaves it: pressed, then focused, not as the keyboard's.
-  const next = part(show, ".next") as HTMLButtonElement;
-  next.dispatchEvent(new PointerEvent("pointerdown", { pointerType: "mouse", bubbles: true, composed: true }));
-  await focusAs(next, false);
-  assertEqual(show.shadowRoot!.activeElement, next, "focused");
-  // Keys follow: Chrome and Firefox take the focus for the keyboard's
-  // then, which is not what keeps the controls up.
-  show.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
-  await sleep(3300);
-  assert(!shown(part(show, ".controls")), "gone a few seconds after the last key, focus or not");
-  next.blur();
 });
 
 test("the first photo, and a new photo of the slide on screen, fade in rather than slide", async () => {
@@ -1673,15 +1655,21 @@ test("in a floating bar, a mouse resting on the caption keeps the controls up", 
   assert(shown(controls), "still up while the mouse rests on the bar");
 });
 
-test("controls tabbed to from the page come up and stay while focus is among them; tabbed away, they go", async () => {
+/** A field of the page's own, before the show: where the visitor tabs from. */
+function pageField(): HTMLInputElement {
+  const field = document.createElement("input");
+  field.ariaLabel = "the page's own field";
+  fixture().append(field);
+  return field;
+}
+
+test("controls tabbed to from the page come up, and stay while focus is among them", async () => {
   const tab = await tabber();
-  const page = document.createElement("input");
-  page.ariaLabel = "the page's own field";
-  fixture().append(page);
+  const field = pageField();
   const show = makeShow([{}, {}], { theme: "darkroom" });
   await settledOn(show, "1 of 2");
   const controls = part(show, ".controls");
-  page.focus();
+  field.focus();
   await tab();
   const at = show.shadowRoot!.activeElement;
   assert(at && controls.contains(at), `Tab from the page brings focus to the controls, not ${at?.className ?? "nowhere"}`);
@@ -1689,20 +1677,33 @@ test("controls tabbed to from the page come up and stay while focus is among the
   await waitFor(() => shown(controls), "shown");
   await sleep(3300);
   assert(shown(controls), "still up, long after, while focus is among them");
+});
+
+test("controls tabbed to and away from go a few seconds after focus left them", async () => {
+  const tab = await tabber();
+  const field = pageField();
+  const show = makeShow([{}, {}], { theme: "darkroom" });
+  await settledOn(show, "1 of 2");
+  field.focus();
+  await tab();
+  assert(box(show).classList.contains("key-focus"), "taken for the keyboard's");
   await tab(true);
-  assertEqual(document.activeElement, page, "Shift-Tab takes focus back to the page");
+  assertEqual(document.activeElement, field, "Shift-Tab takes focus back to the page");
+  assert(!box(show).classList.contains("key-focus"), "no longer kept up");
   await sleep(3300);
-  assert(!shown(controls), "gone a few seconds after focus left them");
+  assert(!shown(part(show, ".controls")), "gone a few seconds after");
 });
 
 test("a click on a control does not keep them up, though arrow keys follow", async () => {
+  if (!(await focusWindow())) skip("this engine's window does not take the focus, so a click focuses nothing");
   const show = makeShow([{}, {}, {}], { theme: "darkroom" });
   await settledOn(show, "1 of 3");
   const controls = part(show, ".controls");
   await moveTo(part(show, ".stage"));
   await waitFor(() => shown(controls), "shown when the mouse moves");
-  // Focused by the click (not in Safari, whose clicks focus no button),
-  // and taken by Chrome for the keyboard's once a key follows.
+  // Focused by the click -- the button in Chrome, and Firefox off a Mac,
+  // the show elsewhere -- and taken by Chrome for the keyboard's once a
+  // key follows.
   await click(part(show, ".next"));
   await settledOn(show, "2 of 3");
   await press(Key.ArrowRight);
@@ -1713,13 +1714,23 @@ test("a click on a control does not keep them up, though arrow keys follow", asy
   assert(!shown(controls), "gone a few seconds after the last of it");
 });
 
-test("after a click on the caption, the keys still move the show on", async () => {
-  const show = makeShow([{ title: "Low tide" }, {}], { theme: "darkroom" });
-  await settledOn(show, "1 of 2");
+test("after a click anywhere in the show, the keys move it on; with Shift, they are the page's", async () => {
+  if (!(await focusWindow())) skip("this engine's window does not take the focus, so a click focuses nothing");
+  const slides = [0, 1, 2].map((i) => ({ id: `s${i}`, alt: `photo ${i + 1}`, description: { title: `Photo ${i + 1}` }, width: 300, height: 200, sources: [{ url: img(300, 200), width: 300 }] }));
+  const show = makeShow([], { theme: "darkroom" });
+  show.src = echo(JSON.stringify({ format: "clack-manifest/1", title: "Coastlines", slides }), { path: "keys-after-click.json" });
+  await waitFor(() => !part(show, ".header").hidden, "the header");
+  await settledOn(show, "1 of 3");
   await click(part(show, ".title"));
   await press(Key.ArrowRight);
-  await settledOn(show, "2 of 2");
-  assertEqual(getComputedStyle(part(show, ".below")).outlineStyle, "none", "no ring around what the keyboard never brings focus to");
+  await settledOn(show, "2 of 3");
+  assertEqual(getComputedStyle(box(show)).outlineStyle, "none", "no ring around the show, which the keyboard never brings focus to");
+  await click(part(show, ".header-title"));
+  await press(Key.ArrowRight);
+  await settledOn(show, "3 of 3");
+  await chord(Key.Shift, Key.ArrowLeft);
+  await sleep(300);
+  assertEqual(show.index, 2, "Shift with an arrow moves nothing: it is how a selection grows");
 });
 
 test("the visitor's mouse drags a photo along, and let go far enough, brings the next", async () => {
@@ -1728,20 +1739,7 @@ test("the visitor's mouse drags a photo along, and let go far enough, brings the
   await settledOn(show, "1 of 2");
   const stage = part(show, ".stage");
   const r = stage.getBoundingClientRect();
-  const from = pointOn(stage, { x: r.width * 0.8, y: r.height / 2 });
-  await input([
-    {
-      type: "pointer",
-      id: "mouse",
-      parameters: { pointerType: "mouse" },
-      actions: [
-        { type: "pointerMove", ...from },
-        { type: "pointerDown", button: 0 },
-        { type: "pointerMove", x: from.x - 320, y: from.y, duration: 200 },
-        { type: "pointerUp", button: 0 },
-      ],
-    },
-  ]);
+  await drag(stage, { x: r.width * 0.8, y: r.height / 2 }, -320, 200);
   assertEqual(show.index, 1, "let go, the next");
   await settledOn(show, "2 of 2");
 });

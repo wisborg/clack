@@ -213,7 +213,7 @@ const answer = arguments[0];
 const done = arguments[arguments.length - 1];
 const next = window.clackNext;
 if (!next) {
-  done({report: {error: "the test bundle did not start: window.clackNext is missing"}});
+  done({gone: true});
   return;
 }
 next(answer).then(done, (e) => done({report: {error: String((e && e.stack) || e)}}));
@@ -231,7 +231,16 @@ type message struct {
 	Focus bool `json:"focus"`
 	// Report ends the run.
 	Report *Report `json:"report"`
+	// Gone says the page has no test run to follow: the bundle did not
+	// start, or -- after the first round -- the page went away.
+	Gone bool `json:"gone"`
 }
+
+// inputTimeout bounds each thing done for the page between rounds, as
+// scriptTimeout bounds the rounds: a driver that never answers ends the run
+// with an error rather than holding it open with no report. Each is quick
+// -- a pointer moved, a key pressed -- so this is far past what any takes.
+const inputTimeout = 30 * time.Second
 
 // driven is what drive needs of a WebDriver session.
 type driven interface {
@@ -248,24 +257,40 @@ type driven interface {
 // answer.
 func drive(ctx context.Context, p driven) (Report, error) {
 	var answer any // null: nothing asked yet
-	for {
+	for round := 0; ; round++ {
 		var m message
-		if err := p.ExecuteAsync(ctx, nextScript, []any{answer}, &m); err != nil {
+		// The driver times the script out (scriptTimeout); this is for a
+		// driver that does not.
+		roundCtx, cancel := context.WithTimeout(ctx, scriptTimeout+inputTimeout)
+		err := p.ExecuteAsync(roundCtx, nextScript, []any{answer}, &m)
+		cancel()
+		if err != nil {
 			return Report{}, err
 		}
-		var err error
+		if m.Gone && round == 0 {
+			return Report{Error: "the test bundle did not start: window.clackNext is missing"}, nil
+		}
+		if m.Gone {
+			// What the page had found went with it: say so, rather than
+			// report a run of nothing.
+			return Report{}, errors.New("the test page went away during the run (it navigated, or was reloaded)")
+		}
+		doCtx, cancel := context.WithTimeout(ctx, inputTimeout)
 		switch {
 		case m.Report != nil:
+			cancel()
 			return *m.Report, nil
 		case m.Release:
-			err = p.ReleaseActions(ctx)
+			err = p.ReleaseActions(doCtx)
 		case m.Focus:
-			err = p.FocusWindow(ctx)
+			err = p.FocusWindow(doCtx)
 		case m.Input != nil:
-			err = p.PerformActions(ctx, m.Input)
+			err = p.PerformActions(doCtx, m.Input)
 		default:
+			cancel()
 			return Report{}, errors.New("the page asked the driver for nothing it knows")
 		}
+		cancel()
 		answer = ""
 		if err != nil {
 			// The page's to report, in the test that asked; a driver that
@@ -276,7 +301,7 @@ func drive(ctx context.Context, p driven) (Report, error) {
 }
 
 // scriptTimeout bounds each round of the test run in one browser (drive),
-// and so the whole run, which may be one round. The harness keeps
+// as inputTimeout bounds what is done between rounds. The harness keeps
 // well inside it (see runBudgetMs in test/harness.ts), so that a slow run
 // still comes back as a report rather than as a WebDriver timeout.
 const scriptTimeout = 10 * time.Minute

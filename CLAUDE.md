@@ -31,9 +31,11 @@ delegates; do not add a target that does the work itself.
   served with a **strict Content-Security-Policy** (`tools/internal/browsertest`). A
   violation a test does not claim with `expectViolation` fails the run. Never weaken the
   policy to make a test pass: the policy is what is being tested.
-- A test of what the visitor's own input does — `:hover`, Tab, how a click or a key leaves
-  focus, a mouse drag — gives it through the WebDriver session (`test/input.ts`), not with
-  events made in script, which the browser does not act on as on a visitor's.
+- A test of what the browser itself does with the visitor's input — `:hover`, Tab moving
+  focus, how a click or a key leaves it (`:focus-visible`), whether a drag reaches the show
+  at all — gives it through the WebDriver session (`test/input.ts`): the browser does none
+  of that for events made in script. Those still serve for what Clack does with the events
+  it is given.
 - A test that cannot run in an engine calls `skip(reason)`; it is reported, not hidden.
 - Session output goes in the gitignored `.scratch/`.
 

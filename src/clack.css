@@ -119,8 +119,11 @@
   -webkit-user-select: none;
 }
 
+/* No ring of the show's own: only a click brings focus to it, and a key
+   after that would otherwise draw one around everything in Chrome. The
+   stage draws its own, over the photo (below). */
 .stage:focus,
-.below:focus {
+.show:focus {
   outline: none;
 }
 

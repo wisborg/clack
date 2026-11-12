@@ -2,23 +2,16 @@
 // tests run under (input in ./harness): what the browser acts on as on a
 // visitor's -- :hover, Tab moving focus, :focus-visible as a click or a key
 // leaves it -- which no event a script makes can have it do.
-import { assert, fixture, focusWindow, input, skip, type Action, type InputSource } from "./harness";
+import { assert, fixture, focusWindow, input, mouse, skip, type Action } from "./harness";
 
-/** WebDriver's code points for the keys the tests press. */
+/** WebDriver's code points for the keys the tests press (its spec's "keyboard actions" table). */
 export const Key = {
-  Tab: "",
-  Enter: "",
-  Shift: "",
-  Alt: "",
-  Escape: "",
-  Space: "",
-  ArrowLeft: "",
-  ArrowRight: "",
+  Tab: "\uE004",
+  Shift: "\uE008",
+  Alt: "\uE00A",
+  ArrowLeft: "\uE012",
+  ArrowRight: "\uE014",
 } as const;
-
-function mouse(actions: Action[]): InputSource {
-  return { type: "pointer", id: "mouse", parameters: { pointerType: "mouse" }, actions };
-}
 
 /**
  * Where in the viewport the mouse goes to be over e: its centre, or a
@@ -40,6 +33,22 @@ export function pointOn(e: Element, at?: { x: number; y: number }): { x: number;
 /** Moves the mouse over e (pointOn), as the visitor's. */
 export function moveTo(e: Element, at?: { x: number; y: number }): Promise<void> {
   return input([mouse([{ type: "pointerMove", ...pointOn(e, at) }])]);
+}
+
+/**
+ * Presses the mouse at the point that far into e, moves it by dx in ms,
+ * and lets it go, as the visitor's drag.
+ */
+export function drag(e: Element, at: { x: number; y: number }, dx: number, ms: number): Promise<void> {
+  const from = pointOn(e, at);
+  return input([
+    mouse([
+      { type: "pointerMove", ...from },
+      { type: "pointerDown", button: 0 },
+      { type: "pointerMove", x: from.x + dx, y: from.y, duration: ms },
+      { type: "pointerUp", button: 0 },
+    ]),
+  ]);
 }
 
 /** Moves the mouse over e and clicks it, as the visitor's. */
@@ -89,6 +98,9 @@ export async function tabber(): Promise<(backwards?: boolean) => Promise<void>> 
     at.append(from, to);
     try {
       for (const keys of [[Key.Tab], [Key.Alt, Key.Tab]]) {
+        // A Tab that went past the page, to the browser's own toolbar,
+        // took the window's focus with it.
+        await focusWindow();
         from.focus();
         await chord(...keys);
         if (document.activeElement === to) {
@@ -99,7 +111,7 @@ export async function tabber(): Promise<(backwards?: boolean) => Promise<void>> 
     } finally {
       at.remove();
     }
-    assert(tabKeys, "neither Tab nor Option-Tab takes focus from a field to a button");
+    if (!tabKeys) skip("neither Tab nor Option-Tab takes focus from a field to a button here: the system's keyboard navigation is off");
   }
   const keys = tabKeys;
   return (backwards = false) => chord(...(backwards ? [Key.Shift, ...keys] : keys));

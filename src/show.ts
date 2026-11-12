@@ -643,6 +643,12 @@ export class ClackShow extends HTMLElement {
     const root = this.attachShadow({ mode: "open" });
     const show = el("div", "show", "show");
     this.#box = show;
+    // Focusable by a click too (not by Tab), so the keys work after a
+    // click anywhere in it: the caption, the header, the theme's mat --
+    // or a control in Safari, or in Firefox on a Mac, whose clicks focus
+    // no button, and so give focus to the nearest thing holding it that
+    // takes it. The stage, within it, takes its own (below).
+    show.tabIndex = -1;
     this.#look(builtinCompiled("base"));
     // Focusable by a click (not by Tab), so the keys work after clicking
     // the photo; the controls are what Tab reaches.
@@ -670,10 +676,6 @@ export class ClackShow extends HTMLElement {
     this.#counter.ariaHidden = "true";
     controls.append(this.#previous, this.#counter, this.#next);
     below.append(caption, controls);
-    // Focusable by a click too, as the stage is, so the keys work after a
-    // click on the caption -- or on a control in Safari, whose clicks focus
-    // no button, and so give focus to what holds it.
-    below.tabIndex = -1;
 
     this.#live = el("div", "live");
     this.#live.ariaLive = "polite";
@@ -1915,7 +1917,9 @@ export class ClackShow extends HTMLElement {
   }
 
   #onKey(e: KeyboardEvent): void {
-    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) {
+    // With Shift, the keys extend a selection -- of a caption, once a
+    // click has put focus in the show -- and are the page's.
+    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) {
       return;
     }
     const forward = this.#rtl() ? -1 : 1;

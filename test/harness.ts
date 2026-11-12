@@ -158,6 +158,8 @@ const outbox: ToDriver[] = [];
 let collect: ((m: ToDriver) => void) | null = null;
 /** The test, waiting for the driver to say it did what was asked. */
 let answered: ((error: string) => void) | null = null;
+/** What was last asked, until the driver has answered it, failed or not. */
+let inFlight: Promise<void> = Promise.resolve();
 /** Whether the running test gave input: let go of after it. */
 let gaveInput = false;
 
@@ -173,10 +175,17 @@ function send(m: ToDriver): void {
 
 function ask(m: ToDriver): Promise<void> {
   if (answered) return Promise.reject(new Error("input asked for while the driver is still giving the last"));
-  return new Promise((resolve, reject) => {
+  const asked = new Promise<void>((resolve, reject) => {
     answered = (error) => (error ? reject(new Error(`the driver could not give the input: ${error}`)) : resolve());
     send(m);
   });
+  inFlight = asked.catch(() => undefined);
+  return asked;
+}
+
+/** The pointer the tests move: one source, with the same id and parameters every time, as the driver requires. */
+export function mouse(actions: Action[]): InputSource {
+  return { type: "pointer", id: "mouse", parameters: { pointerType: "mouse" }, actions };
 }
 
 /**
@@ -199,7 +208,11 @@ export function input(sources: InputSource[]): Promise<void> {
  */
 export async function focusWindow(): Promise<boolean> {
   if (document.hasFocus()) return true;
-  await ask({ focus: true });
+  try {
+    await ask({ focus: true });
+  } catch {
+    return false; // a driver that cannot: as a window that will not
+  }
   const deadline = performance.now() + 1000;
   while (!document.hasFocus() && performance.now() < deadline) await sleep(20);
   return document.hasFocus();
@@ -268,12 +281,14 @@ async function run(): Promise<Report> {
     const r = await runOne(t);
     results.push(r);
     // What the test left pressed is let go of while its DOM is there to
-    // hear it, and the pointer put where no later test's will be.
+    // hear it, where the test left it -- once input the test did not wait
+    // for is done -- and then the pointer put where no later test's will be.
     if (gaveInput && !r.timedOut) {
       gaveInput = false;
       try {
-        await rest();
+        await inFlight;
         await ask({ release: true });
+        await rest();
       } catch (e) {
         if (r.passed) Object.assign(r, { passed: false, error: wellFormed(`after the test: ${describe(e)}`) });
       }
@@ -315,7 +330,7 @@ async function rest(): Promise<void> {
     document.body.append(spot);
   }
   const r = spot.getBoundingClientRect();
-  await ask({ input: [{ type: "pointer", id: "mouse", parameters: { pointerType: "mouse" }, actions: [{ type: "pointerMove", x: Math.floor(r.left + 2), y: Math.floor(r.top + 2) }] }] });
+  await ask({ input: [mouse([{ type: "pointerMove", x: Math.floor(r.left + 2), y: Math.floor(r.top + 2) }])] });
 }
 
 async function runOne(t: Test): Promise<Result & { timedOut: boolean }> {
