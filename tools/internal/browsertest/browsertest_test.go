@@ -190,7 +190,7 @@ type fakePage struct {
 	answers  []any
 	runs     []any
 	did      []string
-	fail     error  // what performing or releasing input returns
+	fail     error  // what giving input -- performing, releasing, focusing -- returns
 	block    bool   // whether giving input waits for its context to end
 	then     func() // called once input is given
 }
@@ -305,7 +305,7 @@ func TestDriveSaysWhenTheRunsDeadlinePassed(t *testing.T) {
 	defer func(was time.Duration) { runTimeout = was }(runTimeout)
 	runTimeout = 20 * time.Millisecond
 	f := &fakePage{messages: []string{`{"focus": true}`}, block: true}
-	if _, err := drive(context.Background(), f); err == nil || !strings.Contains(err.Error(), "the run did not end") || !errors.Is(err, context.DeadlineExceeded) {
+	if _, err := drive(context.Background(), f); err == nil || err.Error() != "the run did not end within 20ms: context deadline exceeded" || !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("error %v, want the run's deadline named", err)
 	}
 }
@@ -335,6 +335,15 @@ func TestDriveLeavesTheCallersEndAsItIs(t *testing.T) {
 	f = &fakePage{messages: []string{`{"focus": true}`, `{"report": {}}`}, then: cancel}
 	if _, err := drive(ctx, f); !errors.Is(err, context.Canceled) {
 		t.Errorf("error %v, want the cancelling", err)
+	}
+}
+
+func TestDriveGivesADriversFailingAsItIs(t *testing.T) {
+	// A round failing with the run going on (the browser gone, say): the
+	// driver's own words, and nothing made of a context that did not end.
+	_, err := drive(context.Background(), &fakePage{})
+	if err == nil || err.Error() != "asked for a round past the last" {
+		t.Errorf("error %v, want the driver's own", err)
 	}
 }
 

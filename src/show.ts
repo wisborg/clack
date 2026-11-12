@@ -1936,12 +1936,28 @@ export class ClackShow extends HTMLElement {
     return getComputedStyle(this).direction === "rtl";
   }
 
-  /** The keys the show takes (#onKey). */
-  static readonly #showKeys = new Set(["ArrowRight", "ArrowLeft", "Home", "End"]);
-
   #onKey(e: KeyboardEvent): void {
-    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || !ClackShow.#showKeys.has(e.key)) {
+    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) {
       return;
+    }
+    const rtl = this.#rtl();
+    const last = this.#slides.length - 1;
+    let act: () => void;
+    switch (e.key) {
+      case "ArrowRight":
+        act = () => this.#user(rtl ? -1 : 1);
+        break;
+      case "ArrowLeft":
+        act = () => this.#user(rtl ? 1 : -1);
+        break;
+      case "Home":
+        act = () => void (last >= 0 && this.#request(0, { user: true }));
+        break;
+      case "End":
+        act = () => void (last >= 0 && this.#request(last, { user: true }));
+        break;
+      default:
+        return; // not the show's
     }
     // With Shift, the keys extend a selection -- of a caption or a title
     // dragged over, which leaves focus on the show itself -- and are the
@@ -1950,54 +1966,47 @@ export class ClackShow extends HTMLElement {
     if (e.shiftKey && e.composedPath()[0] === this.#box && this.#selected()) {
       return;
     }
-    const forward = this.#rtl() ? -1 : 1;
-    switch (e.key) {
-      case "ArrowRight":
-        this.#user(forward === 1 ? 1 : -1);
-        break;
-      case "ArrowLeft":
-        this.#user(forward === 1 ? -1 : 1);
-        break;
-      case "Home":
-        if (this.#slides.length) void this.#request(0, { user: true });
-        break;
-      case "End":
-        if (this.#slides.length) void this.#request(this.#slides.length - 1, { user: true });
-        break;
-    }
+    act();
     e.preventDefault();
   }
 
   /**
-   * Whether text in the show is selected: a range with an end in it, or
-   * one running over all of it from the page (Cmd-A). Asked of the
-   * selection's composed ranges, the one way it says where in a shadow
-   * tree it is. Chrome takes the shadow root only in an object; Safari,
+   * Whether text in the show is selected: a range of the selection's with
+   * an end in the show, or one with both ends in the page run over all of
+   * it (Cmd-A) -- over the host the show is in that is in the page itself,
+   * as the show may be inside another component's shadow tree. Asked of
+   * the selection's composed ranges, the one way a selection says where in
+   * a shadow tree it is (Chrome's containsNode says no shadow host is in
+   * any selection). Chrome takes the shadow root only in an object; Safari,
    * before it took that, took it only as an argument of its own, and
    * throws at the object. An engine without them -- none Clack is for --
-   * is taken to have nothing selected, and the keys stay the show's.
+   * is taken to have nothing of the show selected.
    */
   #selected(): boolean {
-    type Composed = Selection & { getComposedRanges(o: { shadowRoots: ShadowRoot[] } | ShadowRoot): StaticRange[] };
-    const selection = this.ownerDocument.getSelection() as Composed | null;
+    type Composed = Selection & { getComposedRanges?(o: { shadowRoots: ShadowRoot[] } | ShadowRoot): StaticRange[] };
+    const doc = this.ownerDocument;
+    const selection = doc.getSelection() as Composed | null;
+    if (selection?.type !== "Range") return false;
     const root = this.shadowRoot!;
-    if (!selection?.getComposedRanges) return false;
+    let outer: Element = this;
+    for (let at = outer.getRootNode(); at instanceof ShadowRoot; at = outer.getRootNode()) outer = at.host;
     const over = (r: StaticRange): boolean => {
       if (r.collapsed) return false;
       if (root.contains(r.startContainer) || root.contains(r.endContainer)) return true;
-      // Both ends in the page: a range of the page's own can say whether
-      // the show is between them.
-      const range = this.ownerDocument.createRange();
+      if (r.startContainer.getRootNode() !== doc || r.endContainer.getRootNode() !== doc) return false;
+      const range = doc.createRange();
       range.setStart(r.startContainer, r.startOffset);
       range.setEnd(r.endContainer, r.endOffset);
-      return range.intersectsNode(this);
+      return range.intersectsNode(outer);
     };
     for (const form of [{ shadowRoots: [root] }, root]) {
+      let ranges: StaticRange[];
       try {
-        return selection.getComposedRanges(form).some(over);
+        ranges = selection.getComposedRanges?.(form) ?? [];
       } catch {
-        // Not this form: the next.
+        continue; // not this form: the next
       }
+      return ranges.some(over);
     }
     return false;
   }

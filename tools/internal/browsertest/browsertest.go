@@ -318,21 +318,25 @@ var errUnknown = errors.New("the page asked the driver for nothing it knows")
 // errRunTimeout is why a run's context ends when runTimeout passes.
 var errRunTimeout = errors.New("the run's deadline passed")
 
-// overrun says what ended the run, when ctx -- the run's -- has ended, with
+// overrun says what ended the run, if ctx -- the run's -- has ended, with
 // err what was being done: nil if it was done just as the run ended, or the
 // driver's own failing as it went (Ctrl-C reaches the drivers too). The
 // run's own deadline is said to be that; the caller's ending (Ctrl-C, or a
 // deadline of its own) is said as it is. Either way the result is that
-// context error, whatever err was.
+// context error, whatever err was. With ctx not ended, err is as it was.
 func overrun(ctx context.Context, err error) error {
+	done := ctx.Err()
+	if done == nil {
+		return err
+	}
 	if err == nil {
-		err = ctx.Err()
+		err = done
+	}
+	if !errors.Is(err, done) {
+		err = fmt.Errorf("%w, as: %w", done, err)
 	}
 	if context.Cause(ctx) == errRunTimeout {
-		return fmt.Errorf("the run did not end within %v: %w", runTimeout, errors.Join(context.DeadlineExceeded, err))
-	}
-	if !errors.Is(err, ctx.Err()) {
-		return fmt.Errorf("%w, as: %w", ctx.Err(), err)
+		return fmt.Errorf("the run did not end within %v: %w", runTimeout, err)
 	}
 	return err
 }

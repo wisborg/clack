@@ -1777,44 +1777,78 @@ test("with Shift, the keys are the page's while text in the show is selected", a
   await settledOn(show, "1 of 2");
 });
 
-test("with Shift, the keys are the page's while all of the page is selected, the show with it", async () => {
-  if (!(await focusWindow())) skip("this engine's window does not take the focus, so a click focuses nothing");
-  const show = await titledShow(2, "shift-all-selected.json");
-  await show.goTo(1);
-  await settledOn(show, "2 of 2");
+/**
+ * Clicks show's counter, which focuses the show itself in every engine
+ * (it is no button, and no text), the controls brought up for it first.
+ */
+async function focusByCounter(show: ClackShow): Promise<void> {
   await moveTo(part(show, ".stage"));
   await waitFor(() => shown(part(show, ".controls")), "the controls shown");
   await click(part(show, ".counter"));
   assertEqual(show.shadowRoot!.activeElement, box(show), "the counter's click's focus, on the show");
-  // As Cmd-A selects: from before the show to after it.
-  document.getSelection()!.selectAllChildren(document.body);
-  await chord(Key.Shift, Key.ArrowLeft);
-  await sleep(300);
-  assertEqual(show.index, 1, "nothing moved: the selection, over all the show, grows");
-  // As a Safari that takes the shadow root only as an argument of its own,
-  // and throws at an object.
+}
+
+test("with Shift, the keys are the page's while all of the page is selected, the show with it", async () => {
+  if (!(await focusWindow())) skip("this engine's window does not take the focus, so a click focuses nothing");
   const proto = Selection.prototype as Selection & { getComposedRanges?: (...a: unknown[]) => StaticRange[] };
   const own = Object.getOwnPropertyDescriptor(proto, "getComposedRanges");
   if (!own) skip("this engine has no composed ranges");
-  const real = own.value as (...a: unknown[]) => StaticRange[];
-  Object.defineProperty(proto, "getComposedRanges", {
-    configurable: true,
-    value(this: Selection, root: unknown) {
-      if (!(root instanceof ShadowRoot)) throw new TypeError("Argument 1 must be an instance of ShadowRoot");
-      return real.call(this, { shadowRoots: [root] });
-    },
-  });
+  const show = await titledShow(2, "shift-all-selected.json");
+  await show.goTo(1);
+  await settledOn(show, "2 of 2");
+  await focusByCounter(show);
   try {
+    // As Cmd-A selects: from before the show to after it.
+    document.getSelection()!.selectAllChildren(document.body);
     await chord(Key.Shift, Key.ArrowLeft);
     await sleep(300);
-    assertEqual(show.index, 1, "nothing moved, asked as that Safari takes it");
+    assertEqual(show.index, 1, "nothing moved: the selection, over all the show, grows");
+    // Of the title alone, as a Safari that takes the shadow root only as
+    // an argument of its own, and throws at an object, is asked.
+    const title = part(show, ".title").firstChild!;
+    document.getSelection()!.setBaseAndExtent(title, 0, title, 5);
+    if (!document.getSelection()?.toString()) skip("this engine does not let a script select in a shadow tree");
+    const real = own.value as (...a: unknown[]) => StaticRange[];
+    Object.defineProperty(proto, "getComposedRanges", {
+      configurable: true,
+      value(this: Selection, root: unknown) {
+        if (!(root instanceof ShadowRoot)) throw new TypeError("Argument 1 must be an instance of ShadowRoot");
+        return real.call(this, { shadowRoots: [root] });
+      },
+    });
+    try {
+      await chord(Key.Shift, Key.ArrowLeft);
+      await sleep(300);
+      assertEqual(show.index, 1, "nothing moved, asked as that Safari takes it");
+    } finally {
+      Object.defineProperty(proto, "getComposedRanges", own);
+    }
+    // The selection gone, the keys are the show's again.
+    document.getSelection()!.removeAllRanges();
+    await chord(Key.Shift, Key.ArrowLeft);
+    await settledOn(show, "1 of 2");
   } finally {
-    Object.defineProperty(proto, "getComposedRanges", own);
+    document.getSelection()!.removeAllRanges();
   }
-  // The selection gone, the keys are the show's again.
-  document.getSelection()!.removeAllRanges();
-  await chord(Key.Shift, Key.ArrowLeft);
-  await settledOn(show, "1 of 2");
+});
+
+test("with Shift, the keys are the page's while all of the page is selected, the show in a component with it", async () => {
+  if (!(await focusWindow())) skip("this engine's window does not take the focus, so a click focuses nothing");
+  const show = await titledShow(2, "shift-all-selected-component.json");
+  const component = document.createElement("div");
+  show.before(component);
+  component.attachShadow({ mode: "open" }).append(show);
+  await show.goTo(1);
+  await settledOn(show, "2 of 2");
+  await focusByCounter(show);
+  try {
+    document.getSelection()!.selectAllChildren(document.body);
+    await chord(Key.Shift, Key.ArrowLeft);
+    await sleep(300);
+    assertEqual(show.index, 1, "nothing moved: the selection, over all the component and the show in it, grows");
+  } finally {
+    document.getSelection()!.removeAllRanges();
+  }
 });
 
 test("controls focused by a click or a tap, not the keyboard, still go -- though keys follow", async () => {
