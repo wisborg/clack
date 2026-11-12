@@ -213,17 +213,16 @@ func (f *fakePage) ExecuteAsync(ctx context.Context, script string, args []any, 
 }
 
 func (f *fakePage) PerformActions(ctx context.Context, actions json.RawMessage) error {
-	f.did = append(f.did, "perform "+string(actions))
-	return f.fail
+	return f.give(ctx, "perform "+string(actions))
 }
 
-func (f *fakePage) ReleaseActions(ctx context.Context) error {
-	f.did = append(f.did, "release")
-	return f.fail
-}
+func (f *fakePage) ReleaseActions(ctx context.Context) error { return f.give(ctx, "release") }
 
-func (f *fakePage) FocusWindow(ctx context.Context) error {
-	f.did = append(f.did, "focus")
+func (f *fakePage) FocusWindow(ctx context.Context) error { return f.give(ctx, "focus") }
+
+// give records what was done, calls then, and blocks or fails as f says.
+func (f *fakePage) give(ctx context.Context, what string) error {
+	f.did = append(f.did, what)
 	if f.then != nil {
 		f.then()
 	}
@@ -315,13 +314,25 @@ func TestDriveLeavesTheCallersEndAsItIs(t *testing.T) {
 	// A deadline of the caller's own: not called the run's.
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	if _, err := drive(ctx, &fakePage{messages: []string{`{"focus": true}`}, block: true}); err == nil || strings.Contains(err.Error(), "did not end") {
+	if _, err := drive(ctx, &fakePage{messages: []string{`{"focus": true}`}, block: true}); !errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "did not end") {
 		t.Errorf("error %v, want the caller's deadline as it is", err)
+	}
+	// Cancelled before the first round.
+	ctx, cancel = context.WithCancel(context.Background())
+	cancel()
+	if _, err := drive(ctx, &fakePage{messages: []string{`{"report": {}}`}}); !errors.Is(err, context.Canceled) {
+		t.Errorf("error %v, want the cancelling", err)
+	}
+	// Cancelled as the driver failed on its own: still the cancelling.
+	ctx, cancel = context.WithCancel(context.Background())
+	f := &fakePage{messages: []string{`{"release": true}`}, fail: errors.New("EOF"), then: cancel}
+	if _, err := drive(ctx, f); !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "EOF") {
+		t.Errorf("error %v, want the cancelling, and what the driver said", err)
 	}
 	// Cancelled (Ctrl-C) just as what the page asked was done: an error
 	// still, not a run of nothing.
 	ctx, cancel = context.WithCancel(context.Background())
-	f := &fakePage{messages: []string{`{"focus": true}`, `{"report": {}}`}, then: cancel}
+	f = &fakePage{messages: []string{`{"focus": true}`, `{"report": {}}`}, then: cancel}
 	if _, err := drive(ctx, f); !errors.Is(err, context.Canceled) {
 		t.Errorf("error %v, want the cancelling", err)
 	}

@@ -243,7 +243,7 @@ type message struct {
 }
 
 // inputTimeout bounds each thing done for the page between rounds, as
-// scriptTimeout bounds the rounds and runTimeout all of them: a driver that
+// runTimeout bounds the rounds and all of them: a driver that
 // never answers ends the run with an error rather than holding it open
 // with no report. Each is quick -- a pointer moved, a key pressed -- so
 // this is far past what any takes. A variable, for the tests to shorten.
@@ -269,14 +269,14 @@ type driven interface {
 // the page is one: so the run goes in rounds -- the page waits for what it
 // needs of the driver, the driver does it, and calls back in with the
 // answer.
-func drive(caller context.Context, p driven) (Report, error) {
-	ctx, cancel := context.WithTimeout(caller, runTimeout)
+func drive(ctx context.Context, p driven) (Report, error) {
+	ctx, cancel := context.WithTimeoutCause(ctx, runTimeout, errRunTimeout)
 	defer cancel()
 	var answer, run any // null: nothing asked yet, of no run yet
 	for round := 0; ; round++ {
 		var m message
 		if err := p.ExecuteAsync(ctx, nextScript, []any{answer, run}, &m); err != nil {
-			return Report{}, overrun(caller, ctx, err)
+			return Report{}, overrun(ctx, err)
 		}
 		if run == nil {
 			run = m.Run
@@ -297,7 +297,7 @@ func drive(caller context.Context, p driven) (Report, error) {
 			return Report{}, err
 		}
 		if ctx.Err() != nil {
-			return Report{}, overrun(caller, ctx, err)
+			return Report{}, overrun(ctx, err)
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
 			// Cut off, the driver may still be doing it: what it does
@@ -315,16 +315,24 @@ func drive(caller context.Context, p driven) (Report, error) {
 
 var errUnknown = errors.New("the page asked the driver for nothing it knows")
 
-// overrun says what ended the run, when ctx -- the run's, made from the
-// caller's -- has ended, with err what was being done (nil if it was done
-// just as the run ended). The run's own deadline is said to be that; the
-// caller's ending (Ctrl-C, or a deadline of its own) is left as it is.
-func overrun(caller, ctx context.Context, err error) error {
+// errRunTimeout is why a run's context ends when runTimeout passes.
+var errRunTimeout = errors.New("the run's deadline passed")
+
+// overrun says what ended the run, when ctx -- the run's -- has ended, with
+// err what was being done: nil if it was done just as the run ended, or the
+// driver's own failing as it went (Ctrl-C reaches the drivers too). The
+// run's own deadline is said to be that; the caller's ending (Ctrl-C, or a
+// deadline of its own) is said as it is. Either way the result is that
+// context error, whatever err was.
+func overrun(ctx context.Context, err error) error {
 	if err == nil {
 		err = ctx.Err()
 	}
-	if caller.Err() == nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return fmt.Errorf("the run did not end within %v: %w", runTimeout, err)
+	if context.Cause(ctx) == errRunTimeout {
+		return fmt.Errorf("the run did not end within %v: %w", runTimeout, errors.Join(context.DeadlineExceeded, err))
+	}
+	if !errors.Is(err, ctx.Err()) {
+		return fmt.Errorf("%w, as: %w", ctx.Err(), err)
 	}
 	return err
 }
@@ -344,11 +352,6 @@ func do(ctx context.Context, p driven, m message) error {
 	return errUnknown
 }
 
-// scriptTimeout bounds each round of the test run in one browser (drive),
-// as inputTimeout bounds what is done between rounds; it is runTimeout, as
-// a run with no input is one round.
-var scriptTimeout = runTimeout
-
 // Run opens url in b, driven by the driver at driverPath (or found on PATH
 // when it is empty), and returns the test page's report. Notes on what it
 // did besides are written to log.
@@ -367,7 +370,9 @@ func Run(ctx context.Context, b webdriver.Browser, driverPath, url string, headl
 	defer d.Stop()
 	defer CloseSession(ctx, s)
 
-	if err := s.SetScriptTimeout(ctx, scriptTimeout); err != nil {
+	// Each round of the run is bounded by the run's own timeout, as a run
+	// with no input is one round (drive).
+	if err := s.SetScriptTimeout(ctx, runTimeout); err != nil {
 		return Report{}, err
 	}
 	if err := s.Navigate(ctx, url); err != nil {

@@ -1936,12 +1936,18 @@ export class ClackShow extends HTMLElement {
     return getComputedStyle(this).direction === "rtl";
   }
 
+  /** The keys the show takes (#onKey). */
+  static readonly #showKeys = new Set(["ArrowRight", "ArrowLeft", "Home", "End"]);
+
   #onKey(e: KeyboardEvent): void {
+    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || !ClackShow.#showKeys.has(e.key)) {
+      return;
+    }
     // With Shift, the keys extend a selection -- of a caption or a title
     // dragged over, which leaves focus on the show itself -- and are the
     // page's while there is one in the show. A click on a control in
     // Safari leaves focus there too, with nothing of the show selected.
-    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || (e.shiftKey && e.composedPath()[0] === this.#box && this.#selected())) {
+    if (e.shiftKey && e.composedPath()[0] === this.#box && this.#selected()) {
       return;
     }
     const forward = this.#rtl() ? -1 : 1;
@@ -1958,14 +1964,13 @@ export class ClackShow extends HTMLElement {
       case "End":
         if (this.#slides.length) void this.#request(this.#slides.length - 1, { user: true });
         break;
-      default:
-        return;
     }
     e.preventDefault();
   }
 
   /**
-   * Whether text in the show is selected, at either end: asked of the
+   * Whether text in the show is selected: a range with an end in it, or
+   * one running over all of it from the page (Cmd-A). Asked of the
    * selection's composed ranges, the one way it says where in a shadow
    * tree it is. Chrome takes the shadow root only in an object; Safari,
    * before it took that, took it only as an argument of its own, and
@@ -1974,20 +1979,27 @@ export class ClackShow extends HTMLElement {
    */
   #selected(): boolean {
     type Composed = Selection & { getComposedRanges(o: { shadowRoots: ShadowRoot[] } | ShadowRoot): StaticRange[] };
-    const selection = document.getSelection() as Composed | null;
+    const selection = this.ownerDocument.getSelection() as Composed | null;
     const root = this.shadowRoot!;
     if (!selection?.getComposedRanges) return false;
-    let ranges: StaticRange[];
-    try {
-      ranges = selection.getComposedRanges({ shadowRoots: [root] });
-    } catch {
+    const over = (r: StaticRange): boolean => {
+      if (r.collapsed) return false;
+      if (root.contains(r.startContainer) || root.contains(r.endContainer)) return true;
+      // Both ends in the page: a range of the page's own can say whether
+      // the show is between them.
+      const range = this.ownerDocument.createRange();
+      range.setStart(r.startContainer, r.startOffset);
+      range.setEnd(r.endContainer, r.endOffset);
+      return range.intersectsNode(this);
+    };
+    for (const form of [{ shadowRoots: [root] }, root]) {
       try {
-        ranges = selection.getComposedRanges(root);
+        return selection.getComposedRanges(form).some(over);
       } catch {
-        return false;
+        // Not this form: the next.
       }
     }
-    return ranges.some((r) => !r.collapsed && (root.contains(r.startContainer) || root.contains(r.endContainer)));
+    return false;
   }
 
   #drag(dx: number): void {
