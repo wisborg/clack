@@ -1757,6 +1757,18 @@ test("with Shift, the keys are the page's where focus is on the show itself, and
   await sleep(300);
   assertEqual(show.index, 3, "nothing moved: the selection's to grow");
   document.getSelection()?.removeAllRanges();
+  // The header and the counter, which are no buttons: the same.
+  for (const what of [".header-title", ".counter"]) {
+    if (what === ".counter") {
+      await moveTo(part(show, ".stage"));
+      await waitFor(() => shown(part(show, ".controls")), "the controls shown");
+    }
+    await click(part(show, what));
+    assertEqual(show.shadowRoot!.activeElement, box(show), `the click's focus on ${what}, on the show`);
+    await shiftLeft();
+    await sleep(300);
+    assertEqual(show.index, 3, `nothing moved after a click on ${what}`);
+  }
   // On the photo: the show's.
   await click(part(show, ".stage"));
   assertEqual(show.shadowRoot!.activeElement, part(show, ".stage"), "the click's focus, on the photo");
@@ -1772,6 +1784,7 @@ test("with Shift, the keys are the page's where focus is on the show itself, and
   await shiftLeft();
   if (onButton) await settledOn(show, "1 of 4");
   else {
+    assertEqual(show.shadowRoot!.activeElement, box(show), "the click on a button that takes no focus: the show's");
     await sleep(300);
     assertEqual(show.index, 1, "nothing moved, with focus on the show itself");
   }

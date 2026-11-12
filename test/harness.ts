@@ -337,7 +337,10 @@ async function run(): Promise<Report> {
         const failed: unknown[] = [];
         if (ups.length) await ask({ input: ups }).catch((e: unknown) => failed.push(e));
         await ask({ release: true }).catch((e: unknown) => failed.push(e));
-        if (moved) await rest().catch((e: unknown) => failed.push(e));
+        // Not moved if the ups were refused: in Safari, whose release lets
+        // go of nothing, a button may still be down, and moving it would
+        // drag across the page. A pointer left hovering is the lesser harm.
+        if (moved && !failed.length) await rest().catch((e: unknown) => failed.push(e));
         // The first is the cause; the rest may follow from it.
         if (failed.length) throw failed[0];
       } catch (e) {

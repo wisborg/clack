@@ -120,29 +120,35 @@ export async function tabber(): Promise<(backwards?: boolean) => Promise<void>> 
   return (backwards = false) => chord(...(backwards ? [Key.Shift, ...keys] : keys));
 }
 
-/** Whether this engine's driver gives Shift with an arrow as that arrow (shiftLeft). */
+/** Whether this engine's driver gives Shift with an arrow as that arrow; null until found out (shiftArrowsGiven). */
 let shiftArrowsArrive: boolean | null = null;
 
 /**
  * Presses Shift-ArrowLeft, as the visitor's keyboard -- or, where the
  * driver gives it as a key of no name (Safari's), as a keydown made in
  * script at whatever has focus: what the show does with the key it is
- * given is still tested; what the browser does with it is not. Finding out which moves focus the first time, so
- * a test calls shiftArrowsGiven at its start, before focus is anywhere it
- * watches.
+ * given is still tested; what the browser does with it is not. Which one
+ * is found out by shiftArrowsGiven, which a test calls at its start --
+ * it moves focus -- and which this holds it to.
  */
 export async function shiftLeft(): Promise<void> {
-  // Not found out here, in the middle of a test, which would take focus
-  // away: not found out yet (or heard nothing) is the driver's own key.
-  if (shiftArrowsArrive !== false) return chord(Key.Shift, Key.ArrowLeft);
+  assert(shiftArrowsArrive !== null, "shiftArrowsGiven was not asked first, at the test's start");
+  if (shiftArrowsArrive) return chord(Key.Shift, Key.ArrowLeft);
   let at: Element | null = document.activeElement;
   while (at?.shadowRoot?.activeElement) at = at.shadowRoot.activeElement;
   (at ?? document.body).dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", shiftKey: true, bubbles: true, composed: true, cancelable: true }));
 }
 
-/** Finds out, once, whether the driver gives Shift with an arrow as that arrow (shiftLeft). */
+/**
+ * Finds out, once, whether the driver gives Shift with an arrow as that
+ * arrow (shiftLeft), by pressing it on a button of its own: so it moves
+ * focus, and is called at a test's start. A press nothing heard is tried
+ * once more, then skips the test: an answer guessed would test nothing.
+ */
 export async function shiftArrowsGiven(): Promise<boolean> {
-  if (shiftArrowsArrive === null) {
+  for (let tries = 0; shiftArrowsArrive === null; tries++) {
+    if (tries === 2) skip("Shift with an arrow, given by the driver, reached nothing");
+    await focusWindow();
     const at = fixture();
     const on = document.createElement("button");
     on.textContent = "keys";
@@ -157,10 +163,7 @@ export async function shiftArrowsGiven(): Promise<boolean> {
     } finally {
       at.remove();
     }
-    // Nothing heard is no answer: asked again by the next test.
-    if (key === null) return true;
-    shiftArrowsArrive = key === "ArrowLeft";
+    if (key !== null) shiftArrowsArrive = key === "ArrowLeft";
   }
   return shiftArrowsArrive;
 }
-

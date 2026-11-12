@@ -229,11 +229,11 @@ func (f *fakePage) give(ctx context.Context, what string) error {
 	}
 	if f.block {
 		<-ctx.Done()
-		if f.fail != nil {
-			return f.fail // a driver failing just as the context ended
-		}
-		if f.causeErr {
+		switch {
+		case f.causeErr: // as an HTTP call cut off fails
 			return fmt.Errorf("Post: %w", context.Cause(ctx))
+		case f.fail != nil: // a driver failing just as the context ended
+			return f.fail
 		}
 		return ctx.Err()
 	}

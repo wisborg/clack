@@ -150,10 +150,12 @@ The element is 3:2 unless the page gives it a height.
 - **Keys** (with focus in the show): ← and → move the way the text runs (so the other way
   round in a right-to-left page), Home and End go to the first and last. A click anywhere
   in the show gives it focus for them — even on a control in Safari, or Firefox on a Mac,
-  whose clicks focus no button. Where a click leaves focus on the show itself — on the
-  caption, the title, the header or the counter, or, in Safari and Firefox on a Mac, a
-  control — Shift with a key is left to the page, to extend a selection, whether or not
-  anything is selected; on the photo it moves the show.
+  whose clicks focus no button. Where a click leaves focus on the show itself — anywhere
+  but the photo's area and a button it focuses: the caption, the title, the header, the
+  counter, the canvas around the photo, or, in Safari and Firefox on a Mac, a control —
+  Shift with a key is left to the page, to extend a selection, whether or not anything is
+  selected. On the photo's area (the mat around it too), or a focused button, it moves the
+  show.
 - **Swipe and drag**, with touch, pen or mouse: a long drag or a quick flick moves on; a
   short one springs back; up-and-down is left to the page, to scroll. At the ends the photo
   resists.

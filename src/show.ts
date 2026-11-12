@@ -650,7 +650,7 @@ export class ClackShow extends HTMLElement {
     const show = el("div", "show", "show");
     this.#box = show;
     // Focusable by a click too (not by Tab), so the keys work after a
-    // click anywhere in it: the caption, the header, the theme's mat --
+    // click anywhere in it: the caption, the header, the canvas around --
     // or a control in Safari, or in Firefox on a Mac, whose clicks focus
     // no button, and so give focus to the nearest thing holding it that
     // takes it. The stage, within it, takes its own (below). Inside the
