@@ -395,6 +395,19 @@ side with the version before.
   Schema they use, with the contrast of every built-in theme checked in each scheme)*
 
 **1 — First release**
+
+*Where it stands, 2026-11-12:* the core, manifests, theme loading and what the five themes
+draw around the photo are done, and the tests drive the visitor's own pointer and keys in
+all three engines. Not started: the full-size view, auto-play, metadata display, the
+index, title slides. Decided with the user: Shoebox's first version comes next, before the
+rest of this phase, so that the show is seen with real albums before the index and the
+full-size view are designed in detail. Nothing Shoebox's first version needs is missing:
+its index works without script by its own plan, and its photo page needs no full-size
+view. Still open: the size budget. The bundle is 28.2 KB of 32 KB compressed with the
+largest parts still to come (the full-size view, the index), so either the size review
+below comes before them rather than last, or the budget is looked at again — to be decided
+before either of those is built.
+
 - Core: slides, manual navigation (controls, keys, swipe), responsive images,
   decode-before-show, preloading, ThumbHash placeholders, crossfade. *(done; what the
   element does is in `docs/component.md`, and `design/demo/` shows it with the design
@@ -410,20 +423,26 @@ side with the version before.
   way. Known limit: manifest URLs cannot use internationalised domain names, until the tools
   can check them as browsers do — the reasons, and what lifting it would take, are in
   `docs/manifest.md`, "Not supported, and why".)*
-- Sizing modes and the full-size view with zoom and pan.
-- Auto-play with pause control, visibility and reduced-motion handling.
+- Sizing modes and the full-size view with zoom and pan. *(`fit="contain"` and
+  `fit="cover"` done. Not started: a frame that follows each photo's aspect ratio — the
+  show is 3:2 unless the page gives it a height — and the full-size view.)*
+- Auto-play with pause control, visibility and reduced-motion handling. *(Not started.
+  Reduced motion is handled for the transition already: read from Clack's own stylesheet,
+  so tests can apply it in every engine.)*
 - Metadata display (hidden by default), theme loading and validation, the five themes.
   *(Theme loading and validation done: the `theme` attribute takes a built-in theme or a
   theme file, which is checked as the tools check it, against the same shared cases
   (`test/fixtures/themes.json`), and compiled into custom properties. The four layouts, the
   header, the caption card, floating controls and their reveal, and the slide transition are
   drawn, `design/demo/` showing each theme as the mock-ups do; what the show draws of a
-  theme so far is in `docs/themes.md`.)*
+  theme so far is in `docs/themes.md`. Metadata display not started.)*
 - The index, `<clack-index>`: justified and contact-sheet layouts, paired with a show,
   sections, paging, enhancing the host's layout in place.
 - Title slides: a slide type that introduces a part of a show (a day of a trip), for
   Shoebox's slideshows of an album with its sub-albums.
-- Accessibility pass, strict-CSP test page, documentation, a demo page.
+- Accessibility pass, strict-CSP test page, documentation, a demo page. *(The strict-CSP
+  test page done, with the visitor's own pointer and keys given through WebDriver; the
+  documentation grows with each part. The accessibility pass and the demo page to come.)*
 - A review of all of `src/` for size, now that it is all there: what each part costs, and
   what can be made smaller without making it worse.
 
