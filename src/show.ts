@@ -2001,18 +2001,23 @@ export class ClackShow extends HTMLElement {
     for (let n: Element = this; ; ) {
       const tree = n.getRootNode();
       holders.set(tree, n);
-      if (tree === doc || !("host" in tree)) break;
+      if (tree === doc || tree.nodeType !== Node.DOCUMENT_FRAGMENT_NODE || !("host" in tree)) break;
       roots.push(tree as ShadowRoot);
       n = (tree as ShadowRoot).host;
     }
     // Where a range's end is against what holds the show in its tree: -1
-    // before it, 0 in it, 1 after; null in no tree the show is in.
+    // before it, 0 in it, 1 after; null in no tree the show is in. Against
+    // its contents, so that a point at its edge, in its parent -- a range
+    // of the element beside it -- is beside it, not in it. Inside a host
+    // that holds the show is the host's own light content, which comes
+    // after its shadow tree: after the show.
     const against = (node: Node, offset: number): number | null => {
       const held = holders.get(node.getRootNode());
       if (!held) return null;
       const range = doc.createRange();
-      range.selectNode(held);
-      return range.comparePoint(node, offset);
+      range.selectNodeContents(held);
+      const at = range.comparePoint(node, offset);
+      return at === 0 && held !== this ? 1 : at;
     };
     const over = (r: StaticRange): boolean => {
       if (r.collapsed) return false;

@@ -164,11 +164,26 @@ let inFlight: Promise<void> = Promise.resolve();
 let gaveInput = false;
 let movedPointer = false;
 /**
- * What the running test's input left pressed: the mouse's buttons, and
- * keys. Let go of after the test by the input's own ups -- Safari's driver
- * lets go of nothing when asked to release.
+ * What the running test's input left pressed, by input source: a
+ * pointer's buttons, a keyboard's keys. Let go of after the test by the
+ * input's own ups, on the same sources -- Safari's driver lets go of
+ * nothing when asked to release.
  */
-const held = { buttons: new Set<number>(), keys: new Set<string>() };
+const held = new Map<string, { source: Omit<InputSource, "actions">; pressed: Set<number | string> }>();
+
+/** Notes what sources press and let go of: presses always, lets go only once the driver has done them. */
+function hold(sources: InputSource[], done: boolean): void {
+  for (const { actions, ...source } of sources) {
+    const at = held.get(source.id) ?? { source, pressed: new Set<number | string>() };
+    held.set(source.id, at);
+    for (const a of actions) {
+      if (a.type === "pointerDown") at.pressed.add(a.button);
+      else if (a.type === "keyDown") at.pressed.add(a.value);
+      else if (done && a.type === "pointerUp") at.pressed.delete(a.button);
+      else if (done && a.type === "keyUp") at.pressed.delete(a.value);
+    }
+  }
+}
 
 /** This page's run, named in every message (clackNext). */
 const runName = Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, "0")).join("");
@@ -207,15 +222,10 @@ export function mouse(actions: Action[]): InputSource {
 export function input(sources: InputSource[]): Promise<void> {
   gaveInput = true;
   movedPointer ||= sources.some((s) => s.type === "pointer");
-  for (const s of sources) {
-    for (const a of s.actions) {
-      if (a.type === "pointerDown") held.buttons.add(a.button);
-      else if (a.type === "pointerUp") held.buttons.delete(a.button);
-      else if (a.type === "keyDown") held.keys.add(a.value);
-      else if (a.type === "keyUp") held.keys.delete(a.value);
-    }
-  }
-  return ask({ input: sources });
+  // Pressed as soon as asked, in case the driver does some of it and
+  // fails; let go of only once it has done it all.
+  hold(sources, false);
+  return ask({ input: sources }).then(() => hold(sources, true));
 }
 
 /**
@@ -315,11 +325,13 @@ async function run(): Promise<Report> {
       gaveInput = movedPointer = false;
       try {
         await inFlight;
-        const ups: InputSource[] = [];
-        if (held.buttons.size) ups.push(mouse([...held.buttons].map((button): Action => ({ type: "pointerUp", button }))));
-        if (held.keys.size) ups.push({ type: "key", id: "keyboard", actions: [...held.keys].map((value): Action => ({ type: "keyUp", value })) });
-        held.buttons.clear();
-        held.keys.clear();
+        const ups: InputSource[] = [...held.values()]
+          .filter((h) => h.pressed.size)
+          .map(({ source, pressed }) => ({
+            ...source,
+            actions: [...pressed].map((p): Action => (typeof p === "number" ? { type: "pointerUp", button: p } : { type: "keyUp", value: p })),
+          }));
+        held.clear();
         if (ups.length) await ask({ input: ups });
         await ask({ release: true });
         if (moved) await rest();

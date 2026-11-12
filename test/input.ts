@@ -146,7 +146,7 @@ export async function shiftArrowsGiven(): Promise<boolean> {
     const on = document.createElement("button");
     on.textContent = "keys";
     at.append(on);
-    let key = "";
+    let key: string | null = null;
     on.addEventListener("keydown", (e) => {
       if (e.key !== "Shift") key = e.key;
     });
@@ -156,7 +156,43 @@ export async function shiftArrowsGiven(): Promise<boolean> {
     } finally {
       at.remove();
     }
+    // Nothing heard is no answer: asked again next time, not taken for
+    // a driver that gives no name.
+    if (key === null) return false;
     shiftArrowsArrive = key === "ArrowLeft";
   }
   return shiftArrowsArrive;
+}
+
+/**
+ * Runs fn with Selection.getComposedRanges taking shadow roots only as
+ * arguments of their own, and throwing at an object, as Safari's did
+ * before it took the object; returns how many roots it was last given.
+ * Skips where there are no composed ranges of Selection's own.
+ */
+export async function asOlderSafari(fn: () => Promise<void>): Promise<number> {
+  const proto = Selection.prototype as Selection & { getComposedRanges?: (...a: unknown[]) => StaticRange[] };
+  const own = Object.getOwnPropertyDescriptor(proto, "getComposedRanges");
+  if (!own) skip("this engine has no composed ranges of Selection's own");
+  const real = own.value as (...a: unknown[]) => StaticRange[];
+  let given = 0;
+  Object.defineProperty(proto, "getComposedRanges", {
+    configurable: true,
+    value(this: Selection, ...roots: unknown[]) {
+      if (!roots.length || !roots.every((r) => r instanceof ShadowRoot)) throw new TypeError("Argument 1 must be an instance of ShadowRoot");
+      given = roots.length;
+      // As this engine takes them, whichever form that is.
+      try {
+        return real.call(this, { shadowRoots: roots });
+      } catch {
+        return real.apply(this, roots);
+      }
+    },
+  });
+  try {
+    await fn();
+  } finally {
+    Object.defineProperty(proto, "getComposedRanges", own);
+  }
+  return given;
 }

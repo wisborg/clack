@@ -193,6 +193,7 @@ type fakePage struct {
 	fail     error  // what giving input -- performing, releasing, focusing -- returns
 	block    bool   // whether giving input waits for its context to end
 	then     func() // called once input is given
+	causeErr bool   // whether blocked input fails with the context's cause, as an HTTP call does
 }
 
 func (f *fakePage) ExecuteAsync(ctx context.Context, script string, args []any, result any) error {
@@ -228,6 +229,9 @@ func (f *fakePage) give(ctx context.Context, what string) error {
 	}
 	if f.block {
 		<-ctx.Done()
+		if f.causeErr {
+			return fmt.Errorf("Post: %w", context.Cause(ctx))
+		}
 		return ctx.Err()
 	}
 	return f.fail
@@ -307,6 +311,28 @@ func TestDriveSaysWhenTheRunsDeadlinePassed(t *testing.T) {
 	f := &fakePage{messages: []string{`{"focus": true}`}, block: true}
 	if _, err := drive(context.Background(), f); err == nil || err.Error() != "the run did not end within 20ms: context deadline exceeded" || !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("error %v, want the run's deadline named", err)
+	}
+}
+
+func TestDriveSaysNothingMoreOfACallTheDeadlineCut(t *testing.T) {
+	defer func(was time.Duration) { runTimeout = was }(runTimeout)
+	runTimeout = 20 * time.Millisecond
+	// As the HTTP client gives it: the call failed with the deadline's cause.
+	f := &fakePage{messages: []string{`{"focus": true}`}, block: true, causeErr: true}
+	_, err := drive(context.Background(), f)
+	if err == nil || err.Error() != "the run did not end within 20ms: context deadline exceeded" {
+		t.Errorf("error %v, want the run's deadline alone", err)
+	}
+}
+
+func TestDriveKeepsADriversOwnFailingAtTheDeadline(t *testing.T) {
+	defer func(was time.Duration) { runTimeout = was }(runTimeout)
+	runTimeout = 20 * time.Millisecond
+	// The browser gone just as the run's deadline passed: both said.
+	f := &fakePage{messages: []string{`{"focus": true}`}, fail: errors.New("session deleted"), then: func() { time.Sleep(40 * time.Millisecond) }}
+	_, err := drive(context.Background(), f)
+	if err == nil || !strings.Contains(err.Error(), "did not end") || !strings.Contains(err.Error(), "session deleted") {
+		t.Errorf("error %v, want the deadline and the driver's own failing", err)
 	}
 }
 

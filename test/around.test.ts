@@ -4,7 +4,7 @@
 import type { ClackShow, SlideInput } from "../src/clack";
 import { shadowReach, transitionFrames, transitionOf } from "../src/show";
 import { assert, assertEqual, fixture, focusWindow, skip, sleep, test } from "./harness";
-import { Key, click, drag, moveTo, press, shiftArrowsGiven, shiftLeft, tabber } from "./input";
+import { Key, asOlderSafari, click, drag, moveTo, press, shiftArrowsGiven, shiftLeft, tabber } from "./input";
 import { figures, imageLog, img, logged, makeShow, part, pointer, reduceMotion, resetImageLog, settledOn, showBox as box, slidingShow, themed, titled, waitFor } from "./util";
 
 /** Whether the visitor could see and point at the controls now. */
@@ -1793,9 +1793,7 @@ async function focusByCounter(show: ClackShow): Promise<void> {
 test("with Shift, the keys are the page's while all of the page is selected, the show with it", async () => {
   if (!(await focusWindow())) skip("this engine's window does not take the focus, so a click focuses nothing");
   await shiftArrowsGiven(); // before focus is anywhere watched
-  const proto = Selection.prototype as Selection & { getComposedRanges?: (...a: unknown[]) => StaticRange[] };
-  const own = Object.getOwnPropertyDescriptor(proto, "getComposedRanges");
-  if (!own) skip("this engine has no composed ranges");
+  if (!("getComposedRanges" in Selection.prototype)) skip("this engine has no composed ranges");
   const show = await titledShow(2, "shift-all-selected.json");
   await show.goTo(1);
   await settledOn(show, "2 of 2");
@@ -1811,21 +1809,11 @@ test("with Shift, the keys are the page's while all of the page is selected, the
     const title = part(show, ".title").firstChild!;
     document.getSelection()!.setBaseAndExtent(title, 0, title, 5);
     if (!document.getSelection()?.toString()) skip("this engine does not let a script select in a shadow tree");
-    const real = own.value as (...a: unknown[]) => StaticRange[];
-    Object.defineProperty(proto, "getComposedRanges", {
-      configurable: true,
-      value(this: Selection, root: unknown) {
-        if (!(root instanceof ShadowRoot)) throw new TypeError("Argument 1 must be an instance of ShadowRoot");
-        return real.call(this, { shadowRoots: [root] });
-      },
-    });
-    try {
+    await asOlderSafari(async () => {
       await shiftLeft();
       await sleep(300);
       assertEqual(show.index, 1, "nothing moved, asked as that Safari takes it");
-    } finally {
-      Object.defineProperty(proto, "getComposedRanges", own);
-    }
+    });
     // The selection gone, the keys are the show's again.
     document.getSelection()!.removeAllRanges();
     await shiftLeft();
@@ -1865,26 +1853,12 @@ test("with Shift, the keys are the page's while a selection runs over the show i
     assertEqual(show.index, 3, "nothing moved: the selection over the show, in the component, grows");
     // The same, asked as a Safari that takes the shadow roots only as
     // arguments of their own, and throws at an object.
-    const proto = Selection.prototype as Selection & { getComposedRanges: (...a: unknown[]) => StaticRange[] };
-    const own = Object.getOwnPropertyDescriptor(proto, "getComposedRanges")!;
-    const real = own.value as (...a: unknown[]) => StaticRange[];
-    let given = 0;
-    Object.defineProperty(proto, "getComposedRanges", {
-      configurable: true,
-      value(this: Selection, ...roots: unknown[]) {
-        if (!roots.every((r) => r instanceof ShadowRoot)) throw new TypeError("Argument 1 must be an instance of ShadowRoot");
-        given = roots.length;
-        return real.call(this, { shadowRoots: roots });
-      },
-    });
-    try {
+    const given = await asOlderSafari(async () => {
       await shiftLeft();
       await sleep(300);
       assertEqual(show.index, 3, "nothing moved, asked as that Safari takes it");
-      assertEqual(given, 2, "given the show's root and the component's");
-    } finally {
-      Object.defineProperty(proto, "getComposedRanges", own);
-    }
+    });
+    assertEqual(given, 2, "given the show's root and the component's");
     // In the component, beside the show, before it or after it: the keys
     // are the show's.
     selection.setBaseAndExtent(before.firstChild!, 0, before.firstChild!, 9);
@@ -1897,6 +1871,47 @@ test("with Shift, the keys are the page's while a selection runs over the show i
     selection.removeAllRanges();
     await shiftLeft();
     await settledOn(show, "1 of 4");
+  } finally {
+    selection.removeAllRanges();
+  }
+});
+
+test("with Shift, the keys are the show's while a selection is in a component beside it, or in the light of one holding it", async () => {
+  if (!(await focusWindow())) skip("this engine's window does not take the focus, so a click focuses nothing");
+  await shiftArrowsGiven(); // before focus is anywhere watched
+  if (!("getComposedRanges" in Selection.prototype)) skip("this engine has no composed ranges");
+  const show = await titledShow(3, "shift-beside.json");
+  // A component right beside the show, no space between, with words of
+  // its own in its shadow tree: moved out to its host, a range of it
+  // touches the show's edge.
+  const beside = document.createElement("div");
+  const words = document.createElement("p");
+  words.textContent = "The component's own words.";
+  beside.attachShadow({ mode: "open" }).append(words);
+  show.before(beside);
+  // The show held in a component, a heading slotted into it from its
+  // host's own light content.
+  const holding = document.createElement("div");
+  const heading = document.createElement("h2");
+  heading.textContent = "Our trip";
+  heading.slot = "heading";
+  holding.append(heading);
+  beside.after(holding);
+  const slot = document.createElement("slot");
+  slot.name = "heading";
+  holding.attachShadow({ mode: "open" }).append(slot, show);
+  await show.goTo(2);
+  await settledOn(show, "3 of 3");
+  await focusByCounter(show);
+  const selection = document.getSelection()!;
+  try {
+    selection.setBaseAndExtent(words.firstChild!, 0, words.firstChild!, 9);
+    if (!selection.toString().includes("compo")) skip("this engine does not let a script select in a shadow tree");
+    await shiftLeft();
+    await settledOn(show, "2 of 3");
+    selection.setBaseAndExtent(heading.firstChild!, 0, heading.firstChild!, 3);
+    await shiftLeft();
+    await settledOn(show, "1 of 3");
   } finally {
     selection.removeAllRanges();
   }

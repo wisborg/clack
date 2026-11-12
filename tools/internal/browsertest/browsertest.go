@@ -330,9 +330,14 @@ func overrun(ctx context.Context, err error) error {
 		return err
 	}
 	if context.Cause(ctx) == errRunTimeout {
-		// What was under way then -- a round, the page waiting -- says
-		// nothing more.
-		return fmt.Errorf("the run did not end within %v: %w", runTimeout, done)
+		// What the deadline cut off says nothing more; a failure of the
+		// driver's own that came back just then (a browser gone) does.
+		// (The HTTP client gives a call cut off by the deadline the
+		// deadline's cause, not DeadlineExceeded.)
+		if err == nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errRunTimeout) {
+			return fmt.Errorf("the run did not end within %v: %w", runTimeout, done)
+		}
+		return fmt.Errorf("the run did not end within %v: %w, as: %w", runTimeout, done, err)
 	}
 	if err == nil {
 		err = done

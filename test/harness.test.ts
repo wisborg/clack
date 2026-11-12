@@ -37,3 +37,26 @@ test("what a test left pressed is let go of where it left it, before the mouse i
   );
   assert(after.slice(up + 1).some((e) => e.startsWith("pointermove")), "then moved out of the way");
 });
+
+const afterRefused: string[] = [];
+let refusedAt: { x: number; y: number } | null = null;
+const listeningAgain = new AbortController();
+
+test("(a test whose letting go is refused, as the driver is still pressing)", async () => {
+  const spot = document.createElement("div");
+  spot.style.height = "40px";
+  fixture().append(spot);
+  document.addEventListener("pointerup", (e) => afterRefused.push(`pointerup ${Math.round(e.clientX)},${Math.round(e.clientY)}`), { signal: listeningAgain.signal });
+  const at = pointOn(spot);
+  await input([mouse([{ type: "pointerMove", ...at }])]);
+  refusedAt = at;
+  void input([mouse([{ type: "pointerDown", button: 0 }])]);
+  // Asked while the press is still under way: refused, so not done.
+  await input([mouse([{ type: "pointerUp", button: 0 }])]).catch(() => undefined);
+});
+
+test("a press whose letting go was refused is still let go of after the test", () => {
+  listeningAgain.abort();
+  assert(refusedAt, "the test before pressed the mouse");
+  assertEqual(afterRefused[0], `pointerup ${refusedAt.x},${refusedAt.y}`, "let go of, where the test had it");
+});
