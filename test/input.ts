@@ -119,3 +119,44 @@ export async function tabber(): Promise<(backwards?: boolean) => Promise<void>> 
   const keys = tabKeys;
   return (backwards = false) => chord(...(backwards ? [Key.Shift, ...keys] : keys));
 }
+
+/** Whether this engine's driver gives Shift with an arrow as that arrow (shiftLeft). */
+let shiftArrowsArrive: boolean | null = null;
+
+/**
+ * Presses Shift-ArrowLeft, as the visitor's keyboard -- or, where the
+ * driver gives it as a key of no name (Safari's), as a keydown made in
+ * script at whatever has focus: what the show does with the key it is
+ * given, and the selection there is, is still tested; what the browser
+ * does with it is not. Finding out which moves focus the first time, so
+ * a test calls shiftArrowsGiven at its start, before focus is anywhere it
+ * watches.
+ */
+export async function shiftLeft(): Promise<void> {
+  if (await shiftArrowsGiven()) return chord(Key.Shift, Key.ArrowLeft);
+  let at: Element | null = document.activeElement;
+  while (at?.shadowRoot?.activeElement) at = at.shadowRoot.activeElement;
+  (at ?? document.body).dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", shiftKey: true, bubbles: true, composed: true, cancelable: true }));
+}
+
+/** Finds out, once, whether the driver gives Shift with an arrow as that arrow (shiftLeft). */
+export async function shiftArrowsGiven(): Promise<boolean> {
+  if (shiftArrowsArrive === null) {
+    const at = fixture();
+    const on = document.createElement("button");
+    on.textContent = "keys";
+    at.append(on);
+    let key = "";
+    on.addEventListener("keydown", (e) => {
+      if (e.key !== "Shift") key = e.key;
+    });
+    try {
+      on.focus();
+      await chord(Key.Shift, Key.ArrowLeft);
+    } finally {
+      at.remove();
+    }
+    shiftArrowsArrive = key === "ArrowLeft";
+  }
+  return shiftArrowsArrive;
+}

@@ -1940,20 +1940,20 @@ export class ClackShow extends HTMLElement {
     if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) {
       return;
     }
-    // A step the way the text runs, or a slide to go to.
-    let step: -1 | 1 | 0 = 0;
-    let to = 0;
+    // A step the way the text runs, or the first or last slide.
+    let to: -1 | 1 | "first" | "last";
     switch (e.key) {
       case "ArrowRight":
-        step = 1;
+        to = 1;
         break;
       case "ArrowLeft":
-        step = -1;
+        to = -1;
         break;
       case "Home":
+        to = "first";
         break;
       case "End":
-        to = this.#slides.length - 1;
+        to = "last";
         break;
       default:
         return; // not the show's
@@ -1965,65 +1965,74 @@ export class ClackShow extends HTMLElement {
     if (e.shiftKey && e.composedPath()[0] === this.#box && this.#selected()) {
       return;
     }
-    if (step) this.#user(this.#rtl() ? (-step as -1 | 1) : step);
-    else if (this.#slides.length) void this.#request(to, { user: true });
+    if (typeof to === "number") this.#user(this.#rtl() ? (-to as -1 | 1) : to);
+    else if (this.#slides.length) void this.#request(to === "first" ? 0 : this.#slides.length - 1, { user: true });
     e.preventDefault();
   }
 
   /**
    * Whether text in the show is selected: a range of the selection's with
-   * an end in the show, or one with both ends in one tree the show is in
-   * -- the page, or another component's shadow tree holding it -- that
-   * runs over it there (Cmd-A, a drag past it). Asked of the selection's
-   * composed ranges, the one way a selection says where in a shadow tree
-   * it is: its type, and Chrome's containsNode, see nothing of one. Chrome
-   * takes the shadow root only in an object; Safari, before it took that,
-   * took it only as an argument of its own, and throws at the object. An
-   * engine without them -- none Clack is for -- is taken to have nothing
-   * of the show selected. Not seen: a range from one tree into another
-   * past the show, a drag from the page into the component holding it.
+   * an end in the show, or one that starts before the show and ends after
+   * it (Cmd-A, a drag past it), each end judged in its own tree -- the
+   * page, or a component's shadow tree the show is in -- against what holds
+   * the show there: the show itself, or the host of the tree it is in.
+   * Asked of the selection's composed ranges, the one way a selection says
+   * where in a shadow tree it is: its type, and Chrome's containsNode, see
+   * nothing of one. Chrome takes the shadow roots only in an object;
+   * Safari, before it took that, took them only as arguments of their own,
+   * and throws at the object. An engine without them -- none Clack is for
+   * -- is taken to have nothing of the show selected. Not seen: a show
+   * slotted into a component, whose own shadow tree's text is moved out to
+   * its host, and so taken as over the show.
    */
   #selected(): boolean {
-    type Composed = Selection & { getComposedRanges?(o: { shadowRoots: ShadowRoot[] } | ShadowRoot, ...more: ShadowRoot[]): StaticRange[] };
-    const selection = this.ownerDocument.getSelection() as Composed | null;
-    if (!selection) return false;
+    type Composed = Selection & { getComposedRanges?(...a: ({ shadowRoots: ShadowRoot[] } | ShadowRoot)[]): StaticRange[] };
+    const doc = this.ownerDocument;
+    const selection = doc.getSelection() as Composed | null;
+    if (!selection?.rangeCount) return false;
     const root = this.shadowRoot!;
-    /** The show, or the host of the shadow tree holding it, that is in the tree of at; null if none is. */
-    const holder = (at: Node): Node | null => {
-      const tree = at.getRootNode();
-      for (let n: Element = this; ; ) {
-        const own = n.getRootNode();
-        if (own === tree) return n;
-        if (!(own instanceof ShadowRoot)) return null;
-        n = own.host;
-      }
+    // What holds the show in each tree it is in, out to the page; and the
+    // shadow roots among them, which getComposedRanges is given too, so an
+    // engine that would move ends in them out to their hosts keeps them.
+    // (Tested by what they are, not instanceof, which a root from another
+    // window's realm is not.)
+    const holders = new Map<Node, Element>();
+    const roots: ShadowRoot[] = [root];
+    for (let n: Element = this; ; ) {
+      const tree = n.getRootNode();
+      holders.set(tree, n);
+      if (tree === doc || !("host" in tree)) break;
+      roots.push(tree as ShadowRoot);
+      n = (tree as ShadowRoot).host;
+    }
+    // Where a range's end is against what holds the show in its tree: -1
+    // before it, 0 in it, 1 after; null in no tree the show is in.
+    const against = (node: Node, offset: number): number | null => {
+      const held = holders.get(node.getRootNode());
+      if (!held) return null;
+      const range = doc.createRange();
+      range.selectNode(held);
+      return range.comparePoint(node, offset);
     };
     const over = (r: StaticRange): boolean => {
       if (r.collapsed) return false;
       if (root.contains(r.startContainer) || root.contains(r.endContainer)) return true;
-      const held = holder(r.startContainer);
-      if (!held || r.endContainer.getRootNode() !== r.startContainer.getRootNode()) return false;
-      const range = this.ownerDocument.createRange();
-      range.setStart(r.startContainer, r.startOffset);
-      range.setEnd(r.endContainer, r.endOffset);
-      return range.intersectsNode(held);
+      try {
+        const start = against(r.startContainer, r.startOffset);
+        const end = against(r.endContainer, r.endOffset);
+        return start !== null && end !== null && start <= 0 && end >= 0;
+      } catch {
+        return false; // a range no Range can be judged by: none of the show's
+      }
     };
-    // The show's own, and those holding it, so an end in any of them is
-    // given as it is, not moved out to its host.
-    const roots = [root];
-    for (let at = this.getRootNode(); at instanceof ShadowRoot; at = at.host.getRootNode()) roots.push(at);
-    for (const ask of [() => selection.getComposedRanges?.({ shadowRoots: roots }), () => selection.getComposedRanges?.(roots[0]!, ...roots.slice(1))]) {
+    for (const args of [[{ shadowRoots: roots }], roots]) {
       let ranges: StaticRange[];
       try {
-        ranges = ask() ?? [];
+        ranges = selection.getComposedRanges?.(...args) ?? [];
       } catch {
         continue; // not this form: the next
       }
-      try {
-        return ranges.some(over);
-      } catch {
-        return false; // a range no Range can be made of: none of the show's
-      }
+      return ranges.some(over);
     }
     return false;
   }

@@ -329,14 +329,16 @@ func overrun(ctx context.Context, err error) error {
 	if done == nil {
 		return err
 	}
+	if context.Cause(ctx) == errRunTimeout {
+		// What was under way then -- a round, the page waiting -- says
+		// nothing more.
+		return fmt.Errorf("the run did not end within %v: %w", runTimeout, done)
+	}
 	if err == nil {
 		err = done
 	}
 	if !errors.Is(err, done) {
 		err = fmt.Errorf("%w, as: %w", done, err)
-	}
-	if context.Cause(ctx) == errRunTimeout {
-		return fmt.Errorf("the run did not end within %v: %w", runTimeout, err)
 	}
 	return err
 }
