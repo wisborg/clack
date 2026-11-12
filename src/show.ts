@@ -1965,15 +1965,29 @@ export class ClackShow extends HTMLElement {
   }
 
   /**
-   * Whether text in the show is selected: asked of the selection's
-   * composed ranges, the one way it says where in a shadow tree it is. An
-   * engine without them is taken to have none, and the keys stay the
-   * show's.
+   * Whether text in the show is selected, at either end: asked of the
+   * selection's composed ranges, the one way it says where in a shadow
+   * tree it is. Chrome takes the shadow root only in an object; Safari,
+   * before it took that, took it only as an argument of its own, and
+   * throws at the object. An engine without them -- none Clack is for --
+   * is taken to have nothing selected, and the keys stay the show's.
    */
   #selected(): boolean {
-    const selection = document.getSelection() as (Selection & { getComposedRanges?(o: { shadowRoots: ShadowRoot[] }): StaticRange[] }) | null;
+    type Composed = Selection & { getComposedRanges(o: { shadowRoots: ShadowRoot[] } | ShadowRoot): StaticRange[] };
+    const selection = document.getSelection() as Composed | null;
     const root = this.shadowRoot!;
-    return (selection?.getComposedRanges?.({ shadowRoots: [root] }) ?? []).some((r) => !r.collapsed && root.contains(r.startContainer));
+    if (!selection?.getComposedRanges) return false;
+    let ranges: StaticRange[];
+    try {
+      ranges = selection.getComposedRanges({ shadowRoots: [root] });
+    } catch {
+      try {
+        ranges = selection.getComposedRanges(root);
+      } catch {
+        return false;
+      }
+    }
+    return ranges.some((r) => !r.collapsed && (root.contains(r.startContainer) || root.contains(r.endContainer)));
   }
 
   #drag(dx: number): void {

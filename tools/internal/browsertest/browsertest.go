@@ -252,8 +252,9 @@ var inputTimeout = 30 * time.Second
 // runTimeout bounds the whole run in one browser, all its rounds together.
 // The page keeps well inside it (runBudgetMs in test/harness.ts), with
 // room for what is done for it between its tests, so that a slow run still
-// comes back as a report of what passed and what did not.
-const runTimeout = 10 * time.Minute
+// comes back as a report of what passed and what did not. A variable, for
+// the tests to shorten.
+var runTimeout = 10 * time.Minute
 
 // driven is what drive needs of a WebDriver session.
 type driven interface {
@@ -268,14 +269,14 @@ type driven interface {
 // the page is one: so the run goes in rounds -- the page waits for what it
 // needs of the driver, the driver does it, and calls back in with the
 // answer.
-func drive(ctx context.Context, p driven) (Report, error) {
-	ctx, cancel := context.WithTimeout(ctx, runTimeout)
+func drive(caller context.Context, p driven) (Report, error) {
+	ctx, cancel := context.WithTimeout(caller, runTimeout)
 	defer cancel()
 	var answer, run any // null: nothing asked yet, of no run yet
 	for round := 0; ; round++ {
 		var m message
 		if err := p.ExecuteAsync(ctx, nextScript, []any{answer, run}, &m); err != nil {
-			return Report{}, overrun(ctx, err)
+			return Report{}, overrun(caller, ctx, err)
 		}
 		if run == nil {
 			run = m.Run
@@ -296,7 +297,7 @@ func drive(ctx context.Context, p driven) (Report, error) {
 			return Report{}, err
 		}
 		if ctx.Err() != nil {
-			return Report{}, overrun(ctx, err)
+			return Report{}, overrun(caller, ctx, err)
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
 			// Cut off, the driver may still be doing it: what it does
@@ -314,11 +315,15 @@ func drive(ctx context.Context, p driven) (Report, error) {
 
 var errUnknown = errors.New("the page asked the driver for nothing it knows")
 
-// overrun says what err was, when ctx -- the run's -- has ended: the run's
-// own deadline passing is said to be that; the run being cancelled (Ctrl-C)
-// is left as it is.
-func overrun(ctx context.Context, err error) error {
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+// overrun says what ended the run, when ctx -- the run's, made from the
+// caller's -- has ended, with err what was being done (nil if it was done
+// just as the run ended). The run's own deadline is said to be that; the
+// caller's ending (Ctrl-C, or a deadline of its own) is left as it is.
+func overrun(caller, ctx context.Context, err error) error {
+	if err == nil {
+		err = ctx.Err()
+	}
+	if caller.Err() == nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return fmt.Errorf("the run did not end within %v: %w", runTimeout, err)
 	}
 	return err
@@ -342,7 +347,7 @@ func do(ctx context.Context, p driven, m message) error {
 // scriptTimeout bounds each round of the test run in one browser (drive),
 // as inputTimeout bounds what is done between rounds; it is runTimeout, as
 // a run with no input is one round.
-const scriptTimeout = runTimeout
+var scriptTimeout = runTimeout
 
 // Run opens url in b, driven by the driver at driverPath (or found on PATH
 // when it is empty), and returns the test page's report. Notes on what it

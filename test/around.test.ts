@@ -1726,10 +1726,9 @@ test("after a click anywhere in the show, the keys move it on, and its focus is 
   // Shown as the keyboard's once a key follows, in Chrome: then ringed,
   // inside the show's edge, where the canvas is -- and never outside it,
   // on the page's background.
-  if (box(show).matches(":focus-visible")) {
-    const ring = getComputedStyle(box(show), "::after");
-    assertEqual(`${ring.outlineStyle} ${ring.outlineOffset}`, "solid -2px", "a ring inside the show");
-  }
+  const ring = getComputedStyle(box(show), "::after");
+  if (box(show).matches(":focus-visible")) assertEqual(`${ring.outlineStyle} ${ring.outlineOffset}`, "solid -2px", "a ring inside the show");
+  else assertEqual(ring.outlineStyle, "none", "no ring where the browser shows no focus");
   assertEqual(getComputedStyle(box(show)).outlineStyle, "none", "none outside the show, on the page's background");
   await click(part(show, ".header-title"));
   await press(Key.ArrowRight);
@@ -1772,11 +1771,15 @@ test("with Shift, the keys are the page's while text in the show is selected", a
   await chord(Key.Shift, Key.ArrowLeft);
   await sleep(300);
   assertEqual(show.index, 1, "nothing moved: the selection grows");
+  // The selection gone, the keys are the show's again.
+  document.getSelection()!.removeAllRanges();
+  await chord(Key.Shift, Key.ArrowLeft);
+  await settledOn(show, "1 of 2");
 });
 
 test("controls focused by a click or a tap, not the keyboard, still go -- though keys follow", async () => {
   // A real click focuses the button only in Chrome, and Firefox off a
-  // Mac: this has one so in every engine.
+  // Mac: this has one so in every engine that takes focus({ focusVisible }).
   const show = makeShow([{}, {}, {}], { theme: "darkroom" });
   await settledOn(show, "1 of 3");
   const p = pointer(show);
@@ -1802,15 +1805,20 @@ test("a click that focuses the show scrolls nothing, though the show is partly o
   show.after(tall);
   // The show's top out of view, its caption in.
   const caption = part(show, ".title");
-  window.scrollTo(0, Math.max(0, box(show).getBoundingClientRect().top + window.scrollY + 40));
-  await sleep(50);
-  const before = window.scrollY;
-  assert(box(show).getBoundingClientRect().top < 0, "the show's top out of view");
-  await click(caption);
-  assertEqual(show.shadowRoot!.activeElement, box(show), "the click's focus, on the show");
-  await sleep(100);
-  assertEqual(window.scrollY, before, "not scrolled");
-  window.scrollTo(0, 0);
+  try {
+    window.scrollTo(0, Math.max(0, box(show).getBoundingClientRect().top + window.scrollY + 40));
+    await sleep(50);
+    assert(box(show).getBoundingClientRect().top < 0, "the show's top out of view");
+    const r = caption.getBoundingClientRect();
+    assert(r.top >= 0 && r.bottom <= innerHeight, "the caption in view, so pointing at it scrolls nothing");
+    const before = window.scrollY;
+    await click(caption);
+    assertEqual(show.shadowRoot!.activeElement, box(show), "the click's focus, on the show");
+    await sleep(100);
+    assertEqual(window.scrollY, before, "not scrolled");
+  } finally {
+    window.scrollTo(0, 0);
+  }
 });
 
 test("a show in another component, focused by the page, coming back with the window, does not bring the controls up", async () => {
