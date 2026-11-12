@@ -236,7 +236,8 @@ On a show 640px wide or less, a bar with a caption runs from side to side, the c
 line of its own above the controls; one without is the controls alone, as wide as they are.
 The counter is as wide as the show's last number makes it, so the controls beside it do not
 move as the slide's number gains a digit. Controls shown `on-activity` appear when the
-pointer moves or presses, a key is pressed, or focus arrives, and go three seconds after the
+pointer moves or presses, a key is pressed, or focus arrives (not focus that only comes back
+with the window, to where it was as the visitor went), and go three seconds after the
 last of it, unless a mouse or pen moved onto them and rests there, or focus the keyboard
 brought (Tab) is among them — from elsewhere in the page or from the photo, as the browser
 judges it as focus arrives (`:focus-visible`) — not focus a click left there, even once keys follow; until

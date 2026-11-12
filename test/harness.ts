@@ -160,8 +160,9 @@ let collect: ((m: ToDriver) => void) | null = null;
 let answered: ((error: string) => void) | null = null;
 /** What was last asked, until the driver has answered it, failed or not. */
 let inFlight: Promise<void> = Promise.resolve();
-/** Whether the running test gave input: let go of after it. */
+/** Whether the running test gave input: let go of after it; and moved the pointer: put out of the way after it. */
 let gaveInput = false;
+let movedPointer = false;
 
 /** This page's run, named in every message (clackNext). */
 const runName = Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, "0")).join("");
@@ -199,6 +200,7 @@ export function mouse(actions: Action[]): InputSource {
  */
 export function input(sources: InputSource[]): Promise<void> {
   gaveInput = true;
+  movedPointer ||= sources.some((s) => s.type === "pointer");
   return ask({ input: sources });
 }
 
@@ -295,16 +297,17 @@ async function run(): Promise<Report> {
     // hear it, where the test left it -- once input the test did not wait
     // for is done -- and then the pointer put where no later test's will be.
     if (gaveInput && !r.timedOut) {
-      gaveInput = false;
+      const moved = movedPointer;
+      gaveInput = movedPointer = false;
       try {
         await inFlight;
         await ask({ release: true });
-        await rest();
+        if (moved) await rest();
       } catch (e) {
-        // Said even of a test that failed: what it left held may fail the
-        // next, which should not be the only sign of it.
+        // Said even of a test that failed or skipped: what it left held
+        // may fail the next, which should not be the only sign of it.
         const after = wellFormed(`after the test, letting go of its input: ${describe(e)}`);
-        Object.assign(r, { passed: false, error: r.error ? `${r.error}\n${after}` : after });
+        Object.assign(r, { passed: false, skipped: "", error: r.error ? `${r.error}\n${after}` : after });
       }
     }
     document.getElementById("fixtures")?.replaceChildren();

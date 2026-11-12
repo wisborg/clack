@@ -133,11 +133,13 @@
   outline: none;
 }
 
+/* The show's last child, so it is drawn over all in it with no z-index:
+   one would reach past the show, which is no stacking context, and put
+   the ring over the page's own (a sticky header the show scrolls under). */
 .show:focus-visible::after {
   content: "";
   position: absolute;
   inset: 0;
-  z-index: 2;
   outline: 2px solid var(--clack-accent);
   outline-offset: -2px;
   pointer-events: none;

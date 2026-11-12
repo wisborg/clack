@@ -295,6 +295,9 @@ func drive(ctx context.Context, p driven) (Report, error) {
 		if errors.Is(err, errUnknown) {
 			return Report{}, err
 		}
+		if ctx.Err() != nil {
+			return Report{}, fmt.Errorf("the run did not end within %v: %w", runTimeout, ctx.Err())
+		}
 		if errors.Is(err, context.DeadlineExceeded) {
 			// Cut off, the driver may still be doing it: what it does
 			// late would land in a later test. Not a run to go on with.

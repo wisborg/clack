@@ -510,7 +510,6 @@ export class ClackShow extends HTMLElement {
   readonly #probe: HTMLDivElement;
   /** The line above the stage, and its two parts: the show's title, and how many photos it has. */
   readonly #header: HTMLDivElement;
-  readonly #captionBox: HTMLElement;
   readonly #headerTitle: HTMLSpanElement;
   readonly #headerCount: HTMLSpanElement;
   /** The manifest's language, for its title in the header. */
@@ -612,13 +611,10 @@ export class ClackShow extends HTMLElement {
   #focusAt: Element | null = null;
   /**
    * What still had focus as it went out of the show -- so the window
-   * went, not focus -- and whether focus arriving last was coming back to
-   * it, with the window: no activity in the show (#onActivity).
+   * went, not focus: focus coming back to it is no activity in the show
+   * (#onFocus).
    */
   #leftWith: Element | null = null;
-  #cameBack = false;
-  /** Whether the pointer was last taken up on text -- the caption, the header -- that Shift and the keys may be selecting (#onKey). */
-  #onText = false;
   /** Whether #onActivity is listened for (#listenForActivity). */
   #listening = false;
   /** The key of the slide whose photo is on screen (even if the slide has since had a new one), or null for none or the placeholder. */
@@ -673,7 +669,7 @@ export class ClackShow extends HTMLElement {
 
     const below = (this.#below = el("div", "below", "below"));
     // Nothing in it yet, as #caption marks it.
-    const caption = (this.#captionBox = el("p", "caption untitled uncredited", "caption"));
+    const caption = el("p", "caption untitled uncredited", "caption");
     this.#title = el("span", "title");
     this.#credit = el("span", "credit");
     caption.append(this.#title, this.#credit);
@@ -728,7 +724,7 @@ export class ClackShow extends HTMLElement {
   }
 
   /** The events that are the visitor's activity (#onActivity), listened for only in a theme that reveals its controls for it. */
-  static readonly #activity = ["pointermove", "pointerdown", "keydown", "focusin"] as const;
+  static readonly #activity = ["pointermove", "pointerdown", "keydown"] as const;
 
   /** Listens for the visitor's activity, or stops, and puts the controls as they are without it. */
   #listenForActivity(on: boolean): void {
@@ -737,9 +733,11 @@ export class ClackShow extends HTMLElement {
     for (const type of ClackShow.#activity) {
       // In the shadow tree, where a pointer's target is what it is over
       // (the page's own padding around the show is not the show). Keys
-      // where the show hears them (#onKey), on the host; focus where it is
-      // heard for #onFocus.
-      const at = type === "keydown" ? [this] : type === "focusin" ? [this, this.shadowRoot!] : [this.shadowRoot!];
+      // where the show hears them (#onKey), on the host. Focus arriving is
+      // activity too, but #onFocus, which hears it in every theme, says
+      // so: it alone knows whether the focus only came back with the
+      // window.
+      const at = type === "keydown" ? [this] : [this.shadowRoot!];
       for (const t of at) {
         if (on) t.addEventListener(type, this.#onActivity, { passive: true });
         else t.removeEventListener(type, this.#onActivity);
@@ -1805,9 +1803,7 @@ export class ClackShow extends HTMLElement {
    * shows them then whatever this says).
    */
   readonly #onActivity = (e: Event): void => {
-    // Focus back with the window is the visitor back at the window, not
-    // doing anything in the show.
-    if (this.#heardTwice(e) || (e.type === "focusin" && this.#cameBack)) return;
+    if (this.#heardTwice(e)) return;
     if (e instanceof PointerEvent) {
       this.#lastPointer = e.pointerType;
       // Over them, as the shadow tree has it (#listenForActivity): unseen,
@@ -1831,23 +1827,23 @@ export class ClackShow extends HTMLElement {
   readonly #onFocus = (e: Event): void => {
     if (this.#heardTwice(e)) return;
     if (e.type === "focusin") {
-      // Heard before #onActivity, which was listened for after.
-      this.#cameBack = e.composedPath()[0] === this.#leftWith;
+      // Back with the window, focus is the visitor back at the window, not
+      // doing anything in the show.
+      const cameBack = e.composedPath()[0] === this.#leftWith;
       this.#leftWith = null;
       this.#markKeyFocus(true);
+      if (this.#listening && !cameBack) this.#onActivity(e);
     } else if (e.type === "focusout") {
       // Gone from the control it was on, as focusout says at once: no
       // longer there to come back to with the window, which leaves focus
       // where it was as it goes.
-      const still = this.shadowRoot!.activeElement ?? (document.activeElement === this ? this : null);
+      // The host itself, focused by the page: as its own root has it, which
+      // is another component's shadow tree if the show is in one.
+      const still = this.shadowRoot!.activeElement ?? ((this.getRootNode() as Document | ShadowRoot).activeElement === this ? this : null);
       this.#leftWith = still;
       if (still !== this.#focusAt) this.#focusAt = null;
       queueMicrotask(() => this.#markKeyFocus(false));
-    } else if (e.type === "pointerdown") {
-      this.#box.classList.remove("key-focus");
-      const at = e.composedPath()[0];
-      this.#onText = at instanceof Node && (this.#captionBox.contains(at) || this.#header.contains(at));
-    }
+    } else if (e.type === "pointerdown") this.#box.classList.remove("key-focus");
   };
 
   /** Whether e, focus heard on the host, is the shadow tree's, which its shadow root hears too: only the host's own is the host's. */
@@ -1942,10 +1938,11 @@ export class ClackShow extends HTMLElement {
 
   #onKey(e: KeyboardEvent): void {
     // With Shift, the keys extend a selection -- of a caption or a title
-    // the pointer was taken up on, which leaves focus on the show itself
-    // -- and are the page's then. A click on a control in Safari leaves
-    // focus there too, but nothing is selected.
-    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || (e.shiftKey && this.#onText && e.composedPath()[0] === this.#box)) {
+    // dragged over, which leaves focus on the show itself -- and are the
+    // page's while there is one. A click on a control in Safari leaves
+    // focus there too, with nothing selected. (Every engine says a
+    // selection in a shadow tree is there, if not where.)
+    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || (e.shiftKey && e.composedPath()[0] === this.#box && document.getSelection()?.type === "Range")) {
       return;
     }
     const forward = this.#rtl() ? -1 : 1;

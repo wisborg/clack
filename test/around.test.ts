@@ -1707,13 +1707,19 @@ test("a click on a control does not keep them up, though arrow keys follow", asy
   assert(!shown(controls), "gone a few seconds after the last of it");
 });
 
-test("after a click anywhere in the show, the keys move it on; with Shift, they are the page's", async () => {
-  if (!(await focusWindow())) skip("this engine's window does not take the focus, so a click focuses nothing");
-  const slides = [0, 1, 2].map((i) => ({ id: `s${i}`, alt: `photo ${i + 1}`, description: { title: `Photo ${i + 1}` }, width: 300, height: 200, sources: [{ url: img(300, 200), width: 300 }] }));
+/** A show of n photos, each titled, under a manifest titled too: a header and a caption to click. */
+async function titledShow(n: number, path: string): Promise<ClackShow> {
+  const slides = Array.from({ length: n }, (_, i) => ({ id: `s${i}`, alt: `photo ${i + 1}`, description: { title: `The photograph numbered ${i + 1}` }, width: 300, height: 200, sources: [{ url: img(300, 200), width: 300 }] }));
   const show = makeShow([], { theme: "darkroom" });
-  show.src = echo(JSON.stringify({ format: "clack-manifest/1", title: "Coastlines", slides }), { path: "keys-after-click.json" });
+  show.src = echo(JSON.stringify({ format: "clack-manifest/1", title: "Coastlines", slides }), { path });
   await waitFor(() => !part(show, ".header").hidden, "the header");
-  await settledOn(show, "1 of 3");
+  await settledOn(show, `1 of ${n}`);
+  return show;
+}
+
+test("after a click anywhere in the show, the keys move it on, and its focus is shown inside it", async () => {
+  if (!(await focusWindow())) skip("this engine's window does not take the focus, so a click focuses nothing");
+  const show = await titledShow(3, "keys-after-click.json");
   await click(part(show, ".title"));
   assertEqual(show.shadowRoot!.activeElement, box(show), "the click's focus, on the show");
   await press(Key.ArrowRight);
@@ -1727,18 +1733,56 @@ test("after a click anywhere in the show, the keys move it on; with Shift, they 
   await click(part(show, ".header-title"));
   await press(Key.ArrowRight);
   await settledOn(show, "3 of 3");
+});
+
+test("with Shift, the keys are the page's while text in the show is selected, and the show's otherwise", async () => {
+  if (!(await focusWindow())) skip("this engine's window does not take the focus, so a click focuses nothing");
+  const show = await titledShow(4, "shift-after-click.json");
+  await show.goTo(3);
+  await settledOn(show, "4 of 4");
+  // A click on the title selects nothing.
+  await click(part(show, ".title"));
+  await chord(Key.Shift, Key.ArrowLeft);
+  await settledOn(show, "3 of 4");
+  // Dragged over, it is selected -- where the driver's drag selects, as
+  // Safari's does not -- and Shift with an arrow is how that grows.
+  const title = part(show, ".title");
+  const r = title.getBoundingClientRect();
+  await drag(title, { x: 2, y: r.height / 2 }, Math.floor(r.width) - 4, 200);
+  const selected = document.getSelection()?.type === "Range";
+  assertEqual(show.shadowRoot!.activeElement, box(show), "the drag's focus, on the show");
   await chord(Key.Shift, Key.ArrowLeft);
   await sleep(300);
-  assertEqual(show.index, 2, "Shift with an arrow moves nothing where text was clicked: it is how a selection grows");
-  await click(part(show, ".stage"));
-  await chord(Key.Shift, Key.ArrowLeft);
-  await settledOn(show, "2 of 3");
-  // On the counter, which is no text to select: focus on the show, as a
-  // click on a control leaves it in Safari, and the keys still move it.
+  assertEqual(show.index, selected ? 2 : 1, selected ? "nothing moved: the selection grows" : "moved: nothing was selected");
+  // On the counter, which is no text: focus on the show, as a click on a
+  // control leaves it in Safari, nothing selected, and the keys move it.
   await click(part(show, ".counter"));
   assertEqual(show.shadowRoot!.activeElement, box(show), "the counter's click's focus, on the show");
+  const at = show.index;
   await chord(Key.Shift, Key.ArrowLeft);
-  await settledOn(show, "1 of 3");
+  await waitFor(() => show.index === at - 1, "moved by Shift with an arrow");
+});
+
+test("a show in another component, focused by the page, coming back with the window, does not bring the controls up", async () => {
+  if (!(await focusWindow())) skip("this engine's window does not take the focus, so focusing fires no focus event");
+  const show = makeShow([{}, {}], { theme: "darkroom" });
+  const component = document.createElement("div");
+  show.before(component);
+  component.attachShadow({ mode: "open" }).append(show);
+  await settledOn(show, "1 of 2");
+  show.tabIndex = 0;
+  show.focus();
+  assertEqual(component.shadowRoot!.activeElement, show, "the show focused, in the component");
+  await sleep(3300);
+  const controls = part(show, ".controls");
+  assert(!shown(controls), "gone a few seconds after focus came");
+  // Away to another window and back: focus stays on the show as the
+  // window goes, and comes back to it.
+  show.dispatchEvent(new FocusEvent("focusout", { bubbles: true, composed: true }));
+  show.dispatchEvent(new FocusEvent("focusin", { bubbles: true, composed: true }));
+  await sleep(100);
+  assert(!shown(controls), "not brought up by the window coming back");
+  show.blur();
 });
 
 test("focus a click left in the show, coming back with the window, does not bring the controls up", async () => {
