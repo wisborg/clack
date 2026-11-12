@@ -1629,7 +1629,7 @@ test("controls shown only for activity come up as the visitor's mouse moves over
   await waitFor(() => shown(controls), "shown when the mouse moves");
 });
 
-test("a mouse resting on the controls keeps them up; moved off them, they go a few seconds after", async () => {
+test("a mouse resting on the controls keeps them up", async () => {
   const show = makeShow([{}, {}], { theme: "darkroom" });
   await settledOn(show, "1 of 2");
   const controls = part(show, ".controls");
@@ -1638,6 +1638,15 @@ test("a mouse resting on the controls keeps them up; moved off them, they go a f
   await moveTo(part(show, ".next"));
   await sleep(3300);
   assert(shown(controls), "still up while the mouse rests on them");
+});
+
+test("a mouse moved off the controls lets them go a few seconds after", async () => {
+  const show = makeShow([{}, {}], { theme: "darkroom" });
+  await settledOn(show, "1 of 2");
+  const controls = part(show, ".controls");
+  await moveTo(part(show, ".stage"));
+  await waitFor(() => shown(controls), "shown when the mouse moves");
+  await moveTo(part(show, ".next"));
   await moveTo(part(show, ".stage"));
   await sleep(3300);
   assert(!shown(controls), "gone a few seconds after it left them");
@@ -1722,15 +1731,38 @@ test("after a click anywhere in the show, the keys move it on; with Shift, they 
   await waitFor(() => !part(show, ".header").hidden, "the header");
   await settledOn(show, "1 of 3");
   await click(part(show, ".title"));
+  assertEqual(show.shadowRoot!.activeElement, box(show), "the click's focus, on the show");
   await press(Key.ArrowRight);
   await settledOn(show, "2 of 3");
-  assertEqual(getComputedStyle(box(show)).outlineStyle, "none", "no ring around the show, which the keyboard never brings focus to");
+  // Shown as the keyboard's once a key follows, in Chrome: then ringed.
+  const ring = getComputedStyle(box(show)).outlineStyle;
+  assertEqual(ring, box(show).matches(":focus-visible") ? "solid" : "none", "a ring where the browser shows focus");
   await click(part(show, ".header-title"));
   await press(Key.ArrowRight);
   await settledOn(show, "3 of 3");
   await chord(Key.Shift, Key.ArrowLeft);
   await sleep(300);
-  assertEqual(show.index, 2, "Shift with an arrow moves nothing: it is how a selection grows");
+  assertEqual(show.index, 2, "Shift with an arrow moves nothing where text was clicked: it is how a selection grows");
+  await click(part(show, ".stage"));
+  await chord(Key.Shift, Key.ArrowLeft);
+  await settledOn(show, "2 of 3");
+});
+
+test("focus a click left in the show, coming back with the window, does not bring the controls up", async () => {
+  if (!(await focusWindow())) skip("this engine's window does not take the focus, so a click focuses nothing");
+  const show = makeShow([{ title: "Low tide" }, {}], { theme: "darkroom" });
+  await settledOn(show, "1 of 2");
+  const controls = part(show, ".controls");
+  await click(part(show, ".title"));
+  assertEqual(show.shadowRoot!.activeElement, box(show), "the click's focus, on the show");
+  await sleep(3300);
+  assert(!shown(controls), "gone a few seconds after the click");
+  // Away to another window and back: focus stays where it was as the
+  // window goes, and comes back to it.
+  box(show).dispatchEvent(new FocusEvent("focusout", { bubbles: true, composed: true }));
+  box(show).dispatchEvent(new FocusEvent("focusin", { bubbles: true, composed: true }));
+  await sleep(100);
+  assert(!shown(controls), "not brought up by the window coming back");
 });
 
 test("the visitor's mouse drags a photo along, and let go far enough, brings the next", async () => {

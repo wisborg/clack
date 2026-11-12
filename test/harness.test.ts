@@ -7,7 +7,7 @@ import { pointOn } from "./input";
 /** What the pointer did after the first test pressed it, as the next sees. */
 const after: string[] = [];
 let pressedAt: { x: number; y: number } | null = null;
-let looked = false;
+const listening = new AbortController();
 
 test("(a test that ends with the mouse pressed, not waiting for it)", async () => {
   const spot = document.createElement("div");
@@ -15,8 +15,8 @@ test("(a test that ends with the mouse pressed, not waiting for it)", async () =
   fixture().append(spot);
   for (const type of ["pointermove", "pointerup"] as const) {
     document.addEventListener(type, (e) => {
-      if (pressedAt && !looked) after.push(`${e.type} ${Math.round(e.clientX)},${Math.round(e.clientY)} buttons ${e.buttons}`);
-    });
+      if (pressedAt) after.push(`${e.type} ${Math.round(e.clientX)},${Math.round(e.clientY)} buttons ${e.buttons}`);
+    }, { signal: listening.signal });
   }
   const at = pointOn(spot);
   await input([mouse([{ type: "pointerMove", ...at }])]);
@@ -26,7 +26,7 @@ test("(a test that ends with the mouse pressed, not waiting for it)", async () =
 });
 
 test("what a test left pressed is let go of where it left it, before the mouse is put out of the way", () => {
-  looked = true;
+  listening.abort();
   assert(pressedAt, "the test before pressed the mouse");
   const up = after.findIndex((e) => e.startsWith("pointerup"));
   assert(up >= 0, `let go of: ${after.join("; ") || "nothing heard"}`);

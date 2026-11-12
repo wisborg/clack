@@ -100,7 +100,7 @@ export async function tabber(): Promise<(backwards?: boolean) => Promise<void>> 
       for (const keys of [[Key.Tab], [Key.Alt, Key.Tab]]) {
         // A Tab that went past the page, to the browser's own toolbar,
         // took the window's focus with it.
-        await focusWindow();
+        if (!(await focusWindow())) skip("this engine's window does not take the focus back from its own toolbar");
         from.focus();
         await chord(...keys);
         if (document.activeElement === to) {

@@ -208,6 +208,9 @@ func (r Report) Failed() bool {
 // (null at first, then an error's text, or "" if it was done), and waits for
 // what it asks next: input to perform, or the run's report. See clackNext in
 // test/harness.ts.
+// A page that was reloaded between rounds has a run of its own, started
+// afresh; it says so (gone), since it was given an answer to nothing it
+// asked.
 const nextScript = `
 const answer = arguments[0];
 const done = arguments[arguments.length - 1];
@@ -237,10 +240,17 @@ type message struct {
 }
 
 // inputTimeout bounds each thing done for the page between rounds, as
-// scriptTimeout bounds the rounds: a driver that never answers ends the run
-// with an error rather than holding it open with no report. Each is quick
-// -- a pointer moved, a key pressed -- so this is far past what any takes.
-const inputTimeout = 30 * time.Second
+// scriptTimeout bounds the rounds and runTimeout all of them: a driver that
+// never answers ends the run with an error rather than holding it open
+// with no report. Each is quick -- a pointer moved, a key pressed -- so
+// this is far past what any takes. A variable, for the tests to shorten.
+var inputTimeout = 30 * time.Second
+
+// runTimeout bounds the whole run in one browser, all its rounds together.
+// The page keeps well inside it (runBudgetMs in test/harness.ts), with
+// room for what is done for it between its tests, so that a slow run still
+// comes back as a report of what passed and what did not.
+const runTimeout = 10 * time.Minute
 
 // driven is what drive needs of a WebDriver session.
 type driven interface {
@@ -256,15 +266,12 @@ type driven interface {
 // needs of the driver, the driver does it, and calls back in with the
 // answer.
 func drive(ctx context.Context, p driven) (Report, error) {
+	ctx, cancel := context.WithTimeout(ctx, runTimeout)
+	defer cancel()
 	var answer any // null: nothing asked yet
 	for round := 0; ; round++ {
 		var m message
-		// The driver times the script out (scriptTimeout); this is for a
-		// driver that does not.
-		roundCtx, cancel := context.WithTimeout(ctx, scriptTimeout+inputTimeout)
-		err := p.ExecuteAsync(roundCtx, nextScript, []any{answer}, &m)
-		cancel()
-		if err != nil {
+		if err := p.ExecuteAsync(ctx, nextScript, []any{answer}, &m); err != nil {
 			return Report{}, err
 		}
 		if m.Gone && round == 0 {
@@ -272,25 +279,16 @@ func drive(ctx context.Context, p driven) (Report, error) {
 		}
 		if m.Gone {
 			// What the page had found went with it: say so, rather than
-			// report a run of nothing.
+			// report a run of nothing, or the one it starts again.
 			return Report{}, errors.New("the test page went away during the run (it navigated, or was reloaded)")
 		}
-		doCtx, cancel := context.WithTimeout(ctx, inputTimeout)
-		switch {
-		case m.Report != nil:
-			cancel()
+		if m.Report != nil {
 			return *m.Report, nil
-		case m.Release:
-			err = p.ReleaseActions(doCtx)
-		case m.Focus:
-			err = p.FocusWindow(doCtx)
-		case m.Input != nil:
-			err = p.PerformActions(doCtx, m.Input)
-		default:
-			cancel()
-			return Report{}, errors.New("the page asked the driver for nothing it knows")
 		}
-		cancel()
+		err := do(ctx, p, m)
+		if errors.Is(err, errUnknown) {
+			return Report{}, err
+		}
 		answer = ""
 		if err != nil {
 			// The page's to report, in the test that asked; a driver that
@@ -300,10 +298,26 @@ func drive(ctx context.Context, p driven) (Report, error) {
 	}
 }
 
+var errUnknown = errors.New("the page asked the driver for nothing it knows")
+
+// do does for the page what m asks, within inputTimeout.
+func do(ctx context.Context, p driven, m message) error {
+	ctx, cancel := context.WithTimeout(ctx, inputTimeout)
+	defer cancel()
+	switch {
+	case m.Release:
+		return p.ReleaseActions(ctx)
+	case m.Focus:
+		return p.FocusWindow(ctx)
+	case m.Input != nil:
+		return p.PerformActions(ctx, m.Input)
+	}
+	return errUnknown
+}
+
 // scriptTimeout bounds each round of the test run in one browser (drive),
-// as inputTimeout bounds what is done between rounds. The harness keeps
-// well inside it (see runBudgetMs in test/harness.ts), so that a slow run
-// still comes back as a report rather than as a WebDriver timeout.
+// as inputTimeout bounds what is done between rounds; it is runTimeout, as
+// a run with no input is one round.
 const scriptTimeout = 10 * time.Minute
 
 // Run opens url in b, driven by the driver at driverPath (or found on PATH

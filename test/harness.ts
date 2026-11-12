@@ -210,8 +210,11 @@ export async function focusWindow(): Promise<boolean> {
   if (document.hasFocus()) return true;
   try {
     await ask({ focus: true });
-  } catch {
-    return false; // a driver that cannot: as a window that will not
+  } catch (e) {
+    // A driver that cannot, as a window that will not; anything else --
+    // a driver gone wrong, input still under way -- is a failure.
+    if (e instanceof Error && e.message.includes("unsupported operation")) return false;
+    throw e;
   }
   const deadline = performance.now() + 1000;
   while (!document.hasFocus() && performance.now() < deadline) await sleep(20);
@@ -225,6 +228,10 @@ export async function focusWindow(): Promise<boolean> {
  */
 export function start(): void {
   window.clackNext = (answer: string | null): Promise<unknown> => {
+    // An answer to nothing asked: this page is not the one that asked --
+    // it was reloaded, and its run started afresh. Said, rather than run
+    // again from the first test with what the first run found lost.
+    if (answer !== null && !answered) return Promise.resolve({ gone: true });
     if (answer !== null && answered) {
       const a = answered;
       answered = null;
@@ -253,10 +260,10 @@ declare global {
 const perTestTimeoutMs = 10_000;
 
 /**
- * The whole run's budget: well inside the WebDriver script timeout in
- * tools/internal/browsertest, so that a slow run still comes back as a
- * report of what passed and what did not, rather than as a timeout with no
- * results at all.
+ * The whole run's budget: well inside the run's timeout in
+ * tools/internal/browsertest (runTimeout), with room for what the driver
+ * does between tests, so that a slow run still comes back as a report of
+ * what passed and what did not, rather than as a timeout with no results.
  */
 const runBudgetMs = 5 * 60_000;
 

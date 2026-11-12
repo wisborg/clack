@@ -281,15 +281,17 @@ func TestDriveTellsAPageThatWentFromOneThatNeverStarted(t *testing.T) {
 }
 
 func TestDriveGivesUpOnADriverThatNeverAnswers(t *testing.T) {
-	f := &fakePage{messages: []string{`{"focus": true}`, `{"report": {}}`}, block: true}
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	// The deadline is the caller's here (inputTimeout's own is too long to
-	// wait for in a test): the input that never ends is cut off, and so is
-	// the run.
-	_, err := drive(ctx, f)
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Errorf("error %v, want the deadline", err)
+	defer func(was time.Duration) { inputTimeout = was }(inputTimeout)
+	inputTimeout = 20 * time.Millisecond
+	f := &fakePage{messages: []string{`{"focus": true}`, `{"report": {"error": "next"}}`}, block: true}
+	r, err := drive(context.Background(), f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Cut off by its own deadline, not the run's: the page is told, and
+	// the run goes on.
+	if r.Error != "next" || len(f.answers) != 2 || !strings.Contains(fmt.Sprint(f.answers[1]), "deadline") {
+		t.Errorf("report %+v, answers %#v; want the deadline given back, and the run on", r, f.answers)
 	}
 }
 

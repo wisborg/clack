@@ -609,6 +609,13 @@ export class ClackShow extends HTMLElement {
    * judged again then (#markKeyFocus).
    */
   #focusAt: Element | null = null;
+  /**
+   * What still had focus as it went out of the show -- so the window
+   * went, not focus -- and whether focus arriving last was coming back to
+   * it, with the window: no activity in the show (#onActivity).
+   */
+  #leftWith: Element | null = null;
+  #cameBack = false;
   /** Whether #onActivity is listened for (#listenForActivity). */
   #listening = false;
   /** The key of the slide whose photo is on screen (even if the slide has since had a new one), or null for none or the placeholder. */
@@ -647,7 +654,8 @@ export class ClackShow extends HTMLElement {
     // click anywhere in it: the caption, the header, the theme's mat --
     // or a control in Safari, or in Firefox on a Mac, whose clicks focus
     // no button, and so give focus to the nearest thing holding it that
-    // takes it. The stage, within it, takes its own (below).
+    // takes it. The stage, within it, takes its own (below). Inside the
+    // host, which names the show, as a screen reader says on entering.
     show.tabIndex = -1;
     this.#look(builtinCompiled("base"));
     // Focusable by a click (not by Tab), so the keys work after clicking
@@ -1793,7 +1801,9 @@ export class ClackShow extends HTMLElement {
    * shows them then whatever this says).
    */
   readonly #onActivity = (e: Event): void => {
-    if (this.#heardTwice(e)) return;
+    // Focus back with the window is the visitor back at the window, not
+    // doing anything in the show.
+    if (this.#heardTwice(e) || (e.type === "focusin" && this.#cameBack)) return;
     if (e instanceof PointerEvent) {
       this.#lastPointer = e.pointerType;
       // Over them, as the shadow tree has it (#listenForActivity): unseen,
@@ -1816,12 +1826,18 @@ export class ClackShow extends HTMLElement {
    */
   readonly #onFocus = (e: Event): void => {
     if (this.#heardTwice(e)) return;
-    if (e.type === "focusin") this.#markKeyFocus(true);
-    else if (e.type === "focusout") {
+    if (e.type === "focusin") {
+      // Heard before #onActivity, which was listened for after.
+      this.#cameBack = e.composedPath()[0] === this.#leftWith;
+      this.#leftWith = null;
+      this.#markKeyFocus(true);
+    } else if (e.type === "focusout") {
       // Gone from the control it was on, as focusout says at once: no
       // longer there to come back to with the window, which leaves focus
       // where it was as it goes.
-      if (this.shadowRoot!.activeElement !== this.#focusAt) this.#focusAt = null;
+      const still = this.shadowRoot!.activeElement ?? (document.activeElement === this ? this : null);
+      this.#leftWith = still;
+      if (still !== this.#focusAt) this.#focusAt = null;
       queueMicrotask(() => this.#markKeyFocus(false));
     } else if (e.type === "pointerdown") this.#box.classList.remove("key-focus");
   };
@@ -1917,9 +1933,10 @@ export class ClackShow extends HTMLElement {
   }
 
   #onKey(e: KeyboardEvent): void {
-    // With Shift, the keys extend a selection -- of a caption, once a
-    // click has put focus in the show -- and are the page's.
-    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) {
+    // With Shift, the keys extend a selection -- of a caption or a title,
+    // whose click leaves focus on the show itself -- and are the page's
+    // there. Elsewhere, on the photo or a control, nothing is selected.
+    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || (e.shiftKey && e.composedPath()[0] === this.#box)) {
       return;
     }
     const forward = this.#rtl() ? -1 : 1;
