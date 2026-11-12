@@ -510,6 +510,7 @@ export class ClackShow extends HTMLElement {
   readonly #probe: HTMLDivElement;
   /** The line above the stage, and its two parts: the show's title, and how many photos it has. */
   readonly #header: HTMLDivElement;
+  readonly #captionBox: HTMLElement;
   readonly #headerTitle: HTMLSpanElement;
   readonly #headerCount: HTMLSpanElement;
   /** The manifest's language, for its title in the header. */
@@ -616,6 +617,8 @@ export class ClackShow extends HTMLElement {
    */
   #leftWith: Element | null = null;
   #cameBack = false;
+  /** Whether the pointer was last taken up on text -- the caption, the header -- that Shift and the keys may be selecting (#onKey). */
+  #onText = false;
   /** Whether #onActivity is listened for (#listenForActivity). */
   #listening = false;
   /** The key of the slide whose photo is on screen (even if the slide has since had a new one), or null for none or the placeholder. */
@@ -670,7 +673,7 @@ export class ClackShow extends HTMLElement {
 
     const below = (this.#below = el("div", "below", "below"));
     // Nothing in it yet, as #caption marks it.
-    const caption = el("p", "caption untitled uncredited", "caption");
+    const caption = (this.#captionBox = el("p", "caption untitled uncredited", "caption"));
     this.#title = el("span", "title");
     this.#credit = el("span", "credit");
     caption.append(this.#title, this.#credit);
@@ -758,6 +761,7 @@ export class ClackShow extends HTMLElement {
     if (!focus) return;
     this.#box.classList.remove("key-focus");
     this.#focusAt = null;
+    this.#leftWith = null;
   }
 
   #button(label: string, name: string, onClick: () => void): HTMLButtonElement {
@@ -1839,7 +1843,11 @@ export class ClackShow extends HTMLElement {
       this.#leftWith = still;
       if (still !== this.#focusAt) this.#focusAt = null;
       queueMicrotask(() => this.#markKeyFocus(false));
-    } else if (e.type === "pointerdown") this.#box.classList.remove("key-focus");
+    } else if (e.type === "pointerdown") {
+      this.#box.classList.remove("key-focus");
+      const at = e.composedPath()[0];
+      this.#onText = at instanceof Node && (this.#captionBox.contains(at) || this.#header.contains(at));
+    }
   };
 
   /** Whether e, focus heard on the host, is the shadow tree's, which its shadow root hears too: only the host's own is the host's. */
@@ -1933,10 +1941,11 @@ export class ClackShow extends HTMLElement {
   }
 
   #onKey(e: KeyboardEvent): void {
-    // With Shift, the keys extend a selection -- of a caption or a title,
-    // whose click leaves focus on the show itself -- and are the page's
-    // there. Elsewhere, on the photo or a control, nothing is selected.
-    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || (e.shiftKey && e.composedPath()[0] === this.#box)) {
+    // With Shift, the keys extend a selection -- of a caption or a title
+    // the pointer was taken up on, which leaves focus on the show itself
+    // -- and are the page's then. A click on a control in Safari leaves
+    // focus there too, but nothing is selected.
+    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || (e.shiftKey && this.#onText && e.composedPath()[0] === this.#box)) {
       return;
     }
     const forward = this.#rtl() ? -1 : 1;

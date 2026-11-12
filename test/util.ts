@@ -293,3 +293,19 @@ export function reduceMotion(show: ClackShow): () => void {
     root.adoptedStyleSheets = saved;
   };
 }
+
+/**
+ * A show of two photos whose theme (called name) slides for 600ms, ready
+ * to step: the theme taken up, the first photo settled, the next
+ * preloaded. page, if given, is done to the show before any of it -- a
+ * page's own style, say.
+ */
+export async function slidingShow(name: string, page?: (show: ClackShow) => void): Promise<ClackShow> {
+  const show = makeShow([{}, {}], { theme: themed(name, { transition: { type: "slide", duration: "600ms" } }) });
+  page?.(show);
+  await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
+  show.style.setProperty("--clack-transition-duration", "600ms");
+  await settledOn(show, "1 of 2");
+  await sleep(200); // the next preloaded
+  return show;
+}

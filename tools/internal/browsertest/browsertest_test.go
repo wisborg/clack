@@ -188,16 +188,18 @@ func TestStartedRemembersTheLastTest(t *testing.T) {
 type fakePage struct {
 	messages []string // JSON, one per round
 	answers  []any
+	runs     []any
 	did      []string
 	fail     error // what performing or releasing input returns
 	block    bool  // whether giving input waits for its context to end
 }
 
 func (f *fakePage) ExecuteAsync(ctx context.Context, script string, args []any, result any) error {
-	if len(args) != 1 {
-		return fmt.Errorf("args = %v, want the one answer", args)
+	if len(args) != 2 {
+		return fmt.Errorf("args = %v, want the answer and the run", args)
 	}
 	f.answers = append(f.answers, args[0])
+	f.runs = append(f.runs, args[1])
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -230,8 +232,8 @@ func (f *fakePage) FocusWindow(ctx context.Context) error {
 
 func TestDriveGivesThePageItsInputAndAnswers(t *testing.T) {
 	f := &fakePage{messages: []string{
-		`{"input": [{"type": "key", "id": "k", "actions": []}]}`,
-		`{"release": true}`,
+		`{"run": "r1", "input": [{"type": "key", "id": "k", "actions": []}]}`,
+		`{"run": "r1", "release": true}`,
 		`{"focus": true}`,
 		`{"report": {"userAgent": "fake", "results": [{"name": "a", "passed": true}]}}`,
 	}}
@@ -249,6 +251,10 @@ func TestDriveGivesThePageItsInputAndAnswers(t *testing.T) {
 	// Nothing asked at first; then each done.
 	if fmt.Sprintf("%#v", f.answers) != `[]interface {}{interface {}(nil), "", "", ""}` {
 		t.Errorf("answers = %#v", f.answers)
+	}
+	// Of no run at first; then of the run the page named, every time.
+	if fmt.Sprintf("%#v", f.runs) != `[]interface {}{interface {}(nil), "r1", "r1", "r1"}` {
+		t.Errorf("runs = %#v", f.runs)
 	}
 }
 
@@ -283,15 +289,12 @@ func TestDriveTellsAPageThatWentFromOneThatNeverStarted(t *testing.T) {
 func TestDriveGivesUpOnADriverThatNeverAnswers(t *testing.T) {
 	defer func(was time.Duration) { inputTimeout = was }(inputTimeout)
 	inputTimeout = 20 * time.Millisecond
-	f := &fakePage{messages: []string{`{"focus": true}`, `{"report": {"error": "next"}}`}, block: true}
-	r, err := drive(context.Background(), f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Cut off by its own deadline, not the run's: the page is told, and
-	// the run goes on.
-	if r.Error != "next" || len(f.answers) != 2 || !strings.Contains(fmt.Sprint(f.answers[1]), "deadline") {
-		t.Errorf("report %+v, answers %#v; want the deadline given back, and the run on", r, f.answers)
+	f := &fakePage{messages: []string{`{"focus": true}`, `{"report": {}}`}, block: true}
+	// Cut off by its own deadline, not the run's -- and the run ends: the
+	// driver may still be doing it.
+	_, err := drive(context.Background(), f)
+	if !errors.Is(err, context.DeadlineExceeded) || len(f.answers) != 1 {
+		t.Errorf("error %v after %d rounds, want the deadline after the first", err, len(f.answers))
 	}
 }
 

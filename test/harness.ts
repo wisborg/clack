@@ -163,6 +163,9 @@ let inFlight: Promise<void> = Promise.resolve();
 /** Whether the running test gave input: let go of after it. */
 let gaveInput = false;
 
+/** This page's run, named in every message (clackNext). */
+const runName = Array.from(crypto.getRandomValues(new Uint8Array(8)), (b) => b.toString(16).padStart(2, "0")).join("");
+
 function send(m: ToDriver): void {
   if (collect) {
     const c = collect;
@@ -227,21 +230,22 @@ export async function focusWindow(): Promise<boolean> {
  * could not), and is given what is asked next -- input, or the report.
  */
 export function start(): void {
-  window.clackNext = (answer: string | null): Promise<unknown> => {
-    // An answer to nothing asked: this page is not the one that asked --
-    // it was reloaded, and its run started afresh. Said, rather than run
-    // again from the first test with what the first run found lost.
-    if (answer !== null && !answered) return Promise.resolve({ gone: true });
+  window.clackNext = (answer: string | null, run: string | null): Promise<unknown> => {
+    // Another run's answer: this page is not the one that asked -- it was
+    // reloaded, and its run started afresh, perhaps asking already. Said,
+    // rather than take the answer for its own and run again from the first
+    // test, with what the first run found lost.
+    if (run !== null && run !== runName) return Promise.resolve({ gone: true });
     if (answer !== null && answered) {
       const a = answered;
       answered = null;
       a(answer);
     }
-    return new Promise((resolve) => {
+    return new Promise<ToDriver>((resolve) => {
       const m = outbox.shift();
       if (m) resolve(m);
       else collect = resolve;
-    });
+    }).then((m) => ({ ...m, run: runName }));
   };
   run().then(
     (report) => send({ report }),
@@ -251,7 +255,7 @@ export function start(): void {
 
 declare global {
   interface Window {
-    clackNext?: (answer: string | null) => Promise<unknown>;
+    clackNext?: (answer: string | null, run: string | null) => Promise<unknown>;
   }
 }
 
@@ -297,7 +301,10 @@ async function run(): Promise<Report> {
         await ask({ release: true });
         await rest();
       } catch (e) {
-        if (r.passed) Object.assign(r, { passed: false, error: wellFormed(`after the test: ${describe(e)}`) });
+        // Said even of a test that failed: what it left held may fail the
+        // next, which should not be the only sign of it.
+        const after = wellFormed(`after the test, letting go of its input: ${describe(e)}`);
+        Object.assign(r, { passed: false, error: r.error ? `${r.error}\n${after}` : after });
       }
     }
     document.getElementById("fixtures")?.replaceChildren();

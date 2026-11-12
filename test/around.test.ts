@@ -5,7 +5,7 @@ import type { ClackShow, SlideInput } from "../src/clack";
 import { shadowReach, transitionFrames, transitionOf } from "../src/show";
 import { assert, assertEqual, fixture, focusWindow, skip, sleep, test } from "./harness";
 import { Key, chord, click, drag, moveTo, press, tabber } from "./input";
-import { echo, figures, imageLog, img, logged, makeShow, part, pointer, reduceMotion, resetImageLog, settledOn, showBox as box, themed, waitFor } from "./util";
+import { echo, figures, imageLog, img, logged, makeShow, part, pointer, reduceMotion, resetImageLog, settledOn, showBox as box, slidingShow, themed, waitFor } from "./util";
 
 /** Whether the visitor could see and point at the controls now. */
 function shown(e: Element): boolean {
@@ -986,12 +986,7 @@ test("with reduced motion, nothing of the floating bar fades: it and its caption
 
 test("with reduced motion, a theme's slide is a short fade instead: nothing moves", async () => {
   if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
-  const theme = themed("sliding-reduced", { transition: { type: "slide", duration: "600ms" } });
-  const show = makeShow([{}, {}], { theme });
-  await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
-  show.style.setProperty("--clack-transition-duration", "600ms");
-  await settledOn(show, "1 of 2");
-  await sleep(200); // the next preloaded
+  const show = await slidingShow("sliding-reduced");
   const restore = reduceMotion(show);
   try {
     const leaving = figures(show)[0]!;
@@ -1010,12 +1005,7 @@ test("with reduced motion, a theme's slide is a short fade instead: nothing move
 
 test("with reduced motion, a photo held aside by a drag when a key moves on fades where it is held", async () => {
   if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
-  const theme = themed("sliding-held-reduced", { transition: { type: "slide", duration: "600ms" } });
-  const show = makeShow([{}, {}], { theme });
-  await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
-  show.style.setProperty("--clack-transition-duration", "600ms");
-  await settledOn(show, "1 of 2");
-  await sleep(200); // the next preloaded
+  const show = await slidingShow("sliding-held-reduced");
   const restore = reduceMotion(show);
   try {
     const leaving = figures(show)[0]!;
@@ -1040,13 +1030,7 @@ test("with reduced motion, a photo held aside by a drag when a key moves on fade
 test("a page's own value for whether motion is reduced is not taken for the visitor's", async () => {
   if (document.visibilityState === "hidden") skip("this engine's window is hidden, and nothing moves in a hidden page");
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) skip("this engine's visitor has asked for reduced motion");
-  const theme = themed("sliding-page-reduced", { transition: { type: "slide", duration: "600ms" } });
-  const show = makeShow([{}, {}], { theme });
-  show.style.setProperty("--clack-reduced-motion", "yes");
-  await waitFor(() => getComputedStyle(show).getPropertyValue("--clack-transition").trim() === "slide", "the theme");
-  show.style.setProperty("--clack-transition-duration", "600ms");
-  await settledOn(show, "1 of 2");
-  await sleep(200); // the next preloaded
+  const show = await slidingShow("sliding-page-reduced", (s) => s.style.setProperty("--clack-reduced-motion", "yes"));
   const leaving = figures(show)[0]!;
   void show.next();
   await waitFor(() => leaving.getAnimations().length > 0, "the photos to move");
@@ -1734,9 +1718,12 @@ test("after a click anywhere in the show, the keys move it on; with Shift, they 
   assertEqual(show.shadowRoot!.activeElement, box(show), "the click's focus, on the show");
   await press(Key.ArrowRight);
   await settledOn(show, "2 of 3");
-  // Shown as the keyboard's once a key follows, in Chrome: then ringed.
-  const ring = getComputedStyle(box(show)).outlineStyle;
-  assertEqual(ring, box(show).matches(":focus-visible") ? "solid" : "none", "a ring where the browser shows focus");
+  // Shown as the keyboard's once a key follows, in Chrome: then ringed,
+  // inside the show's edge, where the canvas is.
+  const ring = getComputedStyle(box(show), "::after");
+  const want = box(show).matches(":focus-visible") ? "solid -2px" : "none";
+  assertEqual(ring.content === "none" ? "none" : `${ring.outlineStyle} ${ring.outlineOffset}`, want, "a ring where the browser shows focus");
+  assertEqual(getComputedStyle(box(show)).outlineStyle, "none", "none outside the show, on the page's background");
   await click(part(show, ".header-title"));
   await press(Key.ArrowRight);
   await settledOn(show, "3 of 3");
@@ -1746,6 +1733,12 @@ test("after a click anywhere in the show, the keys move it on; with Shift, they 
   await click(part(show, ".stage"));
   await chord(Key.Shift, Key.ArrowLeft);
   await settledOn(show, "2 of 3");
+  // On the counter, which is no text to select: focus on the show, as a
+  // click on a control leaves it in Safari, and the keys still move it.
+  await click(part(show, ".counter"));
+  assertEqual(show.shadowRoot!.activeElement, box(show), "the counter's click's focus, on the show");
+  await chord(Key.Shift, Key.ArrowLeft);
+  await settledOn(show, "1 of 3");
 });
 
 test("focus a click left in the show, coming back with the window, does not bring the controls up", async () => {

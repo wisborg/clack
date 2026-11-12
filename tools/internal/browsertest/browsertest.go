@@ -208,18 +208,18 @@ func (r Report) Failed() bool {
 // (null at first, then an error's text, or "" if it was done), and waits for
 // what it asks next: input to perform, or the run's report. See clackNext in
 // test/harness.ts.
-// A page that was reloaded between rounds has a run of its own, started
-// afresh; it says so (gone), since it was given an answer to nothing it
-// asked.
+// It hands back, too, the run the page named in its first message: a page
+// reloaded between rounds has a run of its own, started afresh, and says
+// so (gone) rather than take another run's answer for its own.
 const nextScript = `
-const answer = arguments[0];
+const [answer, run] = arguments;
 const done = arguments[arguments.length - 1];
 const next = window.clackNext;
 if (!next) {
   done({gone: true});
   return;
 }
-next(answer).then(done, (e) => done({report: {error: String((e && e.stack) || e)}}));
+next(answer, run).then(done, (e) => done({report: {error: String((e && e.stack) || e)}}));
 `
 
 // message is what the page asks of the driver: exactly one of these.
@@ -237,6 +237,9 @@ type message struct {
 	// Gone says the page has no test run to follow: the bundle did not
 	// start, or -- after the first round -- the page went away.
 	Gone bool `json:"gone"`
+	// Run names the page's run, in every message: handed back with each
+	// answer, so a page started afresh is not given another's.
+	Run string `json:"run"`
 }
 
 // inputTimeout bounds each thing done for the page between rounds, as
@@ -268,11 +271,14 @@ type driven interface {
 func drive(ctx context.Context, p driven) (Report, error) {
 	ctx, cancel := context.WithTimeout(ctx, runTimeout)
 	defer cancel()
-	var answer any // null: nothing asked yet
+	var answer, run any // null: nothing asked yet, of no run yet
 	for round := 0; ; round++ {
 		var m message
-		if err := p.ExecuteAsync(ctx, nextScript, []any{answer}, &m); err != nil {
+		if err := p.ExecuteAsync(ctx, nextScript, []any{answer, run}, &m); err != nil {
 			return Report{}, err
+		}
+		if run == nil {
+			run = m.Run
 		}
 		if m.Gone && round == 0 {
 			return Report{Error: "the test bundle did not start: window.clackNext is missing"}, nil
@@ -288,6 +294,11 @@ func drive(ctx context.Context, p driven) (Report, error) {
 		err := do(ctx, p, m)
 		if errors.Is(err, errUnknown) {
 			return Report{}, err
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			// Cut off, the driver may still be doing it: what it does
+			// late would land in a later test. Not a run to go on with.
+			return Report{}, fmt.Errorf("the driver did not finish what the page asked within %v: %w", inputTimeout, err)
 		}
 		answer = ""
 		if err != nil {
@@ -318,7 +329,7 @@ func do(ctx context.Context, p driven, m message) error {
 // scriptTimeout bounds each round of the test run in one browser (drive),
 // as inputTimeout bounds what is done between rounds; it is runTimeout, as
 // a run with no input is one round.
-const scriptTimeout = 10 * time.Minute
+const scriptTimeout = runTimeout
 
 // Run opens url in b, driven by the driver at driverPath (or found on PATH
 // when it is empty), and returns the test page's report. Notes on what it

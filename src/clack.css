@@ -45,6 +45,8 @@
   height: 100%;
   aspect-ratio: 3 / 2;
   padding: var(--clack-padding-top) var(--clack-padding-inline) var(--clack-padding-bottom);
+  /* For its focus ring (::after). */
+  position: relative;
 }
 
 /* A photo dragged or swiped aside is cut off at the show's sides, never
@@ -121,19 +123,27 @@
 
 /* Only a click brings focus to the stage or the show, but the keys work
    there after it, so each shows focus as the browser judges it -- in
-   Chrome, once a key follows the click. The show's ring is outside it, as
-   the controls' are, where nothing in it covers it; the stage's is inside,
-   over the photo (below). */
-.stage:focus {
+   Chrome, once a key follows the click. Each ring is drawn inside its
+   edge, over what is in it: an outline of its own would be painted under
+   the photos, and one outside the show would be on the page's background,
+   not the canvas its contrast is checked against, and cut off by a page
+   that clips the show. */
+.stage:focus,
+.show:focus {
   outline: none;
 }
 
-.show:focus-visible {
+.show:focus-visible::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
   outline: 2px solid var(--clack-accent);
-  outline-offset: 2px;
+  outline-offset: -2px;
+  pointer-events: none;
 }
 
-/* The focus ring: inside the stage's edge, where the theme may leave no
+/* The stage's focus ring: inside its edge, where the theme may leave no
    margin (full-bleed), and over the photos, which an outline of the
    stage's own would be painted under. */
 .stage:focus-visible::before {

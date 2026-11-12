@@ -95,7 +95,10 @@ export async function tabber(): Promise<(backwards?: boolean) => Promise<void>> 
     const from = document.createElement("input");
     const to = document.createElement("button");
     to.textContent = "to";
-    at.append(from, to);
+    // A field after it, so that a Tab that passes buttons by (Safari's)
+    // stays in the page, for Option-Tab to be tried next.
+    const past = document.createElement("input");
+    at.append(from, to, past);
     try {
       for (const keys of [[Key.Tab], [Key.Alt, Key.Tab]]) {
         // A Tab that went past the page, to the browser's own toolbar,
